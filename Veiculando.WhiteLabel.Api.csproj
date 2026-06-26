@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <UserSecretsId>aspnet-Veiculando.WhiteLabel.Api-A90B666C-DE1C-4688-ADB2-144C4529C5A2</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Identity.Web" Version="2.16.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Veiculando.Data\Veiculando.Data.csproj" />
+    <ProjectReference Include="..\Veiculando.Infra.IoC\Veiculando.Infra.IoC.csproj" />
+    <ProjectReference Include="..\Veiculando.Infra.Security\Veiculando.Infra.Security.csproj" />
+    <ProjectReference Include="..\Veiculando.Infra\Veiculando.Infra.csproj" />
+    <ProjectReference Include="..\Veiculando.WhiteLabel.Domain\Veiculando.WhiteLabel.Domain.csproj" />
+  </ItemGroup>
+
+</Project>
