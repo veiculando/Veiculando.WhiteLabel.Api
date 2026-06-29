@@ -8,12 +8,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Identity.Web;
 using Microsoft.OpenApi.Models;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using Veiculando.WhiteLabel.Api.Configurations;
 
 namespace Veiculando.WhiteLabel.Api
 {
@@ -29,8 +25,8 @@ namespace Veiculando.WhiteLabel.Api
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-                .AddMicrosoftIdentityWebApi(Configuration.GetSection("AzureAd"));
+            services.AddJwtLocalAuthentication(Configuration);
+            services.AddDependencyInjectionSetup(Configuration);
 
             services.AddControllers();
             services.AddSwaggerGen(c =>
@@ -53,8 +49,11 @@ namespace Veiculando.WhiteLabel.Api
 
             app.UseRouting();
 
+            app.UseMiddleware<Veiculando.WhiteLabel.Api.Middleware.TenantMiddleware>();
+
             app.UseAuthentication();
             app.UseAuthorization();
+
 
             app.UseEndpoints(endpoints =>
             {
