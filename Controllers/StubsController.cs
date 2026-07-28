@@ -7,18 +7,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     [ApiController]
     [Route("api/wl/[controller]")]
     [Authorize]
-    public class PedidosController : ControllerBase
-    {
-        [HttpGet]
-        public IActionResult Get()
-        {
-            return StatusCode(501, "Not Implemented Yet");
-        }
-    }
-
-    [ApiController]
-    [Route("api/wl/[controller]")]
-    [Authorize]
     public class CampanhasController : ControllerBase
     {
         [HttpGet]
