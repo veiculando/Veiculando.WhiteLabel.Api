@@ -5,8 +5,11 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Data.Entity;
 using Microsoft.Extensions.Options;
 using Veiculando.Data.Contexts;
+using Veiculando.Domain.Entities.WhiteLabel;
+using Veiculando.Domain.Enums;
 using Veiculando.Infra.Security;
 using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
@@ -18,24 +21,23 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     [Route("api/wl/auth")]
     public class AuthController : ControllerBase
     {
-        private readonly WhiteLabelDataContext _wlContext;
+        private readonly VeiculandoDataContext _db;
         private readonly JwtSettings _jwtSettings;
         private readonly ITenantContext _tenantContext;
 
         public AuthController(
-            WhiteLabelDataContext wlContext,
+            VeiculandoDataContext db,
             IOptions<JwtSettings> jwtSettings,
             ITenantContext tenantContext)
         {
-            _wlContext = wlContext;
+            _db = db;
             _jwtSettings = jwtSettings.Value;
             _tenantContext = tenantContext;
         }
 
         /// <summary>
         /// Login do Operador/Usuário WhiteLabel.
-        /// Valida credenciais no WL_Usuario (banco WL isolado) e emite JWT local
-        /// com claims de permissões granulares (ADR-WL-008, ADR-WL-005).
+        /// Autentica via WlUsuarioAfiliada no VeiculandoDataContext e emite JWT com claims de permissão dinâmicas (ADR-WL-005, ADR-WL-008, TP-0).
         /// </summary>
         [AllowAnonymous]
         [HttpPost("login")]
@@ -44,30 +46,35 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (string.IsNullOrWhiteSpace(request?.Email) || string.IsNullOrWhiteSpace(request?.Senha))
                 return BadRequest(new { message = "Email e senha são obrigatórios." });
 
-            var usuario = _wlContext.WlUsuarios
-                .FirstOrDefault(u => u.Email == request.Email && u.Ativo);
+            var normalizedEmail = request.Email.ToLower().Trim();
+            var afiliadaId = _tenantContext.AfiliadaId;
+
+            var usuario = await _db.WlUsuariosAfiliada
+                .FirstOrDefaultAsync(u => u.Email.Endereco == normalizedEmail 
+                                       && u.StatusExibicao == StatusExibicaoEnum.Ativo 
+                                       && u.AfiliadaId == afiliadaId);
 
             if (usuario == null || !BC.Verify(request.Senha, usuario.SenhaHash))
                 return Unauthorized(new { message = "Credenciais inválidas." });
 
-            // Valida que o usuário pertence à instância correta (Tenant-locked — ADR-WL-005)
-            var afiliadaId = _tenantContext.AfiliadaId;
-            if (usuario.AfiliadaId != afiliadaId)
-                return Unauthorized(new { message = "Acesso não autorizado para esta instância." });
+            usuario.RegistrarLogin();
+            await _db.SaveChangesAsync();
 
-            // Monta as claims com as permissões granulares do WL_Usuario
-            var permissionClaims = BuildPermissionClaims(usuario);
+            var permissoes = usuario.ObterPermissoes();
 
-            // Adiciona claims de identidade WL específicas
             var extraClaims = new List<Claim>
             {
                 new Claim("AfiliadaId", afiliadaId.ToString()),
                 new Claim("WlUsuarioId", usuario.Id.ToString()),
             };
-            extraClaims.AddRange(permissionClaims);
 
-            // Reutiliza o JwtService do core (Veiculando.Infra.Security)
-            var userResult = new WlUsuarioJwtResult(usuario.Id, usuario.Nome, usuario.Email);
+            foreach (var perm in permissoes)
+            {
+                extraClaims.Add(new Claim(ClaimTypes.Role, perm));
+                extraClaims.Add(new Claim("permission", perm));
+            }
+
+            var userResult = new WlUsuarioJwtResult(usuario.Id, usuario.Nome, usuario.Email.Endereco);
             var token = JwtService.GenerateToken(userResult, _jwtSettings, extraClaims);
 
             return Ok(new LoginResponse
@@ -75,62 +82,45 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 Token = token,
                 ExpiresInMinutes = _jwtSettings.ExpirationInMinutes,
                 Nome = usuario.Nome,
-                Email = usuario.Email,
-                // Retorna permissões no response para o frontend ajustar o menu sem precisar decodificar o JWT
-                Permissoes = new PermissoesDto
-                {
-                    PecaGerenciar = usuario.PecaGerenciar,
-                    PedidoReservaGerenciar = usuario.PedidoReservaGerenciar,
-                    FinanceiroVisualizar = usuario.FinanceiroVisualizar,
-                    ClienteGerenciar = usuario.ClienteGerenciar
-                }
+                Email = usuario.Email.Endereco,
+                Permissoes = permissoes
             });
         }
 
         /// <summary>
-        /// Retorna as permissões do usuário autenticado (para hidratação de UI sem re-decode do JWT).
+        /// Retorna os dados e permissões do operador autenticado.
         /// </summary>
         [Authorize]
         [HttpGet("me")]
-        public IActionResult Me()
+        public async Task<IActionResult> Me()
         {
-            var wlUsuarioId = User.FindFirstValue("WlUsuarioId");
-            if (!int.TryParse(wlUsuarioId, out var id))
+            var wlUsuarioIdStr = User.FindFirstValue("WlUsuarioId");
+            if (!int.TryParse(wlUsuarioIdStr, out var id))
                 return Unauthorized();
 
-            var usuario = _wlContext.WlUsuarios.FirstOrDefault(u => u.Id == id && u.Ativo);
-            if (usuario == null) return Unauthorized();
+            var afiliadaId = _tenantContext.AfiliadaId;
+
+            var usuario = await _db.WlUsuariosAfiliada
+                .FirstOrDefaultAsync(u => u.Id == id 
+                                       && u.StatusExibicao == StatusExibicaoEnum.Ativo 
+                                       && u.AfiliadaId == afiliadaId);
+
+            if (usuario == null) 
+                return Unauthorized();
 
             return Ok(new
             {
                 usuario.Id,
                 usuario.Nome,
-                usuario.Email,
-                Permissoes = new PermissoesDto
-                {
-                    PecaGerenciar = usuario.PecaGerenciar,
-                    PedidoReservaGerenciar = usuario.PedidoReservaGerenciar,
-                    FinanceiroVisualizar = usuario.FinanceiroVisualizar,
-                    ClienteGerenciar = usuario.ClienteGerenciar
-                }
+                Email = usuario.Email.Endereco,
+                usuario.Cargo,
+                usuario.Departamento,
+                usuario.TelefoneComercial,
+                usuario.DataUltimoLogin,
+                Permissoes = usuario.ObterPermissoes()
             });
         }
-
-        // --- Helpers ---
-
-        private static IEnumerable<Claim> BuildPermissionClaims(Veiculando.Domain.Entities.WhiteLabel.WlUsuario usuario)
-        {
-            var claims = new List<Claim>();
-            // A claim "permission" é verificada no AuthGuard do Angular (Exibidora WL)
-            if (usuario.PecaGerenciar)            claims.Add(new Claim("permission", "PecaGerenciar"));
-            if (usuario.PedidoReservaGerenciar)   claims.Add(new Claim("permission", "PedidoReservaGerenciar"));
-            if (usuario.FinanceiroVisualizar)      claims.Add(new Claim("permission", "FinanceiroVisualizar"));
-            if (usuario.ClienteGerenciar)          claims.Add(new Claim("permission", "ClienteGerenciar"));
-            return claims;
-        }
     }
-
-    // --- DTOs e helpers locais ---
 
     public class LoginRequest
     {
@@ -144,21 +134,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         public int ExpiresInMinutes { get; set; }
         public string Nome { get; set; }
         public string Email { get; set; }
-        public PermissoesDto Permissoes { get; set; }
+        public string[] Permissoes { get; set; }
     }
 
-    public class PermissoesDto
-    {
-        public bool PecaGerenciar { get; set; }
-        public bool PedidoReservaGerenciar { get; set; }
-        public bool FinanceiroVisualizar { get; set; }
-        public bool ClienteGerenciar { get; set; }
-    }
-
-    /// <summary>
-    /// Adapter para que o JwtService do core consiga emitir token para WL_Usuario.
-    /// Implementa a interface IUsuarioResult de Veiculando.Domain.Commands.Results.Usuarios.
-    /// </summary>
     internal class WlUsuarioJwtResult : Veiculando.Domain.Commands.Results.Usuarios.IUsuarioResult
     {
         public WlUsuarioJwtResult(int id, string nome, string email)

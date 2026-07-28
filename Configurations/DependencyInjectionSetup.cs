@@ -33,12 +33,9 @@ namespace Veiculando.WhiteLabel.Api.Configurations
                 client.BaseAddress = new Uri(coreApiUrl);
             });
 
-            // Fonte Injector
-            services.AddScoped<IFonteInjector, FonteInjector>();
-
-            // MediatR (referenciando os assemblies de Domain)
-            services.AddMediatR(typeof(Veiculando.Domain.Entities.EntityBase));
-            // services.AddMediatR(typeof(Veiculando.WhiteLabel.Domain.ValueObjects.SomeStub)); // Ajustar para classe base WL se houver
+            // Validação de Arquivos e Sanitização de Entrada
+            services.AddSingleton<IFileValidationService, FileValidationService>();
+            services.AddScoped<InputSanitizationFilter>();
         }
     }
 }
