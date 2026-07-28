@@ -1,0 +1,125 @@
+using System;
+using System.Data.Entity;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Veiculando.Data.Contexts;
+using Veiculando.Domain.Enums;
+using Veiculando.WhiteLabel.Api.Middleware;
+using Veiculando.WhiteLabel.Api.Services;
+
+namespace Veiculando.WhiteLabel.Api.Controllers
+{
+    [ApiController]
+    [Route("api/wl/[controller]")]
+    [Authorize]
+    [ServiceFilter(typeof(InputSanitizationFilter))]
+    public class CheckingController : ControllerBase
+    {
+        private readonly VeiculandoDataContext _db;
+        private readonly ITenantContext _tenantContext;
+        private readonly IFileValidationService _fileValidation;
+
+        public CheckingController(VeiculandoDataContext db, ITenantContext tenantContext, IFileValidationService fileValidation)
+        {
+            _db = db;
+            _tenantContext = tenantContext;
+            _fileValidation = fileValidation;
+        }
+
+        [HttpGet("pis-autorizadas")]
+        public async Task<IActionResult> GetPisAutorizadas()
+        {
+            var afiliadaId = _tenantContext.AfiliadaId;
+
+            var pis = await _db.PedidosInsercao
+                .Where(pi => pi.IdAfiliada == afiliadaId && pi.StatusExibicao == StatusExibicaoEnum.Ativo)
+                .Select(pi => new
+                {
+                    pi.Id,
+                    pi.Codigo,
+                    pi.DataCadastro,
+                    pi.ValorLiquidoVeiculacao
+                })
+                .ToListAsync();
+
+            return Ok(pis);
+        }
+
+        [HttpGet("pi/{codigo}")]
+        public async Task<IActionResult> GetPiByCodigo(string codigo)
+        {
+            var afiliadaId = _tenantContext.AfiliadaId;
+
+            var pi = await _db.PedidosInsercao
+                .FirstOrDefaultAsync(p => p.Codigo == codigo && p.IdAfiliada == afiliadaId && p.StatusExibicao == StatusExibicaoEnum.Ativo);
+
+            if (pi == null)
+                return NotFound(new { message = "Pedido de Inserção não encontrado." });
+
+            pi.AssertTenantAccess(afiliadaId);
+
+            return Ok(new
+            {
+                pi.Id,
+                pi.Codigo,
+                pi.DataCadastro,
+                pi.ValorLiquidoVeiculacao,
+                ItensCount = pi.Itens != null ? pi.Itens.Count : 0
+            });
+        }
+
+        [HttpGet("item/{id}")]
+        public async Task<IActionResult> GetItemById(int id)
+        {
+            var afiliadaId = _tenantContext.AfiliadaId;
+
+            var item = await _db.PedidoInsercaoItens
+                .FirstOrDefaultAsync(i => i.IdPedidoItem == id && i.PedidoInsercao.IdAfiliada == afiliadaId);
+
+            if (item == null)
+                return NotFound(new { message = "Item de PI não encontrado." });
+
+            item.PedidoInsercao.AssertTenantAccess(afiliadaId);
+
+            return Ok(new
+            {
+                item.IdPedidoItem,
+                item.IdPedidoInsercao,
+                Status = item.Status.ToString()
+            });
+        }
+
+        [HttpPost("enviar-foto/{idItemPI}")]
+        public async Task<IActionResult> EnviarFotoChecking(int idItemPI, IFormFile foto)
+        {
+            var afiliadaId = _tenantContext.AfiliadaId;
+
+            var item = await _db.PedidoInsercaoItens
+                .FirstOrDefaultAsync(i => i.IdPedidoItem == idItemPI && i.PedidoInsercao.IdAfiliada == afiliadaId);
+
+            if (item == null)
+                return NotFound(new { message = "Item de PI não encontrado." });
+
+            item.PedidoInsercao.AssertTenantAccess(afiliadaId);
+
+            const long maxBytes = 15 * 1024 * 1024; // Max 15MB conforme TP-2
+            if (!_fileValidation.IsValidFile(foto, maxBytes, out var errorMessage))
+            {
+                return BadRequest(new { message = errorMessage });
+            }
+
+            var safeFilename = _fileValidation.SanitizeFileName(foto.FileName);
+
+            return Ok(new
+            {
+                message = "Foto de comprovação recebida e validada com sucesso.",
+                fileName = safeFilename,
+                idItemPI = idItemPI
+            });
+        }
+    }
+}
