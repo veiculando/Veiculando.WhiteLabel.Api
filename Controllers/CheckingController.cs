@@ -72,6 +72,49 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             });
         }
 
+        /// <summary>
+        /// Lista os itens de uma PI para a tela de checking (TP-R4).
+        /// </summary>
+        /// <remarks>
+        /// Sem este endpoint a segunda tela do fluxo de checking era inalcançável:
+        /// o <see cref="GetPiByCodigo"/> devolve apenas <c>ItensCount</c>, e o
+        /// upload é endereçado por <c>idItemPI</c> — o frontend não tinha como
+        /// descobrir esses ids. Espelha o que o <c>PedidosReservaController</c>
+        /// já faz na projeção de <c>Itens</c>.
+        ///
+        /// Somente leitura, com a mesma validação de tenant dos demais.
+        /// </remarks>
+        [HttpGet("pi/{codigo}/itens")]
+        public async Task<IActionResult> GetItensDaPi(string codigo)
+        {
+            var afiliadaId = _tenantContext.AfiliadaId;
+
+            var pi = await _db.PedidosInsercao
+                .FirstOrDefaultAsync(p => p.Codigo == codigo && p.IdAfiliada == afiliadaId && p.StatusExibicao == StatusExibicaoEnum.Ativo);
+
+            if (pi == null)
+                return NotFound(new { message = "Pedido de Inserção não encontrado." });
+
+            pi.AssertTenantAccess(afiliadaId);
+
+            var itens = await _db.PedidoInsercaoItens
+                .Where(i => i.IdPedidoInsercao == pi.Id && i.PedidoInsercao.IdAfiliada == afiliadaId)
+                .Select(i => new
+                {
+                    i.IdPedidoItem,
+                    i.IdPedidoInsercao,
+                    Status = i.Status.ToString(),
+                    PecaCodigo = i.PedidoItem.Peca.Codigo,
+                    LocalCodigo = i.PedidoItem.Peca.Local.Codigo,
+                    LocalDescricao = i.PedidoItem.Peca.Local.Descricao,
+                    // Status do checking propriamente dito, quando ja houve envio.
+                    StatusChecking = i.CheckingItem != null ? i.CheckingItem.Status.ToString() : null
+                })
+                .ToListAsync();
+
+            return Ok(itens);
+        }
+
         [HttpGet("item/{id}")]
         public async Task<IActionResult> GetItemById(int id)
         {

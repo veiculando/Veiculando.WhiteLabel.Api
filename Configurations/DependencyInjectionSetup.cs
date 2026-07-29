@@ -13,8 +13,14 @@ namespace Veiculando.WhiteLabel.Api.Configurations
     {
         public static void AddDependencyInjectionSetup(this IServiceCollection services, IConfiguration configuration)
         {
-            // Contextos de Banco de Dados
-            services.AddScoped<WhiteLabelDataContext>();
+            // Contexto de Banco de Dados.
+            //
+            // Um único contexto, por decisão da ADR-WL-005 revisada: WL_Usuario
+            // vive no banco central e não há DbContext WhiteLabel separado. O
+            // registro de `WhiteLabelDataContext` que existia aqui apontava para
+            // uma classe removida no TP-R0 (ela declarava `name=WLCnnStr`, uma
+            // connection string que não estava definida em lugar nenhum) e
+            // deixava o BFF sem compilar.
             services.AddScoped<VeiculandoDataContext>();
 
             // Tenant

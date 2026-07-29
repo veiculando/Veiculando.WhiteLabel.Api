@@ -28,13 +28,29 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             _tenantContext = tenantContext;
         }
 
+        /// <summary>
+        /// Lista os locais da afiliada ativa, incluindo os que aguardam aprovação.
+        /// </summary>
+        /// <remarks>
+        /// O filtro original era <c>StatusExibicao == Ativo</c>, o que escondia
+        /// justamente os locais criados pela Exibidora: eles nascem em
+        /// <c>AprovacaoPendente</c> e só passam a Ativo quando o Admin aprova
+        /// (ADR-WL-004). O operador cadastrava e o registro não aparecia em
+        /// lugar nenhum — indistinguível de uma falha no cadastro.
+        ///
+        /// Deletados (-1) e Inativos (0) continuam fora. O <c>StatusExibicao</c>
+        /// passou a ser projetado para o frontend poder rotular a situação em vez
+        /// de assumir que tudo que veio está ativo.
+        /// </remarks>
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
             var afiliadaId = _tenantContext.AfiliadaId;
 
             var locais = await _db.Locais
-                .Where(l => l.IdAfiliada == afiliadaId && l.StatusExibicao == StatusExibicaoEnum.Ativo)
+                .Where(l => l.IdAfiliada == afiliadaId
+                         && (l.StatusExibicao == StatusExibicaoEnum.Ativo
+                          || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente))
                 .Select(l => new
                 {
                     l.Id,
@@ -43,7 +59,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     Cidade = l.Cidade.Nome,
                     UF = l.Cidade.Estado.Sigla,
                     l.FonteOrigem,
-                    l.FonteTimestamp
+                    l.FonteTimestamp,
+                    l.StatusExibicao
                 })
                 .ToListAsync();
 
