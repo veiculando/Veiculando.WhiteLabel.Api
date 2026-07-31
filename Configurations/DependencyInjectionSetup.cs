@@ -39,6 +39,9 @@ namespace Veiculando.WhiteLabel.Api.Configurations
                 client.BaseAddress = new Uri(coreApiUrl);
             });
 
+            // Cadastro de Local/Peça delegado ao core (ver CoreCadastroService)
+            services.AddScoped<ICoreCadastroService, CoreCadastroService>();
+
             // Validação de Arquivos e Sanitização de Entrada
             services.AddSingleton<IFileValidationService, FileValidationService>();
             services.AddScoped<InputSanitizationFilter>();
