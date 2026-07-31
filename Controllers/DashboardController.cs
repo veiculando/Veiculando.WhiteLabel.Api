@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data.Entity;
 using System.Linq;
 using System.Threading.Tasks;
@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Enums;
+using Veiculando.Domain.Repositories;
 using Veiculando.WhiteLabel.Api.Middleware;
 
 namespace Veiculando.WhiteLabel.Api.Controllers
@@ -17,11 +18,16 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     {
         private readonly VeiculandoDataContext _db;
         private readonly ITenantContext _tenantContext;
+        private readonly ILocalRepository _localRepository;
 
-        public DashboardController(VeiculandoDataContext db, ITenantContext tenantContext)
+        public DashboardController(
+            VeiculandoDataContext db,
+            ITenantContext tenantContext,
+            ILocalRepository localRepository)
         {
             _db = db;
             _tenantContext = tenantContext;
+            _localRepository = localRepository;
         }
 
         /// <summary>
@@ -46,22 +52,13 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .AsNoTracking()
                 .CountAsync(pr => pr.IdAfiliada == afiliadaId && pr.Status == StatusPedidoReservaEnum.Solicitado);
 
-            // ⚠️ NÃO trocar por ILocalRepository.CountAprovacaoPendente().
-            //
-            // A Tarefa 7 do TP-R2 pedia esse reuso, mas o método do core está
-            // errado para este fim, em dois pontos (LocalRepository.cs:465):
-            //   - filtra StatusExibicao == Ativo, e não AprovacaoPendente;
-            //   - não recebe afiliadaId, contando as 221 afiliadas juntas.
-            //
-            // Reusá-lo transformaria o alerta "locais aguardando aprovação" na
-            // contagem global de locais ativos. A consulta abaixo é a correta;
-            // o método do core (e o endpoint GET /api/local/count-aprovacao-pendente
-            // que o expõe) precisa de correção própria, fora desta sprint.
-            var alertasAprovaçãoPendente = await _db.Locais
-                .AsNoTracking()
-                .CountAsync(l => l.IdAfiliada == afiliadaId
-                              && l.FonteOrigem == FonteOrigemEnum.WhiteLabel
-                              && l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente);
+            // Reusa a contagem do core (TP-R2, Tarefa 7) em vez de duplicar a regra
+            // aqui. Só foi possível depois de corrigir o método: a versão anterior
+            // filtrava StatusExibicao == Ativo — não AprovacaoPendente — e não
+            // recebia afiliadaId, contando as 221 afiliadas juntas. A sobrecarga
+            // usada abaixo recorta por afiliada e por origem.
+            var alertasAprovaçãoPendente = _localRepository.CountAprovacaoPendente(
+                afiliadaId, FonteOrigemEnum.WhiteLabel);
 
             return Ok(new
             {

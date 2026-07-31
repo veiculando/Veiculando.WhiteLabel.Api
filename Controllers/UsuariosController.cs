@@ -23,6 +23,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         private readonly VeiculandoDataContext _db;
         private readonly ITenantContext _tenantContext;
 
+        /// <summary>Mesmo mínimo exigido no cadastro e no formulário do painel.</summary>
+        private const int SenhaTamanhoMinimo = 8;
+
         public UsuariosController(VeiculandoDataContext db, ITenantContext tenantContext)
         {
             _db = db;
@@ -102,6 +105,14 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 return BadRequest(new { message = $"Permissões inválidas detectadas: {string.Join(", ", invalidas)}" });
             }
 
+            // O formulário do painel já exige 8 caracteres, mas validação de UI não
+            // é validação: sem esta checagem uma chamada direta cria operador com
+            // senha de 1 caractere.
+            if (dto.Senha.Trim().Length < SenhaTamanhoMinimo)
+            {
+                return BadRequest(new { message = $"A senha precisa ter no mínimo {SenhaTamanhoMinimo} caracteres." });
+            }
+
             var afiliadaId = _tenantContext.AfiliadaId;
             var normalizedEmail = dto.Email.ToLower().Trim();
 
@@ -133,13 +144,30 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         }
 
         /// <summary>
-        /// Atualiza os dados de um operador com validação Anti-IDOR e Whitelist de permissões.
+        /// Atualiza dados cadastrais, permissões e — opcionalmente — a senha de um
+        /// operador, com validação Anti-IDOR e whitelist de permissões.
         /// </summary>
+        /// <remarks>
+        /// A versão anterior aceitava nome, cargo, departamento, telefone e senha no
+        /// DTO mas aplicava **somente** <c>AtualizarPermissoes</c>: o resto era
+        /// descartado sem erro e a API respondia "atualizado com sucesso". O
+        /// operador via o formulário salvar e o dado voltar como antes.
+        ///
+        /// <para>As entidades já expunham <c>AtualizarDados</c> e
+        /// <c>AlterarSenha</c>; faltava chamá-las.</para>
+        ///
+        /// <para>Campos ausentes no payload são preservados — a atualização é
+        /// parcial por campo, não substituição do registro. Assim uma tela que
+        /// edite só permissões não zera o cargo do operador.</para>
+        /// </remarks>
         [HttpPut("{id}")]
         [Authorize(Policy = AuthorizationSetup.UsuarioAfiliadaGerenciar)]
         [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> Update(int id, [FromBody] WlUsuarioUpdateDto dto)
         {
+            if (dto == null)
+                return BadRequest(new { message = "Dados do usuário são obrigatórios." });
+
             var afiliadaId = _tenantContext.AfiliadaId;
 
             // Anti-IDOR: AfiliadaId filtrado diretamente na query SQL — não via
@@ -158,7 +186,29 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 return BadRequest(new { message = $"Permissões inválidas detectadas: {string.Join(", ", invalidas)}" });
             }
 
-            usuario.AtualizarPermissoes(dto.Permissoes);
+            if (!string.IsNullOrWhiteSpace(dto.Senha) && dto.Senha.Trim().Length < SenhaTamanhoMinimo)
+            {
+                return BadRequest(new { message = $"A senha precisa ter no mínimo {SenhaTamanhoMinimo} caracteres." });
+            }
+
+            usuario.AtualizarDados(
+                // `??` e não `?? string.Empty`: omitir o campo mantém o valor atual.
+                string.IsNullOrWhiteSpace(dto.Nome) ? usuario.Nome : dto.Nome.Trim(),
+                dto.Cargo ?? usuario.Cargo,
+                dto.Departamento ?? usuario.Departamento,
+                dto.TelefoneComercial ?? usuario.TelefoneComercial);
+
+            if (dto.Permissoes != null)
+            {
+                usuario.AtualizarPermissoes(dto.Permissoes);
+            }
+
+            if (!string.IsNullOrWhiteSpace(dto.Senha))
+            {
+                // Mesmo algoritmo do cadastro e do login do painel (BCrypt).
+                usuario.AlterarSenha(BC.HashPassword(dto.Senha.Trim()));
+            }
+
             if (!usuario.IsValid())
                 return BadRequest(usuario.Notifications);
 

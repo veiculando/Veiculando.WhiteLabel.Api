@@ -1,8 +1,10 @@
-using MediatR;
+﻿using MediatR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using System;
 using Veiculando.Data.Contexts;
+using Veiculando.Domain.Repositories;
+using Veiculando.Data.Repositories;
 using Veiculando.Shared;
 using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
@@ -49,6 +51,11 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // connection string que não estava definida em lugar nenhum) e
             // deixava o BFF sem compilar.
             services.AddScoped<VeiculandoDataContext>();
+
+            // Repositórios do core. Reusar as consultas de lá evita reimplementar
+            // regra que já existe — o dashboard, por exemplo, usa
+            // ILocalRepository.CountAprovacaoPendente em vez de repetir o COUNT.
+            services.AddScoped<ILocalRepository, LocalRepository>();
 
             // Tenant
             services.AddScoped<ITenantContext, TenantContext>();
