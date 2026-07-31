@@ -36,6 +36,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var afiliadaId = _tenantContext.AfiliadaId;
 
             var usuarios = await _db.WlUsuariosAfiliada
+                .AsNoTracking()
                 .Where(u => u.AfiliadaId == afiliadaId && u.StatusExibicao == StatusExibicaoEnum.Ativo)
                 .Select(u => new WlUsuarioDto
                 {
@@ -62,6 +63,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var afiliadaId = _tenantContext.AfiliadaId;
 
             var u = await _db.WlUsuariosAfiliada
+                .AsNoTracking()
                 .FirstOrDefaultAsync(x => x.Id == id && x.AfiliadaId == afiliadaId && x.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (u == null)
@@ -134,8 +136,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         {
             var afiliadaId = _tenantContext.AfiliadaId;
 
+            // Anti-IDOR: AfiliadaId filtrado diretamente na query SQL — não via
+            // AssertTenantAccess pós-materialização, que poderia vazar registros de
+            // outras afiliadas em mensagens de erro ou logs intermediários.
             var usuario = await _db.WlUsuariosAfiliada
-                .FirstOrDefaultAsync(u => u.Id == id && u.StatusExibicao == StatusExibicaoEnum.Ativo);
+                .FirstOrDefaultAsync(u => u.Id == id && u.AfiliadaId == afiliadaId && u.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (usuario == null)
                 return NotFound(new { message = "Usuário não encontrado." });
@@ -163,8 +168,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         {
             var afiliadaId = _tenantContext.AfiliadaId;
 
+            // Anti-IDOR: AfiliadaId filtrado diretamente na query SQL.
             var usuario = await _db.WlUsuariosAfiliada
-                .FirstOrDefaultAsync(u => u.Id == id && u.StatusExibicao == StatusExibicaoEnum.Ativo);
+                .FirstOrDefaultAsync(u => u.Id == id && u.AfiliadaId == afiliadaId && u.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (usuario == null)
                 return NotFound(new { message = "Usuário não encontrado." });

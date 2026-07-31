@@ -140,6 +140,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var afiliadaId = _tenantContext.AfiliadaId;
 
             var locais = await _db.Locais
+                .AsNoTracking()
                 .Where(l => l.IdAfiliada == afiliadaId
                          && (l.StatusExibicao == StatusExibicaoEnum.Ativo
                           || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente))
@@ -180,6 +181,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var afiliadaId = _tenantContext.AfiliadaId;
 
             var local = await _db.Locais
+                .AsNoTracking()
                 .FirstOrDefaultAsync(l => l.Id == id
                                        && l.IdAfiliada == afiliadaId
                                        && (l.StatusExibicao == StatusExibicaoEnum.Ativo
@@ -356,6 +358,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var afiliadaId = _tenantContext.AfiliadaId;
 
             var pecas = await _db.Pecas
+                .AsNoTracking()
                 .Where(p => p.Local.IdAfiliada == afiliadaId && p.StatusExibicao == StatusExibicaoEnum.Ativo)
                 .Select(p => new
                 {
@@ -378,6 +381,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var afiliadaId = _tenantContext.AfiliadaId;
 
             var peca = await _db.Pecas
+                .AsNoTracking()
                 .FirstOrDefaultAsync(p => p.Id == id && p.Local.IdAfiliada == afiliadaId && p.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (peca == null)

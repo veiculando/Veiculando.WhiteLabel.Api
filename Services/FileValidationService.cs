@@ -29,9 +29,16 @@ namespace Veiculando.WhiteLabel.Api.Services
                 return false;
             }
 
+            // Reabre o stream a cada chamada: OpenReadStream() sempre inicia em 0,
+            // então não há risco de leitura parcial aqui. O stream criado neste
+            // using é independente do que o caller vai usar para gravar o arquivo;
+            // IFormFile.OpenReadStream() pode ser chamado múltiplas vezes.
             using var stream = file.OpenReadStream();
             var header = new byte[8];
-            stream.Read(header, 0, 8);
+            _ = stream.Read(header, 0, 8);
+            // Nota: o stream deste using é descartado ao sair do bloco.
+            // O caller deve chamar file.OpenReadStream() novamente para obter
+            // um stream posicionado em 0 para gravação no storage.
 
             foreach (var kvp in AllowedMagicBytes)
             {

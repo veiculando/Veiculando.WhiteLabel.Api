@@ -32,16 +32,22 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         {
             var afiliadaId = _tenantContext.AfiliadaId;
 
+            // AsNoTracking: todas estas consultas são read-only; evita tracking
+            // desnecessário no ChangeTracker do EF e reduz uso de memória.
             var locaisAtivos = await _db.Locais
+                .AsNoTracking()
                 .CountAsync(l => l.IdAfiliada == afiliadaId && l.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             var pecasEmExibicao = await _db.Pecas
+                .AsNoTracking()
                 .CountAsync(p => p.Local.IdAfiliada == afiliadaId && p.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             var pedidosPendentes = await _db.PedidosReserva
+                .AsNoTracking()
                 .CountAsync(pr => pr.IdAfiliada == afiliadaId && pr.Status == StatusPedidoReservaEnum.Solicitado);
 
             var alertasAprovaçãoPendente = await _db.Locais
+                .AsNoTracking()
                 .CountAsync(l => l.IdAfiliada == afiliadaId 
                               && l.FonteOrigem == FonteOrigemEnum.WhiteLabel 
                               && l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente);

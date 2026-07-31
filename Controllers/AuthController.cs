@@ -120,6 +120,56 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 Permissoes = usuario.ObterPermissoes()
             });
         }
+
+        /// <summary>
+        /// Renova o JWT do operador autenticado sem exigir re-login.
+        /// Deve ser chamado pelo frontend quando o token está próximo da expiração.
+        /// </summary>
+        [Authorize]
+        [HttpPost("refresh")]
+        public async Task<IActionResult> Refresh()
+        {
+            var wlUsuarioIdStr = User.FindFirstValue("WlUsuarioId");
+            if (!int.TryParse(wlUsuarioIdStr, out var id))
+                return Unauthorized();
+
+            var afiliadaId = _tenantContext.AfiliadaId;
+
+            var usuario = await _db.WlUsuariosAfiliada
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Id == id
+                                       && u.StatusExibicao == StatusExibicaoEnum.Ativo
+                                       && u.AfiliadaId == afiliadaId);
+
+            if (usuario == null)
+                return Unauthorized(new { message = "Sessão inválida." });
+
+            var permissoes = usuario.ObterPermissoes();
+
+            var extraClaims = new List<Claim>
+            {
+                new Claim("AfiliadaId", afiliadaId.ToString()),
+                new Claim("WlUsuarioId", usuario.Id.ToString()),
+            };
+
+            foreach (var perm in permissoes)
+            {
+                extraClaims.Add(new Claim(ClaimTypes.Role, perm));
+                extraClaims.Add(new Claim("permission", perm));
+            }
+
+            var userResult = new WlUsuarioJwtResult(usuario.Id, usuario.Nome, usuario.Email.Endereco);
+            var token = JwtService.GenerateToken(userResult, _jwtSettings, extraClaims);
+
+            return Ok(new LoginResponse
+            {
+                Token = token,
+                ExpiresInMinutes = _jwtSettings.ExpirationInMinutes,
+                Nome = usuario.Nome,
+                Email = usuario.Email.Endereco,
+                Permissoes = permissoes
+            });
+        }
     }
 
     public class LoginRequest
