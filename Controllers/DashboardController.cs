@@ -46,10 +46,21 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .AsNoTracking()
                 .CountAsync(pr => pr.IdAfiliada == afiliadaId && pr.Status == StatusPedidoReservaEnum.Solicitado);
 
+            // ⚠️ NÃO trocar por ILocalRepository.CountAprovacaoPendente().
+            //
+            // A Tarefa 7 do TP-R2 pedia esse reuso, mas o método do core está
+            // errado para este fim, em dois pontos (LocalRepository.cs:465):
+            //   - filtra StatusExibicao == Ativo, e não AprovacaoPendente;
+            //   - não recebe afiliadaId, contando as 221 afiliadas juntas.
+            //
+            // Reusá-lo transformaria o alerta "locais aguardando aprovação" na
+            // contagem global de locais ativos. A consulta abaixo é a correta;
+            // o método do core (e o endpoint GET /api/local/count-aprovacao-pendente
+            // que o expõe) precisa de correção própria, fora desta sprint.
             var alertasAprovaçãoPendente = await _db.Locais
                 .AsNoTracking()
-                .CountAsync(l => l.IdAfiliada == afiliadaId 
-                              && l.FonteOrigem == FonteOrigemEnum.WhiteLabel 
+                .CountAsync(l => l.IdAfiliada == afiliadaId
+                              && l.FonteOrigem == FonteOrigemEnum.WhiteLabel
                               && l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente);
 
             return Ok(new

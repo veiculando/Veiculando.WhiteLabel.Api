@@ -1,12 +1,14 @@
-using System;
+﻿using System;
 using System.Data.Entity;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Entities.WhiteLabel;
 using Veiculando.Domain.Enums;
+using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
 using BC = BCrypt.Net.BCrypt;
 
@@ -88,6 +90,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// Cadastra um novo operador com validação de Whitelist de permissões no servidor.
         /// </summary>
         [HttpPost]
+        [Authorize(Policy = AuthorizationSetup.UsuarioAfiliadaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> Create([FromBody] WlUsuarioCreateDto dto)
         {
             if (string.IsNullOrWhiteSpace(dto?.Email) || string.IsNullOrWhiteSpace(dto?.Senha) || string.IsNullOrWhiteSpace(dto?.Nome))
@@ -132,6 +136,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// Atualiza os dados de um operador com validação Anti-IDOR e Whitelist de permissões.
         /// </summary>
         [HttpPut("{id}")]
+        [Authorize(Policy = AuthorizationSetup.UsuarioAfiliadaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> Update(int id, [FromBody] WlUsuarioUpdateDto dto)
         {
             var afiliadaId = _tenantContext.AfiliadaId;
@@ -164,6 +170,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// Remove um operador da instância (Soft Delete) com validação Anti-IDOR.
         /// </summary>
         [HttpDelete("{id}")]
+        [Authorize(Policy = AuthorizationSetup.UsuarioAfiliadaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> Delete(int id)
         {
             var afiliadaId = _tenantContext.AfiliadaId;

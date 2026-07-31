@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data.Entity;
 using System.IO;
 using System.Linq;
@@ -6,8 +6,10 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Enums;
+using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
 using Veiculando.WhiteLabel.Api.Services;
 
@@ -137,6 +139,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         }
 
         [HttpPost("enviar-foto/{idItemPI}")]
+        [Authorize(Policy = AuthorizationSetup.Checking)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> EnviarFotoChecking(int idItemPI, IFormFile foto)
         {
             var afiliadaId = _tenantContext.AfiliadaId;

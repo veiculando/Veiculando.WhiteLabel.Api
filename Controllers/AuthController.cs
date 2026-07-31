@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Data.Entity;
 using Microsoft.Extensions.Options;
 using Veiculando.Data.Contexts;
@@ -40,6 +41,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// Autentica via WlUsuarioAfiliada no VeiculandoDataContext e emite JWT com claims de permissão dinâmicas (ADR-WL-005, ADR-WL-008, TP-0).
         /// </summary>
         [AllowAnonymous]
+        [EnableRateLimiting(Startup.RateLimitLogin)]
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {

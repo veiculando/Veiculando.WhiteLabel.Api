@@ -1,11 +1,13 @@
-using System;
+﻿using System;
 using System.Data.Entity;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Enums;
+using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
 
 namespace Veiculando.WhiteLabel.Api.Controllers
@@ -89,6 +91,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// Responde a uma solicitação de reserva (aceitar ou rejeitar) com validação Anti-IDOR (TP-3).
         /// </summary>
         [HttpPost("resposta")]
+        [Authorize(Policy = AuthorizationSetup.PedidoReservaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> ResponderReserva([FromBody] PedidoReservaRespostaDto dto)
         {
             var afiliadaId = _tenantContext.AfiliadaId;

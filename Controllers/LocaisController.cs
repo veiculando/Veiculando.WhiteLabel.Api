@@ -1,14 +1,16 @@
-using System;
+﻿using System;
 using System.Data.Entity;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Commands.Inputs;
 using Veiculando.Domain.Entities;
 using Veiculando.Domain.Enums;
+using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
 using Veiculando.WhiteLabel.Api.Services;
 
@@ -54,6 +56,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// vier no payload para esses campos é ignorado.</para>
         /// </remarks>
         [HttpPost]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> Create([FromBody] LocalCadastroCommand command)
         {
             if (command == null)
@@ -80,6 +84,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// sequestrar o inventário alheio informando um id qualquer.
         /// </remarks>
         [HttpPut("{id}")]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> Update(int id, [FromBody] LocalCadastroCommand command)
         {
             if (command == null)
@@ -224,6 +230,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> Delete(int id)
         {
             var afiliadaId = _tenantContext.AfiliadaId;
@@ -278,6 +286,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// quem cadastra é um <c>UsuarioAfiliada</c>.
         /// </remarks>
         [HttpPost]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> Create([FromBody] PecaCadastroCommand command)
         {
             if (command == null)
@@ -296,6 +306,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// Atualiza uma peça da própria exibidora.
         /// </summary>
         [HttpPut("{id}")]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> Update(int id, [FromBody] PecaCadastroCommand command)
         {
             if (command == null)
@@ -402,6 +414,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         }
 
         [HttpPost("locais/{idLocal}/pecas/{pecaId}/foto")]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> UploadFotoPeca(int idLocal, int pecaId, IFormFile foto)
         {
             var afiliadaId = _tenantContext.AfiliadaId;
