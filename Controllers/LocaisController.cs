@@ -20,7 +20,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     [Route("api/wl/[controller]")]
     [Authorize]
     [ServiceFilter(typeof(InputSanitizationFilter))]
-    public class LocaisController : ControllerBase
+    public class LocaisController : WlCadastroControllerBase
     {
         private readonly VeiculandoDataContext _db;
         private readonly ITenantContext _tenantContext;
@@ -35,12 +35,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             _tenantContext = tenantContext;
             _coreCadastro = coreCadastro;
         }
-
-        /// <summary>
-        /// Id do operador WhiteLabel autenticado, para a trilha de origem.
-        /// </summary>
-        private int? WlUsuarioId =>
-            int.TryParse(User.FindFirst("WlUsuarioId")?.Value, out var id) ? id : (int?)null;
 
         /// <summary>
         /// Cadastra um local pela Exibidora.
@@ -107,23 +101,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             var resposta = await _coreCadastro.SalvarLocalAsync(command, WlUsuarioId);
             return RepassarResposta(resposta);
-        }
-
-        /// <summary>
-        /// Repassa a resposta do core preservando o status e o corpo, para que as
-        /// notificações do domínio (mensagens de validação) cheguem à tela em vez
-        /// de virarem um 500 genérico.
-        /// </summary>
-        private IActionResult RepassarResposta(CoreRespostaCadastro resposta)
-        {
-            if (resposta.Sucesso)
-                return Content(resposta.Corpo ?? "{}", "application/json");
-
-            return StatusCode(resposta.StatusCode, new
-            {
-                message = "O cadastro foi recusado pelo Veiculando Core.",
-                detalhe = resposta.Corpo
-            });
         }
 
         /// <summary>
@@ -255,7 +232,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     [Route("api/wl/[controller]")]
     [Authorize]
     [ServiceFilter(typeof(InputSanitizationFilter))]
-    public class PecasController : ControllerBase
+    public class PecasController : WlCadastroControllerBase
     {
         private readonly VeiculandoDataContext _db;
         private readonly ITenantContext _tenantContext;
@@ -273,9 +250,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             _fileValidation = fileValidation;
             _coreCadastro = coreCadastro;
         }
-
-        private int? WlUsuarioId =>
-            int.TryParse(User.FindFirst("WlUsuarioId")?.Value, out var id) ? id : (int?)null;
 
         /// <summary>
         /// Cadastra uma peça em um local da própria exibidora.
@@ -350,18 +324,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             local.AssertTenantAccess(afiliadaId);
             return null;
-        }
-
-        private IActionResult RepassarResposta(CoreRespostaCadastro resposta)
-        {
-            if (resposta.Sucesso)
-                return Content(resposta.Corpo ?? "{}", "application/json");
-
-            return StatusCode(resposta.StatusCode, new
-            {
-                message = "O cadastro foi recusado pelo Veiculando Core.",
-                detalhe = resposta.Corpo
-            });
         }
 
         [HttpGet]

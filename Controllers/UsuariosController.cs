@@ -40,21 +40,45 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         {
             var afiliadaId = _tenantContext.AfiliadaId;
 
-            var usuarios = await _db.WlUsuariosAfiliada
+            // `String.Split` não tem tradução para SQL: deixá-lo dentro do `Select`
+            // faz o EF6 lançar NotSupportedException ao montar a query, e a listagem
+            // de operadores quebrava por inteiro — não é um detalhe de performance.
+            //
+            // A projeção continua existindo (e não `ToListAsync()` na entidade) para
+            // que SenhaHash e TokenRecuperacaoHash não sejam trazidos para memória.
+            // O split acontece depois da materialização, já em LINQ to Objects.
+            var brutos = await _db.WlUsuariosAfiliada
                 .AsNoTracking()
                 .Where(u => u.AfiliadaId == afiliadaId && u.StatusExibicao == StatusExibicaoEnum.Ativo)
+                .Select(u => new
+                {
+                    u.Id,
+                    u.Nome,
+                    Email = u.Email.Endereco,
+                    u.Cargo,
+                    u.Departamento,
+                    u.TelefoneComercial,
+                    u.DataUltimoLogin,
+                    u.PermissoesRaw
+                })
+                .ToListAsync();
+
+            // Mesma semântica de WlUsuario.ObterPermissoes().
+            var usuarios = brutos
                 .Select(u => new WlUsuarioDto
                 {
                     Id = u.Id,
                     Nome = u.Nome,
-                    Email = u.Email.Endereco,
+                    Email = u.Email,
                     Cargo = u.Cargo,
                     Departamento = u.Departamento,
                     TelefoneComercial = u.TelefoneComercial,
                     DataUltimoLogin = u.DataUltimoLogin,
-                    Permissoes = u.PermissoesRaw != null ? u.PermissoesRaw.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries) : new string[0]
+                    Permissoes = string.IsNullOrWhiteSpace(u.PermissoesRaw)
+                        ? Array.Empty<string>()
+                        : u.PermissoesRaw.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
                 })
-                .ToListAsync();
+                .ToList();
 
             return Ok(usuarios);
         }

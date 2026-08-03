@@ -62,31 +62,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             usuario.RegistrarLogin();
             await _db.SaveChangesAsync();
 
-            var permissoes = usuario.ObterPermissoes();
-
-            var extraClaims = new List<Claim>
-            {
-                new Claim("AfiliadaId", afiliadaId.ToString()),
-                new Claim("WlUsuarioId", usuario.Id.ToString()),
-            };
-
-            foreach (var perm in permissoes)
-            {
-                extraClaims.Add(new Claim(ClaimTypes.Role, perm));
-                extraClaims.Add(new Claim("permission", perm));
-            }
-
-            var userResult = new WlUsuarioJwtResult(usuario.Id, usuario.Nome, usuario.Email.Endereco);
-            var token = JwtService.GenerateToken(userResult, _jwtSettings, extraClaims);
-
-            return Ok(new LoginResponse
-            {
-                Token = token,
-                ExpiresInMinutes = _jwtSettings.ExpirationInMinutes,
-                Nome = usuario.Nome,
-                Email = usuario.Email.Endereco,
-                Permissoes = permissoes
-            });
+            return Ok(EmitirSessao(usuario, afiliadaId));
         }
 
         /// <summary>
@@ -146,6 +122,26 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (usuario == null)
                 return Unauthorized(new { message = "Sessão inválida." });
 
+            return Ok(EmitirSessao(usuario, afiliadaId));
+        }
+
+        /// <summary>
+        /// Monta as claims e o JWT de uma sessão de operador.
+        /// </summary>
+        /// <remarks>
+        /// O login e o refresh precisam emitir exatamente o mesmo conjunto de
+        /// claims — o bloco estava duplicado nos dois, e um token de refresh que
+        /// divergisse do de login tiraria permissões do operador no meio da
+        /// sessão, com o sintoma aparecendo só depois da renovação.
+        ///
+        /// <para>A claim de permissão usa <see cref="AuthorizationSetup.ClaimPermissao"/>,
+        /// a mesma constante que as policies exigem. Antes o literal
+        /// <c>"permission"</c> estava escrito à mão aqui, apesar de o
+        /// <c>AuthorizationSetup</c> documentar que os dois lados compartilham a
+        /// constante justamente para não descasarem.</para>
+        /// </remarks>
+        private LoginResponse EmitirSessao(WlUsuarioAfiliada usuario, int afiliadaId)
+        {
             var permissoes = usuario.ObterPermissoes();
 
             var extraClaims = new List<Claim>
@@ -157,20 +153,19 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             foreach (var perm in permissoes)
             {
                 extraClaims.Add(new Claim(ClaimTypes.Role, perm));
-                extraClaims.Add(new Claim("permission", perm));
+                extraClaims.Add(new Claim(AuthorizationSetup.ClaimPermissao, perm));
             }
 
             var userResult = new WlUsuarioJwtResult(usuario.Id, usuario.Nome, usuario.Email.Endereco);
-            var token = JwtService.GenerateToken(userResult, _jwtSettings, extraClaims);
 
-            return Ok(new LoginResponse
+            return new LoginResponse
             {
-                Token = token,
+                Token = JwtService.GenerateToken(userResult, _jwtSettings, extraClaims),
                 ExpiresInMinutes = _jwtSettings.ExpirationInMinutes,
                 Nome = usuario.Nome,
                 Email = usuario.Email.Endereco,
                 Permissoes = permissoes
-            });
+            };
         }
     }
 
