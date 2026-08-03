@@ -183,7 +183,21 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             };
 
             var resposta = await _coreCadastro.ResponderReservaAsync(command);
-            return RepassarResposta(resposta);
+
+            // Só o caminho de erro repassa o corpo do core — ali as notificações do
+            // domínio são o que a tela precisa mostrar. No sucesso o core devolve um
+            // `PedidoReservaResult`, que não tem `message` e não serve para nada
+            // nesta UI: a tela lê `resposta.message` para o banner de confirmação e
+            // ficaria em branco se recebesse o objeto do core.
+            if (!resposta.Sucesso)
+                return RepassarResposta(resposta);
+
+            return Ok(new
+            {
+                message = dto.Aceitar
+                    ? "Reserva confirmada com sucesso."
+                    : "Reserva rejeitada com sucesso."
+            });
         }
     }
 
