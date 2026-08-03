@@ -19,8 +19,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     [ApiController]
     [Route("api/wl/[controller]")]
     [Authorize]
-    [ServiceFilter(typeof(InputSanitizationFilter))]
-    public class LocaisController : WlCadastroControllerBase
+    public class LocaisController : WlCoreProxyControllerBase
     {
         private readonly VeiculandoDataContext _db;
         private readonly ITenantContext _tenantContext;
@@ -163,8 +162,13 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         {
             var afiliadaId = _tenantContext.AfiliadaId;
 
+            // Cidade e Estado são navegações: com lazy loading desligado no contexto
+            // do core, sem Include os campos Cidade/UF do detalhe voltavam sempre
+            // null. O `?.` na projeção escondia isso — o formulário de edição abria
+            // com a cidade em branco e salvava por cima.
             var local = await _db.Locais
                 .AsNoTracking()
+                .Include(l => l.Cidade.Estado)
                 .FirstOrDefaultAsync(l => l.Id == id
                                        && l.IdAfiliada == afiliadaId
                                        && (l.StatusExibicao == StatusExibicaoEnum.Ativo
@@ -231,8 +235,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     [ApiController]
     [Route("api/wl/[controller]")]
     [Authorize]
-    [ServiceFilter(typeof(InputSanitizationFilter))]
-    public class PecasController : WlCadastroControllerBase
+    public class PecasController : WlCoreProxyControllerBase
     {
         private readonly VeiculandoDataContext _db;
         private readonly ITenantContext _tenantContext;
@@ -289,7 +292,10 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             var afiliadaId = _tenantContext.AfiliadaId;
 
+            // Include necessário pelo mesmo motivo do GetById: sem ele `peca.Local`
+            // vem null e a asserção de tenant abaixo vira no-op silencioso.
             var peca = await _db.Pecas
+                .Include(p => p.Local)
                 .FirstOrDefaultAsync(p => p.Id == id
                                        && p.Local.IdAfiliada == afiliadaId
                                        && p.StatusExibicao != StatusExibicaoEnum.Deletado);
@@ -354,8 +360,14 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         {
             var afiliadaId = _tenantContext.AfiliadaId;
 
+            // O Include é obrigatório: o contexto do core tem LazyLoadingEnabled =
+            // false, e o `p.Local.IdAfiliada` do WHERE vira JOIN no SQL sem popular
+            // a navegação. Sem ele `peca.Local` vem null e o acesso a
+            // `peca.Local.Codigo` logo abaixo estoura NullReferenceException — 500
+            // em todo GET de detalhe de peça.
             var peca = await _db.Pecas
                 .AsNoTracking()
+                .Include(p => p.Local)
                 .FirstOrDefaultAsync(p => p.Id == id && p.Local.IdAfiliada == afiliadaId && p.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (peca == null)
@@ -410,6 +422,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // de foto em peça de outra afiliada informando um id qualquer.
             var peca = await _db.Pecas
                 .AsNoTracking()
+                .Include(p => p.Local)
                 .FirstOrDefaultAsync(p => p.Id == pecaId
                                        && p.IdLocal == idLocal
                                        && p.Local.IdAfiliada == afiliadaId

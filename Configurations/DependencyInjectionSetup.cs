@@ -76,9 +76,35 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // Cadastro de Local/Peça delegado ao core (ver CoreCadastroService)
             services.AddScoped<ICoreCadastroService, CoreCadastroService>();
 
-            // Validação de Arquivos e Sanitização de Entrada
+            // Validação de arquivos (magic bytes + tamanho).
             services.AddSingleton<IFileValidationService, FileValidationService>();
-            services.AddScoped<InputSanitizationFilter>();
+
+            // Não há filtro de sanitização de entrada por lista de padrões, e a
+            // ausência é deliberada.
+            //
+            // Havia um `InputSanitizationFilter` registrado aqui e aplicado via
+            // [ServiceFilter] nos controllers de escrita. Ele lia
+            // `context.ActionArguments` e chamava `param.Value?.ToString()` —
+            // que, num objeto complexo, devolve o NOME DO TIPO
+            // ("...WlUsuarioCreateDto"), não o conteúdo dos campos. Ou seja:
+            // nenhum corpo de request era inspecionado. Só parâmetros primitivos
+            // de rota e query passavam pela lista.
+            //
+            // Fazê-lo varrer o grafo do objeto resolveria a inspeção e criaria
+            // problema pior: a lista continha ";" e "--", então um endereço como
+            // "Av. Paulista, 1000; loja 2" passaria a ser recusado com 400.
+            //
+            // As duas ameaças que a lista mirava já têm defesa real e específica:
+            //  - SQL injection: todas as consultas do BFF são via EF (LINQ ou
+            //    parâmetros), nunca concatenação de SQL.
+            //  - XSS: tratado na SAÍDA, no Angular, que escapa por padrão em
+            //    interpolação e property binding. O Exibidora não usa innerHTML,
+            //    DomSanitizer nem bypassSecurityTrust em lugar nenhum — não há
+            //    ponto de escape para reintroduzir o risco.
+            //
+            // Validação de entrada continua existindo onde é específica e não gera
+            // falso positivo: whitelist de permissões (WlPermissoesValidas), tamanho
+            // mínimo de senha, magic bytes de arquivo e as regras do domínio.
         }
     }
 }

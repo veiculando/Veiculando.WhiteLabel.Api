@@ -17,7 +17,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     [ApiController]
     [Route("api/wl/[controller]")]
     [Authorize]
-    [ServiceFilter(typeof(InputSanitizationFilter))]
     public class UsuariosController : ControllerBase
     {
         private readonly VeiculandoDataContext _db;

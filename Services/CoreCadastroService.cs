@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Veiculando.Domain.Commands.Inputs;
+using Veiculando.Domain.Commands.Inputs.Pedidos;
 using Veiculando.Domain.Enums;
 using Veiculando.WhiteLabel.Api.Middleware;
 
@@ -13,6 +14,7 @@ namespace Veiculando.WhiteLabel.Api.Services
     {
         Task<CoreRespostaCadastro> SalvarLocalAsync(LocalCadastroCommand command, int? wlUsuarioId);
         Task<CoreRespostaCadastro> SalvarPecaAsync(PecaCadastroCommand command, int? wlUsuarioId);
+        Task<CoreRespostaCadastro> ResponderReservaAsync(PedidoReservaRespostaCommand command);
     }
 
     /// <summary>
@@ -85,6 +87,35 @@ namespace Veiculando.WhiteLabel.Api.Services
             // A peça não carrega IdAfiliada: ela pertence a um Local, e o
             // controller já validou que esse local é da afiliada da instância.
             return EnviarAsync("api/peca", command);
+        }
+
+        /// <summary>
+        /// Encaminha a resposta de um pedido de reserva ao core.
+        /// </summary>
+        /// <remarks>
+        /// Responder reserva não é só mudar o status do pedido. O
+        /// <c>PedidoReservaRespostaHandler</c> do core, além de confirmar ou marcar
+        /// os itens como indisponíveis, atualiza o <c>PecaPeriodoStatus</c> — a
+        /// grade de disponibilidade —, grava quem respondeu e propaga o resultado
+        /// para o <c>Pedido</c> pai via <c>AtualizaStatusPedidosDeReserva</c>.
+        ///
+        /// <para>O BFF fazia nada disso: chamava <c>AtualizaStatus()</c> direto na
+        /// entidade, com a coleção <c>Itens</c> nunca carregada. Como o ctor
+        /// protegido inicializa a lista vazia, <c>Itens.All(...)</c> era verdadeiro
+        /// por vacuidade e a reserva virava <c>Confirmado</c> sem que item algum
+        /// fosse olhado — e a grade de disponibilidade continuava intocada, deixando
+        /// a peça livre para ser reservada de novo.</para>
+        ///
+        /// <para><c>IdUsuarioAfiliada</c> não é preenchido aqui: o
+        /// <c>PedidoReservaController.Resposta</c> do core o sobrescreve com o id do
+        /// token da conta de serviço, igual ao que o <c>LocalController</c> faz com
+        /// <c>IdUsuario</c>.</para>
+        /// </remarks>
+        public Task<CoreRespostaCadastro> ResponderReservaAsync(PedidoReservaRespostaCommand command)
+        {
+            if (command == null) throw new ArgumentNullException(nameof(command));
+
+            return EnviarAsync("api/pedido-reserva/resposta", command);
         }
 
         private async Task<CoreRespostaCadastro> EnviarAsync(string rota, object command)

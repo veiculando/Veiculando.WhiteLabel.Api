@@ -13,7 +13,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     [ApiController]
     [Route("api/wl/pedidos-insercao")]
     [Authorize]
-    [ServiceFilter(typeof(InputSanitizationFilter))]
     public class PedidosInsercaoController : ControllerBase
     {
         private readonly VeiculandoDataContext _db;
@@ -61,7 +60,14 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var afiliadaId = _tenantContext.AfiliadaId;
             var fileServerUrl = Environment.GetEnvironmentVariable("FILE_SERVER_URL") ?? "https://fileserver.veiculando.com.br";
 
+            // Sem estes Includes `pi.Pedido` vem null (lazy loading desligado no
+            // contexto do core) e `pi.Pedido.Campanha.Agencia?.Nome` abaixo estoura
+            // NullReferenceException — o `?.` protege o último nível, não o
+            // primeiro. Era 500 garantido em todo detalhe de PI.
             var pi = await _db.PedidosInsercao
+                .Include(p => p.Pedido.Campanha.Agencia)
+                .Include(p => p.Pedido.Campanha.Cliente)
+                .Include(p => p.Itens)
                 .FirstOrDefaultAsync(p => p.Codigo == codigo && p.IdAfiliada == afiliadaId && p.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (pi == null)

@@ -14,7 +14,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     /// sintoma seria uma tela mostrando 500 genérico enquanto a irmã mostra a
     /// notificação de validação correta.
     /// </remarks>
-    public abstract class WlCadastroControllerBase : ControllerBase
+    public abstract class WlCoreProxyControllerBase : ControllerBase
     {
         /// <summary>
         /// Id do operador WhiteLabel autenticado, para a trilha de origem.
@@ -34,7 +34,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             return StatusCode(resposta.StatusCode, new
             {
-                message = "O cadastro foi recusado pelo Veiculando Core.",
+                message = "A operação foi recusada pelo Veiculando Core.",
                 detalhe = resposta.Corpo
             });
         }
