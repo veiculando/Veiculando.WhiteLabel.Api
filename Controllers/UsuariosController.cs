@@ -140,8 +140,23 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var afiliadaId = _tenantContext.AfiliadaId;
             var normalizedEmail = dto.Email.ToLower().Trim();
 
+            // A checagem cobre TODOS os status, não só Ativo — inclusive operadores
+            // excluídos.
+            //
+            // A exclusão é soft (StatusExibicao = Deletado), mas o índice
+            // UK_WlUsuario_Email_Afiliada é único sobre (Email, AfiliadaId) sem
+            // filtro: o EF6 IndexAttribute não expressa índice filtrado, então a
+            // linha excluída continua ocupando o e-mail no banco. Filtrando por
+            // Ativo aqui, recriar um operador excluído passava nesta validação e
+            // estourava violação de constraint no SaveChanges — o operador via um
+            // 500 sem explicação em vez da mensagem de e-mail duplicado.
+            //
+            // O e-mail de um operador excluído permanece reservado. É o
+            // comportamento desejado: preserva a trilha de auditoria do registro
+            // antigo e evita que um novo operador herde a identidade de um
+            // desligado.
             var emailExiste = await _db.WlUsuarios
-                .AnyAsync(u => u.Email.Endereco == normalizedEmail && u.AfiliadaId == afiliadaId && u.StatusExibicao == StatusExibicaoEnum.Ativo);
+                .AnyAsync(u => u.Email.Endereco == normalizedEmail && u.AfiliadaId == afiliadaId);
 
             if (emailExiste)
                 return BadRequest(new { message = "Já existe um usuário cadastrado com este e-mail nesta instância." });

@@ -375,6 +375,28 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             });
         }
 
+        /// <summary>
+        /// Valida uma foto de peça. **Não persiste o arquivo** — ver o remarks.
+        /// </summary>
+        /// <remarks>
+        /// Este endpoint respondia 200 com "Foto da peça recebida e validada com
+        /// sucesso" sem gravar coisa alguma: a validação rodava, o nome sanitizado
+        /// era devolvido e o arquivo era descartado no fim do request. Para quem
+        /// usa o painel isso é indistinguível de um upload que funcionou — o
+        /// operador só descobriria a perda quando a foto não aparecesse.
+        ///
+        /// <para>A gravação depende de integrar o BFF ao Veiculando.FileServer,
+        /// que é escopo do TP-2 e traz decisões próprias (autenticação entre os
+        /// dois serviços, isolamento de tenant nos diretórios, colisão de nomes —
+        /// hoje o FileServer grava pelo nome original e aceita só .jpg até 2MB).
+        /// Enquanto isso não existe, a resposta honesta é 501: o frontend já
+        /// traduz esse status para "Recurso ainda não implementado no servidor"
+        /// em <c>api-error.ts</c>.</para>
+        ///
+        /// <para>A validação foi mantida antes do 501 de propósito — assim um
+        /// arquivo inválido continua sendo recusado com a mensagem específica, e
+        /// o contrato de validação segue exercitado quando a persistência entrar.</para>
+        /// </remarks>
         [HttpPost("locais/{idLocal}/pecas/{pecaId}/foto")]
         [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
         [EnableRateLimiting(Startup.RateLimitEscrita)]
@@ -382,13 +404,21 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         {
             var afiliadaId = _tenantContext.AfiliadaId;
 
-            var local = await _db.Locais
-                .FirstOrDefaultAsync(l => l.Id == idLocal && l.IdAfiliada == afiliadaId && l.StatusExibicao == StatusExibicaoEnum.Ativo);
+            // A peça precisa existir E pertencer ao local informado. Antes só o
+            // local era verificado e o pecaId era ecoado de volta sem checagem
+            // nenhuma: com a persistência do TP-2 no lugar, isso viraria gravação
+            // de foto em peça de outra afiliada informando um id qualquer.
+            var peca = await _db.Pecas
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == pecaId
+                                       && p.IdLocal == idLocal
+                                       && p.Local.IdAfiliada == afiliadaId
+                                       && p.StatusExibicao != StatusExibicaoEnum.Deletado);
 
-            if (local == null)
-                return NotFound(new { message = "Local não encontrado." });
+            if (peca == null)
+                return NotFound(new { message = "Peça não encontrada neste local." });
 
-            local.AssertTenantAccess(afiliadaId);
+            peca.Local.AssertTenantAccess(afiliadaId);
 
             const long maxBytes = 10 * 1024 * 1024; // Max 10MB conforme TP-2
             if (!_fileValidation.IsValidFile(foto, maxBytes, out var errorMessage))
@@ -396,14 +426,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 return BadRequest(new { message = errorMessage });
             }
 
-            var safeFilename = _fileValidation.SanitizeFileName(foto.FileName);
-
-            return Ok(new
+            return StatusCode(501, new
             {
-                message = "Foto da peça recebida e validada com sucesso.",
-                fileName = safeFilename,
-                idLocal = idLocal,
-                pecaId = pecaId
+                message = "O envio de fotos de peça ainda não está disponível: o arquivo " +
+                          "foi validado, mas o armazenamento será entregue no TP-2. " +
+                          "Nenhuma foto foi salva."
             });
         }
     }

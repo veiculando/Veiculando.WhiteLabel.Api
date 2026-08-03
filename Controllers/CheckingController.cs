@@ -138,6 +138,17 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             });
         }
 
+        /// <summary>
+        /// Valida a foto de comprovação de um item de PI. **Não persiste o
+        /// arquivo** — o armazenamento é escopo do TP-2.
+        /// </summary>
+        /// <remarks>
+        /// Respondia 200 com "recebida e validada com sucesso" e descartava o
+        /// arquivo no fim do request. Num fluxo de checking isso é pior do que
+        /// falhar: a comprovação fotográfica é a evidência de que a inserção
+        /// aconteceu, e o operador encerrava o trabalho acreditando tê-la
+        /// enviado. Enquanto a gravação não existe, o status honesto é 501.
+        /// </remarks>
         [HttpPost("enviar-foto/{idItemPI}")]
         [Authorize(Policy = AuthorizationSetup.Checking)]
         [EnableRateLimiting(Startup.RateLimitEscrita)]
@@ -159,13 +170,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 return BadRequest(new { message = errorMessage });
             }
 
-            var safeFilename = _fileValidation.SanitizeFileName(foto.FileName);
-
-            return Ok(new
+            return StatusCode(501, new
             {
-                message = "Foto de comprovação recebida e validada com sucesso.",
-                fileName = safeFilename,
-                idItemPI = idItemPI
+                message = "O envio da comprovação fotográfica ainda não está disponível: " +
+                          "o arquivo foi validado, mas o armazenamento será entregue no " +
+                          "TP-2. Nenhuma foto foi salva."
             });
         }
     }
