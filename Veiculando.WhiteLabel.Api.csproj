@@ -5,7 +5,11 @@
     <UserSecretsId>aspnet-Veiculando.WhiteLabel.Api-A90B666C-DE1C-4688-ADB2-144C4529C5A2</UserSecretsId>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
-    <DefaultItemExcludes>$(DefaultItemExcludes);obj\**</DefaultItemExcludes>
+    <!-- O csproj vive na raiz do repositorio, entao o glob padrao do SDK
+         alcancaria tambem o projeto de testes que fica em subpasta. Sem esta
+         exclusao os arquivos de teste seriam compilados DENTRO da API, que
+         passaria a depender de xUnit e Testcontainers em runtime. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj\**;Veiculando.WhiteLabel.Api.Tests\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

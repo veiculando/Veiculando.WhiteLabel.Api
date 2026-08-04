@@ -1,0 +1,28 @@
+# Saida de build — nao versionar.
+# Ate aqui obj/ estava rastreado, o que gerava conflito a cada build e sujava
+# todo diff. Os arquivos foram removidos do indice (git rm --cached), nao do
+# disco.
+bin/
+obj/
+[Bb]in/
+[Oo]bj/
+
+# Resultados de teste
+TestResults/
+*.trx
+coverage*.xml
+coverage*.json
+
+# Segredos — ver SEGREDOS.md no repositorio do core.
+# appsettings.json fica rastreado, mas sem valores de segredo.
+appsettings.Local.json
+appsettings.*.Local.json
+*.secrets.json
+.env
+.env.*
+!.env.example
+
+# IDE
+.vs/
+.idea/
+*.user
