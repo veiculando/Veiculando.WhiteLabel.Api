@@ -73,6 +73,12 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                     ["JwtSettings:ValidAt"] = "wl-tests",
 
                     ["CoreApiUrl"] = "http://core.invalido/",
+
+                    // Conta de servico: o VeiculandoApiClient recusa autenticar sem
+                    // ela. Os valores nao importam — quem responde e o CoreApiStub —
+                    // mas a ausencia faz o cliente lancar antes de chegar na rede.
+                    ["SeedAccount:Email"] = "conta-servico@teste.local",
+                    ["SeedAccount:Password"] = "irrelevante-o-stub-responde",
                 });
             });
 

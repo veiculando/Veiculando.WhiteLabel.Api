@@ -32,14 +32,24 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         public IReadOnlyList<RequisicaoCapturada> Requisicoes => _requisicoes;
 
         /// <summary>
-        /// Resposta a devolver. Trocavel pelo teste para exercitar o caminho de
-        /// erro — o BFF repassa corpo e status do core nesse caso.
+        /// Resposta a devolver para as chamadas de negocio. Trocavel pelo teste
+        /// para exercitar o caminho de erro — o BFF repassa corpo e status do core
+        /// nesse caso.
         /// </summary>
+        /// <remarks>
+        /// O login da conta de servico NAO passa por aqui: ele e respondido antes,
+        /// em <see cref="SendAsync"/>. Assim um teste que troque este delegate para
+        /// simular erro do core nao quebra o handshake de autenticacao junto — o
+        /// que confundiria a causa da falha.
+        /// </remarks>
         public Func<RequisicaoCapturada, HttpResponseMessage> Responder { get; set; } =
             _ => new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent("{\"sucesso\":true}", System.Text.Encoding.UTF8, "application/json")
             };
+
+        /// <summary>Rota de login da conta de servico no core.</summary>
+        private const string RotaLoginServico = "api/account/login-usuario-afiliada";
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
@@ -48,10 +58,24 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                 ? string.Empty
                 : await request.Content.ReadAsStringAsync(cancellationToken);
 
-            var capturada = new RequisicaoCapturada(
-                request.Method.Method,
-                request.RequestUri?.ToString() ?? string.Empty,
-                corpo);
+            var url = request.RequestUri?.ToString() ?? string.Empty;
+
+            // O VeiculandoApiClient autentica a conta de servico antes de qualquer
+            // chamada de negocio. Esse handshake e respondido aqui e NAO entra em
+            // Requisicoes: os testes afirmam sobre o que o BFF delegou, e um login
+            // de infraestrutura no meio da lista faria toda assercao de contagem
+            // precisar descontar 1.
+            if (url.Contains(RotaLoginServico))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        "{\"token\":\"token-de-servico-para-teste\",\"expires\":60}",
+                        System.Text.Encoding.UTF8, "application/json")
+                };
+            }
+
+            var capturada = new RequisicaoCapturada(request.Method.Method, url, corpo);
 
             _requisicoes.Add(capturada);
 

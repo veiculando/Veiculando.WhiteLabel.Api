@@ -168,6 +168,150 @@ VALUES ({localId}, 1, 1, '{codigo}', 'INT-{codigo}',
                 .SingleAsync();
         }
 
+        /// <summary>
+        /// Cria um pedido de reserva `Solicitado` com um item, pertencente a
+        /// afiliada informada. Devolve (idPedidoReserva, codigo).
+        /// </summary>
+        /// <remarks>
+        /// O grafo e profundo — PedidoReserva -> Pedido -> Campanha -> Agencia,
+        /// Cliente e UsuarioAnunciante, mais Periodo e PedidoItem — porque a
+        /// resposta de reserva precisa de itens reais: o command enviado ao core
+        /// carrega IdPeca e IdPeriodo de cada um.
+        ///
+        /// <para>As linhas de apoio (perfil, usuario, agencia, cliente, periodo)
+        /// sao criadas uma vez com ids fixos e reaproveitadas; so pedido, item e
+        /// reserva sao por teste.</para>
+        /// </remarks>
+        public static async Task<(int Id, string Codigo)> ReservaAsync(
+            int afiliadaId,
+            string codigo,
+            int pecaId,
+            StatusPedidoReserva status = StatusPedidoReserva.Solicitado)
+        {
+            using var ctx = new VeiculandoDataContext();
+
+            await ctx.Database.ExecuteSqlCommandAsync($@"
+IF NOT EXISTS (SELECT 1 FROM PerfilUsuario WHERE Id = 1)
+BEGIN
+    SET IDENTITY_INSERT PerfilUsuario ON;
+    INSERT INTO PerfilUsuario (Id, Nome, Codigo, DataCadastro, DataAtualizacao, StatusExibicao)
+    VALUES (1, 'Anunciante', 'ANUN', GETDATE(), GETDATE(), 1);
+    SET IDENTITY_INSERT PerfilUsuario OFF;
+END
+
+IF NOT EXISTS (SELECT 1 FROM Usuario WHERE Id = 1)
+BEGIN
+    SET IDENTITY_INSERT Usuario ON;
+    INSERT INTO Usuario (Id, Nome, Email, Senha, StatusAprovacao, Acessos, DataUltimoLogin,
+                         EmailConfirmado, DataCadastro, DataAtualizacao, StatusExibicao, IdPerfil)
+    VALUES (1, 'Anunciante Teste', 'anunciante@exemplo.com', 'x', 1, 0, GETDATE(),
+            1, GETDATE(), GETDATE(), 1, 1);
+    SET IDENTITY_INSERT Usuario OFF;
+END
+
+IF NOT EXISTS (SELECT 1 FROM UsuarioAnunciante WHERE Id = 1)
+    INSERT INTO UsuarioAnunciante (Id) VALUES (1);
+
+IF NOT EXISTS (SELECT 1 FROM Agencia WHERE Id = 1)
+BEGIN
+    SET IDENTITY_INSERT Agencia ON;
+    INSERT INTO Agencia (Id, Nome, Cnpj, Email, AvaliacaoMedia, BonificacaoVolume,
+                         DataCadastro, DataAtualizacao, StatusExibicao)
+    VALUES (1, 'Agencia Teste', '00000000000191', 'agencia@exemplo.com', 0, 0,
+            GETDATE(), GETDATE(), 1);
+    SET IDENTITY_INSERT Agencia OFF;
+END
+
+IF NOT EXISTS (SELECT 1 FROM Cliente WHERE Id = 1)
+BEGIN
+    SET IDENTITY_INSERT Cliente ON;
+    INSERT INTO Cliente (Id, Codigo, Nome, Cnpj, DescontoNegociado, Status,
+                         DataCadastro, DataAtualizacao, StatusExibicao)
+    VALUES (1, 'CLI1', 'Cliente Teste', '00000000000191', 0, 1,
+            GETDATE(), GETDATE(), 1);
+    SET IDENTITY_INSERT Cliente OFF;
+END
+
+IF NOT EXISTS (SELECT 1 FROM Campanha WHERE Id = 1)
+BEGIN
+    SET IDENTITY_INSERT Campanha ON;
+    INSERT INTO Campanha (Id, FonteOrigem, IdAgencia, IdUsuarioAnunciante, IdCliente,
+                          Nome, Codigo, Status, DataInicioPrevisto, DataFimPrevisto,
+                          DescontoNegociado, PermiteConviteAvaliacao,
+                          DataCadastro, DataAtualizacao, StatusExibicao)
+    VALUES (1, 0, 1, 1, 1, 'Campanha Teste', 'CAMP1', 1, GETDATE(), DATEADD(day, 30, GETDATE()),
+            0, 0, GETDATE(), GETDATE(), 1);
+    SET IDENTITY_INSERT Campanha OFF;
+END
+
+IF NOT EXISTS (SELECT 1 FROM Periodo WHERE Id = 1)
+BEGIN
+    SET IDENTITY_INSERT Periodo ON;
+    INSERT INTO Periodo (Id, Codigo, Periodicidade, DataInicio, DataFim, StatusExibicao)
+    VALUES (1, 'P1', 0, GETDATE(), DATEADD(day, 14, GETDATE()), 1);
+    SET IDENTITY_INSERT Periodo OFF;
+END");
+
+            // Pedido
+            await ctx.Database.ExecuteSqlCommandAsync($@"
+INSERT INTO Pedido (FonteOrigem, IdCampanha, IdCidade, IdPeriodo, IdUsuarioAnunciante,
+                    Codigo, Status, StatusPagamento, Revisao,
+                    DescontoNegociado, DescontoFinanceiro, ComissaoAgencia, BonificacaoVolume,
+                    ComissaoVeiculando, ValorTotalTabela, ValorTotalBruto, ValorDescontoNegociado,
+                    ValorDescontoFinanceiro, ValorComissaoAgencia, ValorBonificacaoVolume,
+                    ValorComissaoVeiculando, ValorLiquidoVeiculacao, ValorLiquidoAnunciante,
+                    DataCadastro, DataAtualizacao, StatusExibicao)
+VALUES (0, 1, 1, 1, 1, 'PED-{codigo}', 0, 0, 1,
+        0, 0, 0, 0,
+        0, 1000, 1000, 0,
+        0, 0, 0,
+        0, 1000, 1000,
+        GETDATE(), GETDATE(), 1);");
+
+            var pedidoId = await ctx.Database
+                .SqlQuery<int>($"SELECT TOP 1 Id FROM Pedido WHERE Codigo = 'PED-{codigo}' ORDER BY Id DESC")
+                .SingleAsync();
+
+            await ctx.Database.ExecuteSqlCommandAsync($@"
+INSERT INTO PedidoItem (IdPedido, IdPeca, IdPeriodo, Status,
+                        DescontoNegociado, ValorTabela, ValorBruto, ValorDescontoNegociado,
+                        ValorDescontoFinanceiro, ValorComissaoAgencia, ValorBonificacaoVolume,
+                        ValorComissaoVeiculando, ValorLiquidoVeiculacao, ValorLiquidoAnunciante)
+VALUES ({pedidoId}, {pecaId}, 1, 0,
+        0, 1000, 1000, 0,
+        0, 0, 0,
+        0, 1000, 1000);
+
+INSERT INTO PedidoReserva (IdPedido, IdAfiliada, Codigo, Status,
+                           ValorTotalBruto, ValorDesconto, ValorLiquidoVeiculacao,
+                           DataCadastro, DataAtualizacao, StatusExibicao)
+VALUES ({pedidoId}, {afiliadaId}, '{codigo}', {(int)status},
+        1000, 0, 1000, GETDATE(), GETDATE(), 1);");
+
+            var reservaId = await ctx.Database
+                .SqlQuery<int>($"SELECT TOP 1 Id FROM PedidoReserva WHERE Codigo = '{codigo}' ORDER BY Id DESC")
+                .SingleAsync();
+
+            var itemId = await ctx.Database
+                .SqlQuery<int>($"SELECT TOP 1 Id FROM PedidoItem WHERE IdPedido = {pedidoId} ORDER BY Id DESC")
+                .SingleAsync();
+
+            await ctx.Database.ExecuteSqlCommandAsync(
+                $"INSERT INTO PedidoReservaItem (IdPedidoItem, IdPedidoReserva, Status) VALUES ({itemId}, {reservaId}, 0);");
+
+            return (reservaId, codigo);
+        }
+
+        /// <summary>Espelha StatusPedidoReservaEnum.</summary>
+        public enum StatusPedidoReserva
+        {
+            Cancelado = -2,
+            Revisado = -1,
+            Solicitado = 0,
+            Confirmado = 1,
+            ItensIndisponiveis = 2,
+        }
+
         /// <summary>Espelha StatusExibicaoEnum para o seed nao depender do enum do dominio.</summary>
         public enum StatusExibicaoLocal
         {
