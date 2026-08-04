@@ -79,14 +79,33 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             return Ok(pois);
         }
 
+        /// <summary>
+        /// Bi-semanas ativas, mais recentes primeiro.
+        /// </summary>
+        /// <remarks>
+        /// <c>Periodo.Nome</c> NAO e coluna: e propriedade calculada
+        /// (<c>get => RetornaNome()</c>) e esta marcada com <c>Ignore(x =&gt; x.Nome)</c>
+        /// no <c>PeriodoMap</c>. Dentro de um <c>Select</c> traduzido para SQL o EF6
+        /// lanca NotSupportedException ("The specified type member 'Nome' is not
+        /// supported in LINQ to Entities"), e este endpoint respondia 500 sempre —
+        /// o dropdown de bi-semana da tela de Programacao nunca carregava.
+        ///
+        /// <para>Mesma classe do <c>String.Split</c> que quebrava a listagem de
+        /// operadores: expressao que so existe em C# usada onde o EF precisa gerar
+        /// SQL. A projecao materializa as colunas reais primeiro e o <c>Nome</c> e
+        /// calculado depois, ja em memoria.</para>
+        /// </remarks>
         [HttpGet("periodos")]
         public async Task<IActionResult> GetPeriodos()
         {
-            var periodos = await _db.Periodos
+            var brutos = await _db.Periodos
                 .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo)
                 .OrderByDescending(p => p.DataInicio)
-                .Select(p => new { p.Id, p.Nome, p.DataInicio, p.DataFim })
                 .ToListAsync();
+
+            var periodos = brutos
+                .Select(p => new { p.Id, p.Nome, p.DataInicio, p.DataFim })
+                .ToList();
 
             return Ok(periodos);
         }

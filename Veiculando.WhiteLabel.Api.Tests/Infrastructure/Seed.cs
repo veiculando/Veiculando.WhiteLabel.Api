@@ -302,6 +302,59 @@ VALUES ({pedidoId}, {afiliadaId}, '{codigo}', {(int)status},
             return (reservaId, codigo);
         }
 
+        /// <summary>
+        /// Cria um pedido de insercao com um item, na afiliada informada.
+        /// Reaproveita o mesmo grafo de apoio da reserva.
+        /// </summary>
+        public static async Task<int> InsercaoAsync(int afiliadaId, string codigo, int pecaId)
+        {
+            // A reserva ja monta Pedido/Campanha/Periodo/PedidoItem; aproveitamos o
+            // pedido criado por ela em vez de duplicar todo o grafo.
+            var (_, codigoReserva) = await ReservaAsync(afiliadaId, $"RES{codigo}", pecaId);
+
+            using var ctx = new VeiculandoDataContext();
+
+            var pedidoId = await ctx.Database
+                .SqlQuery<int>($"SELECT TOP 1 IdPedido FROM PedidoReserva WHERE Codigo = '{codigoReserva}'")
+                .SingleAsync();
+
+            await ctx.Database.ExecuteSqlCommandAsync($@"
+INSERT INTO PedidoInsercao (IdPedido, IdAfiliada, Codigo, Status, StatusPagamento,
+                            ValorTotalTabela, ValorTotalBruto, ValorDescontoNegociado,
+                            ValorDescontoFinanceiro, ValorComissaoAgencia, ValorBonificacaoVolume,
+                            ValorComissaoVeiculando, ValorLiquidoVeiculacao, ValorLiquidoAnunciante,
+                            DataCadastro, DataAtualizacao, StatusExibicao)
+VALUES ({pedidoId}, {afiliadaId}, '{codigo}', 0, 0,
+        1000, 1000, 0,
+        0, 0, 0,
+        0, 1000, 1000,
+        GETDATE(), GETDATE(), 1);");
+
+            var insercaoId = await ctx.Database
+                .SqlQuery<int>($"SELECT TOP 1 Id FROM PedidoInsercao WHERE Codigo = '{codigo}' ORDER BY Id DESC")
+                .SingleAsync();
+
+            var itemId = await ctx.Database
+                .SqlQuery<int>($"SELECT TOP 1 Id FROM PedidoItem WHERE IdPedido = {pedidoId} ORDER BY Id DESC")
+                .SingleAsync();
+
+            await ctx.Database.ExecuteSqlCommandAsync(
+                $"INSERT INTO PedidoInsercaoItem (IdPedidoItem, IdPedidoInsercao, Status) VALUES ({itemId}, {insercaoId}, 0);");
+
+            return insercaoId;
+        }
+
+        /// <summary>
+        /// Marca a peca como disponivel no periodo 1, para a grade de programacao.
+        /// </summary>
+        public static async Task StatusProgramacaoAsync(int pecaId, int status = 0)
+        {
+            using var ctx = new VeiculandoDataContext();
+
+            await ctx.Database.ExecuteSqlCommandAsync(
+                $"INSERT INTO PecaPeriodoStatus (IdPeca, IdPeriodo, Status) VALUES ({pecaId}, 1, {status});");
+        }
+
         /// <summary>Espelha StatusPedidoReservaEnum.</summary>
         public enum StatusPedidoReserva
         {

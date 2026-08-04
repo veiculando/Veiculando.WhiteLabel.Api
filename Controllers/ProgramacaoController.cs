@@ -41,7 +41,14 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 query = query.Where(pps => pps.Peca.IdLocal == dto.IdLocal.Value);
             }
 
-            var grade = await query
+            // `Periodo.Nome` e propriedade calculada e esta marcada com
+            // `Ignore(x => x.Nome)` no PeriodoMap — nao existe coluna equivalente.
+            // Projeta-la aqui fazia o EF6 lancar NotSupportedException ao traduzir a
+            // query, e a grade de programacao respondia 500 sempre.
+            //
+            // A projecao traz o Periodo inteiro e o Nome e resolvido depois, ja em
+            // memoria. Mesma correcao aplicada em LookupsController.GetPeriodos.
+            var brutos = await query
                 .Select(pps => new
                 {
                     PecaId = pps.IdPeca,
@@ -49,10 +56,23 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     LocalId = pps.Peca.IdLocal,
                     LocalCodigo = pps.Peca.Local.Codigo,
                     PeriodoId = pps.IdPeriodo,
-                    PeriodoNome = pps.Periodo.Nome,
-                    Status = pps.Status.ToString()
+                    Periodo = pps.Periodo,
+                    Status = pps.Status
                 })
                 .ToListAsync();
+
+            var grade = brutos
+                .Select(x => new
+                {
+                    x.PecaId,
+                    x.PecaCodigo,
+                    x.LocalId,
+                    x.LocalCodigo,
+                    x.PeriodoId,
+                    PeriodoNome = x.Periodo != null ? x.Periodo.Nome : null,
+                    Status = x.Status.ToString()
+                })
+                .ToList();
 
             return Ok(grade);
         }

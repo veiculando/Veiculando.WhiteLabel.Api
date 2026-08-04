@@ -33,20 +33,40 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var afiliadaId = _tenantContext.AfiliadaId;
             var fileServerUrl = Environment.GetEnvironmentVariable("FILE_SERVER_URL") ?? "https://fileserver.veiculando.com.br";
 
-            var pis = await _db.PedidosInsercao
+            // A interpolacao de string vira String.Format, que o EF6 nao traduz:
+            // dentro do Select isso lancava NotSupportedException e a listagem de
+            // PIs respondia 500 sempre. O mesmo vale para `Status.ToString()`.
+            //
+            // Materializa as colunas reais primeiro e monta PdfUrl e Status depois,
+            // ja em memoria. Mesma classe de defeito de Periodo.Nome em
+            // LookupsController e ProgramacaoController.
+            var brutos = await _db.PedidosInsercao
                 .Where(pi => pi.IdAfiliada == afiliadaId && pi.StatusExibicao == StatusExibicaoEnum.Ativo)
                 .Select(pi => new
                 {
                     pi.Id,
                     pi.Codigo,
                     pi.DataCadastro,
-                    Status = pi.Status.ToString(),
+                    pi.Status,
                     Agencia = pi.Pedido.Campanha.Agencia != null ? pi.Pedido.Campanha.Agencia.Nome : null,
                     Anunciante = pi.Pedido.Campanha.Cliente != null ? pi.Pedido.Campanha.Cliente.Nome : null,
                     pi.ValorLiquidoVeiculacao,
-                    PdfUrl = $"{fileServerUrl}/pedidoinsercao/detalhes/{pi.Id}"
                 })
                 .ToListAsync();
+
+            var pis = brutos
+                .Select(pi => new
+                {
+                    pi.Id,
+                    pi.Codigo,
+                    pi.DataCadastro,
+                    Status = pi.Status.ToString(),
+                    pi.Agencia,
+                    pi.Anunciante,
+                    pi.ValorLiquidoVeiculacao,
+                    PdfUrl = $"{fileServerUrl}/pedidoinsercao/detalhes/{pi.Id}"
+                })
+                .ToList();
 
             return Ok(pis);
         }
