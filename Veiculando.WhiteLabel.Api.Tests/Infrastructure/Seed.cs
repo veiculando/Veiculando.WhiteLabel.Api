@@ -1,3 +1,5 @@
+using System.Data.Entity;
+using System.Linq;
 using System.Threading.Tasks;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Entities.WhiteLabel;
@@ -41,6 +43,137 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
             await ctx.SaveChangesAsync();
 
             return operador.Id;
+        }
+
+        /// <summary>
+        /// Cria a afiliada e sua cidade/estado, se ainda nao existirem.
+        /// </summary>
+        /// <remarks>
+        /// Via SQL, e nao pelos construtores do dominio, de proposito. <c>Afiliada</c>
+        /// recebe 17 parametros e <c>Peca</c> 18, quase todos irrelevantes para o
+        /// que esta sob teste — montar esse grafo em C# encheria os testes de ruido
+        /// e os quebraria a cada assinatura que mudasse. O seed nao e o objeto do
+        /// teste; os controllers sao.
+        ///
+        /// <para>O preco e conhecer os nomes das colunas. Em troca, quando o
+        /// mapeamento mudar, o seed quebra alto e claro em vez de silenciosamente
+        /// gravar em coluna errada.</para>
+        /// </remarks>
+        public static async Task AfiliadaAsync(int afiliadaId)
+        {
+            using var ctx = new VeiculandoDataContext();
+
+            await ctx.Database.ExecuteSqlCommandAsync($@"
+IF NOT EXISTS (SELECT 1 FROM Estado WHERE Id = 1)
+BEGIN
+    SET IDENTITY_INSERT Estado ON;
+    INSERT INTO Estado (Id, Sigla, Nome, CodigoIBGE, Latitude, Longitude)
+    VALUES (1, 'SP', 'Sao Paulo', 35, -23.55, -46.63);
+    SET IDENTITY_INSERT Estado OFF;
+END
+
+IF NOT EXISTS (SELECT 1 FROM Cidade WHERE Id = 1)
+BEGIN
+    SET IDENTITY_INSERT Cidade ON;
+    INSERT INTO Cidade (Id, IdEstado, Nome, Codigo, CodigoIBGE, Latitude, Longitude,
+                        DataCadastro, DataAtualizacao, StatusExibicao)
+    VALUES (1, 1, 'Sao Paulo', 'SP001', 3550308, -23.55, -46.63, GETDATE(), GETDATE(), 1);
+    SET IDENTITY_INSERT Cidade OFF;
+END
+
+IF NOT EXISTS (SELECT 1 FROM TipoAfiliada WHERE Id = 1)
+BEGIN
+    SET IDENTITY_INSERT TipoAfiliada ON;
+    INSERT INTO TipoAfiliada (Id, Nome) VALUES (1, 'Exibidora');
+    SET IDENTITY_INSERT TipoAfiliada OFF;
+END
+
+IF NOT EXISTS (SELECT 1 FROM Afiliada WHERE Id = {afiliadaId})
+BEGIN
+    SET IDENTITY_INSERT Afiliada ON;
+    INSERT INTO Afiliada (Id, IdTipoAfiliada, Codigo, Nome, Cnpj, Email,
+                          AvaliacaoMedia, DataCadastro, DataAtualizacao, StatusExibicao)
+    VALUES ({afiliadaId}, 1, 'AF{afiliadaId}', 'Exibidora {afiliadaId}',
+            '00000000000191', 'afiliada{afiliadaId}@exemplo.com', 0, GETDATE(), GETDATE(), 1);
+    SET IDENTITY_INSERT Afiliada OFF;
+END");
+        }
+
+        /// <summary>
+        /// Cria um local pertencente a afiliada informada e devolve o id.
+        /// </summary>
+        public static async Task<int> LocalAsync(
+            int afiliadaId,
+            string codigo,
+            StatusExibicaoLocal status = StatusExibicaoLocal.Ativo,
+            FonteOrigemLocal fonte = FonteOrigemLocal.WhiteLabel)
+        {
+            await AfiliadaAsync(afiliadaId);
+
+            using var ctx = new VeiculandoDataContext();
+
+            await ctx.Database.ExecuteSqlCommandAsync($@"
+INSERT INTO Local (IdCidade, IdAfiliada, FonteOrigem, Codigo, Codigointerno, Descricao,
+                   Latitude, Longitude, DataCadastro, DataAtualizacao, StatusExibicao)
+VALUES (1, {afiliadaId}, {(int)fonte}, '{codigo}', 'INT-{codigo}', 'Local {codigo}',
+        -23.55, -46.63, GETDATE(), GETDATE(), {(int)status});");
+
+            return await ctx.Database
+                .SqlQuery<int>($"SELECT TOP 1 Id FROM Local WHERE Codigo = '{codigo}' ORDER BY Id DESC")
+                .SingleAsync();
+        }
+
+        /// <summary>
+        /// Cria uma peca no local informado e devolve o id.
+        /// </summary>
+        public static async Task<int> PecaAsync(
+            int localId,
+            string codigo,
+            StatusExibicaoLocal status = StatusExibicaoLocal.Ativo)
+        {
+            using var ctx = new VeiculandoDataContext();
+
+            await ctx.Database.ExecuteSqlCommandAsync($@"
+IF NOT EXISTS (SELECT 1 FROM TipoSuporte WHERE Id = 1)
+BEGIN
+    SET IDENTITY_INSERT TipoSuporte ON;
+    INSERT INTO TipoSuporte (Id, Nome, Codigo, Ordem, StatusExibicao)
+    VALUES (1, 'Outdoor', 'OUT', 1, 1);
+    SET IDENTITY_INSERT TipoSuporte OFF;
+END
+
+INSERT INTO Peca (IdLocal, IdTipoSuporte, FonteOrigem, Codigo, CodigoInterno,
+                  Altura, Largura, Juncao, Iluminacao, Semaforo, AnguloDeVisao,
+                  Via_Tipo, Via_Faixas, Via_Velociade, Via_Pedestre,
+                  RoteiroComercial, Alvara, Periodicidade, ValorPadrao, Promocao,
+                  AvaliacaoMedia, AvaliacaoQuantidade,
+                  DataCadastro, DataAtualizacao, StatusExibicao)
+VALUES ({localId}, 1, 1, '{codigo}', 'INT-{codigo}',
+        3, 9, 0, 1, 0, 90,
+        0, 2, 60, 0,
+        1, 1, 0, 1500, 0,
+        0, 0,
+        GETDATE(), GETDATE(), {(int)status});");
+
+            return await ctx.Database
+                .SqlQuery<int>($"SELECT TOP 1 Id FROM Peca WHERE Codigo = '{codigo}' ORDER BY Id DESC")
+                .SingleAsync();
+        }
+
+        /// <summary>Espelha StatusExibicaoEnum para o seed nao depender do enum do dominio.</summary>
+        public enum StatusExibicaoLocal
+        {
+            Deletado = -1,
+            Inativo = 0,
+            Ativo = 1,
+            AprovacaoPendente = 2,
+        }
+
+        /// <summary>Espelha FonteOrigemEnum.</summary>
+        public enum FonteOrigemLocal
+        {
+            Core = 0,
+            WhiteLabel = 1,
         }
     }
 }
