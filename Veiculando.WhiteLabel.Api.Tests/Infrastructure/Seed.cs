@@ -108,6 +108,14 @@ END");
             StatusExibicaoLocal status = StatusExibicaoLocal.Ativo,
             FonteOrigemLocal fonte = FonteOrigemLocal.WhiteLabel)
         {
+            // Local.Codigo e varchar(12). Passar disso gera
+            // "String or binary data would be truncated", que aponta para a coluna
+            // mas nao para o teste culpado — a mensagem abaixo aponta.
+            if (codigo.Length > 12)
+                throw new System.ArgumentException(
+                    $"Codigo de local '{codigo}' tem {codigo.Length} caracteres; a coluna aceita 12.",
+                    nameof(codigo));
+
             await AfiliadaAsync(afiliadaId);
 
             using var ctx = new VeiculandoDataContext();
