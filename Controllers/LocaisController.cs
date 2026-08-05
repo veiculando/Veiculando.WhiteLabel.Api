@@ -22,16 +22,16 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     public class LocaisController : WlCoreProxyControllerBase
     {
         private readonly VeiculandoDataContext _db;
-        private readonly ITenantContext _tenantContext;
+        private readonly ITenantQueries _tenant;
         private readonly ICoreCadastroService _coreCadastro;
 
         public LocaisController(
             VeiculandoDataContext db,
-            ITenantContext tenantContext,
+            ITenantQueries tenant,
             ICoreCadastroService coreCadastro)
         {
             _db = db;
-            _tenantContext = tenantContext;
+            _tenant = tenant;
             _coreCadastro = coreCadastro;
         }
 
@@ -84,17 +84,16 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (command == null)
                 return BadRequest(new { message = "Dados do local são obrigatórios." });
 
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var local = await _db.Locais
+            var local = await _tenant.Locais
                 .FirstOrDefaultAsync(l => l.Id == id
-                                       && l.IdAfiliada == afiliadaId
+                                      
                                        && l.StatusExibicao != StatusExibicaoEnum.Deletado);
 
             if (local == null)
                 return NotFound(new { message = "Local não encontrado." });
 
-            local.AssertTenantAccess(afiliadaId);
 
             command.Id = id;
 
@@ -119,12 +118,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var locais = await _db.Locais
+            var locais = await _tenant.Locais
                 .AsNoTracking()
-                .Where(l => l.IdAfiliada == afiliadaId
-                         && (l.StatusExibicao == StatusExibicaoEnum.Ativo
+                .Where(l => (l.StatusExibicao == StatusExibicaoEnum.Ativo
                           || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente))
                 .Select(l => new
                 {
@@ -160,24 +158,23 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
             // Cidade e Estado são navegações: com lazy loading desligado no contexto
             // do core, sem Include os campos Cidade/UF do detalhe voltavam sempre
             // null. O `?.` na projeção escondia isso — o formulário de edição abria
             // com a cidade em branco e salvava por cima.
-            var local = await _db.Locais
+            var local = await _tenant.Locais
                 .AsNoTracking()
                 .Include(l => l.Cidade.Estado)
                 .FirstOrDefaultAsync(l => l.Id == id
-                                       && l.IdAfiliada == afiliadaId
+                                      
                                        && (l.StatusExibicao == StatusExibicaoEnum.Ativo
                                         || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
 
             if (local == null)
                 return NotFound(new { message = "Local não encontrado." });
 
-            local.AssertTenantAccess(afiliadaId);
 
             return Ok(new
             {
@@ -215,15 +212,14 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> Delete(int id)
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var local = await _db.Locais
-                .FirstOrDefaultAsync(l => l.Id == id && l.IdAfiliada == afiliadaId && l.StatusExibicao == StatusExibicaoEnum.Ativo);
+            var local = await _tenant.Locais
+                .FirstOrDefaultAsync(l => l.Id == id && l.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (local == null)
                 return NotFound(new { message = "Local não encontrado." });
 
-            local.AssertTenantAccess(afiliadaId);
 
             local.Delete();
             await _db.SaveChangesAsync();
@@ -238,18 +234,18 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     public class PecasController : WlCoreProxyControllerBase
     {
         private readonly VeiculandoDataContext _db;
-        private readonly ITenantContext _tenantContext;
+        private readonly ITenantQueries _tenant;
         private readonly IFileValidationService _fileValidation;
         private readonly ICoreCadastroService _coreCadastro;
 
         public PecasController(
             VeiculandoDataContext db,
-            ITenantContext tenantContext,
+            ITenantQueries tenant,
             IFileValidationService fileValidation,
             ICoreCadastroService coreCadastro)
         {
             _db = db;
-            _tenantContext = tenantContext;
+            _tenant = tenant;
             _fileValidation = fileValidation;
             _coreCadastro = coreCadastro;
         }
@@ -290,20 +286,19 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (command == null)
                 return BadRequest(new { message = "Dados da peça são obrigatórios." });
 
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
             // Include necessário pelo mesmo motivo do GetById: sem ele `peca.Local`
             // vem null e a asserção de tenant abaixo vira no-op silencioso.
-            var peca = await _db.Pecas
+            var peca = await _tenant.Pecas
                 .Include(p => p.Local)
                 .FirstOrDefaultAsync(p => p.Id == id
-                                       && p.Local.IdAfiliada == afiliadaId
+                                      
                                        && p.StatusExibicao != StatusExibicaoEnum.Deletado);
 
             if (peca == null)
                 return NotFound(new { message = "Peça não encontrada." });
 
-            peca.Local.AssertTenantAccess(afiliadaId);
 
             // O local de destino também precisa ser da exibidora: sem isso uma
             // edição poderia mover a peça para o inventário de outra afiliada.
@@ -318,28 +313,27 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
         private async Task<IActionResult> ValidarLocalDaAfiliadaAsync(int idLocal)
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var local = await _db.Locais
+            var local = await _tenant.Locais
                 .FirstOrDefaultAsync(l => l.Id == idLocal
-                                       && l.IdAfiliada == afiliadaId
+                                      
                                        && l.StatusExibicao != StatusExibicaoEnum.Deletado);
 
             if (local == null)
                 return NotFound(new { message = "Local não encontrado." });
 
-            local.AssertTenantAccess(afiliadaId);
             return null;
         }
 
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var pecas = await _db.Pecas
+            var pecas = await _tenant.Pecas
                 .AsNoTracking()
-                .Where(p => p.Local.IdAfiliada == afiliadaId && p.StatusExibicao == StatusExibicaoEnum.Ativo)
+                .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo)
                 .Select(p => new
                 {
                     p.Id,
@@ -358,22 +352,21 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
             // O Include é obrigatório: o contexto do core tem LazyLoadingEnabled =
             // false, e o `p.Local.IdAfiliada` do WHERE vira JOIN no SQL sem popular
             // a navegação. Sem ele `peca.Local` vem null e o acesso a
             // `peca.Local.Codigo` logo abaixo estoura NullReferenceException — 500
             // em todo GET de detalhe de peça.
-            var peca = await _db.Pecas
+            var peca = await _tenant.Pecas
                 .AsNoTracking()
                 .Include(p => p.Local)
-                .FirstOrDefaultAsync(p => p.Id == id && p.Local.IdAfiliada == afiliadaId && p.StatusExibicao == StatusExibicaoEnum.Ativo);
+                .FirstOrDefaultAsync(p => p.Id == id && p.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (peca == null)
                 return NotFound(new { message = "Peça não encontrada." });
 
-            peca.Local.AssertTenantAccess(afiliadaId);
 
             return Ok(new
             {
@@ -414,24 +407,23 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> UploadFotoPeca(int idLocal, int pecaId, IFormFile foto)
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
             // A peça precisa existir E pertencer ao local informado. Antes só o
             // local era verificado e o pecaId era ecoado de volta sem checagem
             // nenhuma: com a persistência do TP-2 no lugar, isso viraria gravação
             // de foto em peça de outra afiliada informando um id qualquer.
-            var peca = await _db.Pecas
+            var peca = await _tenant.Pecas
                 .AsNoTracking()
                 .Include(p => p.Local)
                 .FirstOrDefaultAsync(p => p.Id == pecaId
                                        && p.IdLocal == idLocal
-                                       && p.Local.IdAfiliada == afiliadaId
+                                      
                                        && p.StatusExibicao != StatusExibicaoEnum.Deletado);
 
             if (peca == null)
                 return NotFound(new { message = "Peça não encontrada neste local." });
 
-            peca.Local.AssertTenantAccess(afiliadaId);
 
             const long maxBytes = 10 * 1024 * 1024; // Max 10MB conforme TP-2
             if (!_fileValidation.IsValidFile(foto, maxBytes, out var errorMessage))

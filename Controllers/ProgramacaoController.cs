@@ -15,21 +15,20 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     public class ProgramacaoController : ControllerBase
     {
         private readonly VeiculandoDataContext _db;
-        private readonly ITenantContext _tenantContext;
+        private readonly ITenantQueries _tenant;
 
-        public ProgramacaoController(VeiculandoDataContext db, ITenantContext tenantContext)
+        public ProgramacaoController(VeiculandoDataContext db, ITenantQueries tenant)
         {
             _db = db;
-            _tenantContext = tenantContext;
+            _tenant = tenant;
         }
 
         [HttpPost("listar")]
         public async Task<IActionResult> ListarGrade([FromBody] ProgramacaoFiltroDto dto)
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var query = _db.PecaPeriodoStatus
-                .Where(pps => pps.Peca.Local.IdAfiliada == afiliadaId);
+            var query = _tenant.PecaPeriodoStatus;
 
             if (dto?.IdPeriodo.HasValue == true && dto.IdPeriodo.Value > 0)
             {

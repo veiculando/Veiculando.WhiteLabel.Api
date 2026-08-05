@@ -24,16 +24,16 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     {
         private readonly VeiculandoDataContext _db;
         private readonly JwtSettings _jwtSettings;
-        private readonly ITenantContext _tenantContext;
+        private readonly ITenantQueries _tenant;
 
         public AuthController(
             VeiculandoDataContext db,
             IOptions<JwtSettings> jwtSettings,
-            ITenantContext tenantContext)
+            ITenantQueries tenant)
         {
             _db = db;
             _jwtSettings = jwtSettings.Value;
-            _tenantContext = tenantContext;
+            _tenant = tenant;
         }
 
         /// <summary>
@@ -49,12 +49,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 return BadRequest(new { message = "Email e senha são obrigatórios." });
 
             var normalizedEmail = request.Email.ToLower().Trim();
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var usuario = await _db.WlUsuariosAfiliada
+            var usuario = await _tenant.UsuariosAfiliada
                 .FirstOrDefaultAsync(u => u.Email.Endereco == normalizedEmail 
-                                       && u.StatusExibicao == StatusExibicaoEnum.Ativo 
-                                       && u.AfiliadaId == afiliadaId);
+                                       && u.StatusExibicao == StatusExibicaoEnum.Ativo );
 
             if (usuario == null || !BC.Verify(request.Senha, usuario.SenhaHash))
                 return Unauthorized(new { message = "Credenciais inválidas." });
@@ -76,12 +75,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (!int.TryParse(wlUsuarioIdStr, out var id))
                 return Unauthorized();
 
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var usuario = await _db.WlUsuariosAfiliada
+            var usuario = await _tenant.UsuariosAfiliada
                 .FirstOrDefaultAsync(u => u.Id == id 
-                                       && u.StatusExibicao == StatusExibicaoEnum.Ativo 
-                                       && u.AfiliadaId == afiliadaId);
+                                       && u.StatusExibicao == StatusExibicaoEnum.Ativo );
 
             if (usuario == null) 
                 return Unauthorized();
@@ -111,13 +109,12 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (!int.TryParse(wlUsuarioIdStr, out var id))
                 return Unauthorized();
 
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var usuario = await _db.WlUsuariosAfiliada
+            var usuario = await _tenant.UsuariosAfiliada
                 .AsNoTracking()
                 .FirstOrDefaultAsync(u => u.Id == id
-                                       && u.StatusExibicao == StatusExibicaoEnum.Ativo
-                                       && u.AfiliadaId == afiliadaId);
+                                       && u.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (usuario == null)
                 return Unauthorized(new { message = "Sessão inválida." });

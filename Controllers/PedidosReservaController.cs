@@ -20,16 +20,16 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     public class PedidosReservaController : WlCoreProxyControllerBase
     {
         private readonly VeiculandoDataContext _db;
-        private readonly ITenantContext _tenantContext;
+        private readonly ITenantQueries _tenant;
         private readonly ICoreCadastroService _coreCadastro;
 
         public PedidosReservaController(
             VeiculandoDataContext db,
-            ITenantContext tenantContext,
+            ITenantQueries tenant,
             ICoreCadastroService coreCadastro)
         {
             _db = db;
-            _tenantContext = tenantContext;
+            _tenant = tenant;
             _coreCadastro = coreCadastro;
         }
 
@@ -39,10 +39,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var reservas = await _db.PedidosReserva
-                .Where(pr => pr.IdAfiliada == afiliadaId)
+            var reservas = await _tenant.PedidosReserva
                 .Select(pr => new
                 {
                     pr.Id,
@@ -64,22 +63,21 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet("{codigo}")]
         public async Task<IActionResult> GetByCodigo(string codigo)
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
             // Mesma armadilha do PedidosInsercaoController: sem Include, `pr.Pedido`
             // vem null e a projeção estoura NRE. `pr.Itens` não estoura (o ctor
             // protegido inicializa a lista) mas viria vazia, e o detalhe mostraria
             // um pedido sem itens.
-            var pr = await _db.PedidosReserva
+            var pr = await _tenant.PedidosReserva
                 .Include(x => x.Pedido.Campanha.Agencia)
                 .Include(x => x.Pedido.Campanha.Cliente)
                 .Include(x => x.Itens.Select(i => i.PedidoItem.Peca.Local))
-                .FirstOrDefaultAsync(x => x.Codigo == codigo && x.IdAfiliada == afiliadaId);
+                .FirstOrDefaultAsync(x => x.Codigo == codigo);
 
             if (pr == null)
                 return NotFound(new { message = "Pedido de reserva não encontrado." });
 
-            pr.AssertTenantAccess(afiliadaId);
 
             return Ok(new
             {
@@ -140,19 +138,18 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (dto == null)
                 return BadRequest(new { message = "Dados da resposta são obrigatórios." });
 
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
             // Itens e PedidoItem são necessários de verdade aqui: o command do core
             // exige IdPeca e IdPeriodo de cada item para localizar a linha da grade
             // de disponibilidade.
-            var pedido = await _db.PedidosReserva
+            var pedido = await _tenant.PedidosReserva
                 .Include(pr => pr.Itens.Select(i => i.PedidoItem))
-                .FirstOrDefaultAsync(pr => pr.Id == dto.PedidoReservaId && pr.IdAfiliada == afiliadaId);
+                .FirstOrDefaultAsync(pr => pr.Id == dto.PedidoReservaId);
 
             if (pedido == null)
                 return NotFound(new { message = "Pedido de reserva não encontrado." });
 
-            pedido.AssertTenantAccess(afiliadaId);
 
             // Mesma guarda do handler do core, aplicada antes da chamada remota
             // para devolver uma mensagem clara em vez de uma notificação genérica.

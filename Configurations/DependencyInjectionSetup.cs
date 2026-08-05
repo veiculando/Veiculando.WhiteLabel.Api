@@ -60,6 +60,12 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // Tenant
             services.AddScoped<ITenantContext, TenantContext>();
 
+            // Superfície de consulta já recortada pela afiliada da instância.
+            // Os controllers consultam por aqui em vez de tocar os DbSets crus: o
+            // filtro de tenant deixa de depender de cada endpoint lembrar de
+            // escrevê-lo. Ver ITenantQueries.
+            services.AddScoped<ITenantQueries, TenantQueries>();
+
             // Configuração do Seed
             services.Configure<SeedAccountOptions>(configuration.GetSection("SeedAccount"));
             

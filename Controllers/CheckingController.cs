@@ -21,23 +21,23 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     public class CheckingController : ControllerBase
     {
         private readonly VeiculandoDataContext _db;
-        private readonly ITenantContext _tenantContext;
+        private readonly ITenantQueries _tenant;
         private readonly IFileValidationService _fileValidation;
 
-        public CheckingController(VeiculandoDataContext db, ITenantContext tenantContext, IFileValidationService fileValidation)
+        public CheckingController(VeiculandoDataContext db, ITenantQueries tenant, IFileValidationService fileValidation)
         {
             _db = db;
-            _tenantContext = tenantContext;
+            _tenant = tenant;
             _fileValidation = fileValidation;
         }
 
         [HttpGet("pis-autorizadas")]
         public async Task<IActionResult> GetPisAutorizadas()
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var pis = await _db.PedidosInsercao
-                .Where(pi => pi.IdAfiliada == afiliadaId && pi.StatusExibicao == StatusExibicaoEnum.Ativo)
+            var pis = await _tenant.PedidosInsercao
+                .Where(pi => pi.StatusExibicao == StatusExibicaoEnum.Ativo)
                 .Select(pi => new
                 {
                     pi.Id,
@@ -53,15 +53,14 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet("pi/{codigo}")]
         public async Task<IActionResult> GetPiByCodigo(string codigo)
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var pi = await _db.PedidosInsercao
-                .FirstOrDefaultAsync(p => p.Codigo == codigo && p.IdAfiliada == afiliadaId && p.StatusExibicao == StatusExibicaoEnum.Ativo);
+            var pi = await _tenant.PedidosInsercao
+                .FirstOrDefaultAsync(p => p.Codigo == codigo && p.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (pi == null)
                 return NotFound(new { message = "Pedido de Inserção não encontrado." });
 
-            pi.AssertTenantAccess(afiliadaId);
 
             return Ok(new
             {
@@ -88,18 +87,17 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet("pi/{codigo}/itens")]
         public async Task<IActionResult> GetItensDaPi(string codigo)
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var pi = await _db.PedidosInsercao
-                .FirstOrDefaultAsync(p => p.Codigo == codigo && p.IdAfiliada == afiliadaId && p.StatusExibicao == StatusExibicaoEnum.Ativo);
+            var pi = await _tenant.PedidosInsercao
+                .FirstOrDefaultAsync(p => p.Codigo == codigo && p.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (pi == null)
                 return NotFound(new { message = "Pedido de Inserção não encontrado." });
 
-            pi.AssertTenantAccess(afiliadaId);
 
-            var itens = await _db.PedidoInsercaoItens
-                .Where(i => i.IdPedidoInsercao == pi.Id && i.PedidoInsercao.IdAfiliada == afiliadaId)
+            var itens = await _tenant.PedidoInsercaoItens
+                .Where(i => i.IdPedidoInsercao == pi.Id)
                 .Select(i => new
                 {
                     i.IdPedidoItem,
@@ -119,15 +117,14 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet("item/{id}")]
         public async Task<IActionResult> GetItemById(int id)
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var item = await _db.PedidoInsercaoItens
-                .FirstOrDefaultAsync(i => i.IdPedidoItem == id && i.PedidoInsercao.IdAfiliada == afiliadaId);
+            var item = await _tenant.PedidoInsercaoItens
+                .FirstOrDefaultAsync(i => i.IdPedidoItem == id);
 
             if (item == null)
                 return NotFound(new { message = "Item de PI não encontrado." });
 
-            item.PedidoInsercao.AssertTenantAccess(afiliadaId);
 
             return Ok(new
             {
@@ -153,15 +150,14 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> EnviarFotoChecking(int idItemPI, IFormFile foto)
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var item = await _db.PedidoInsercaoItens
-                .FirstOrDefaultAsync(i => i.IdPedidoItem == idItemPI && i.PedidoInsercao.IdAfiliada == afiliadaId);
+            var item = await _tenant.PedidoInsercaoItens
+                .FirstOrDefaultAsync(i => i.IdPedidoItem == idItemPI);
 
             if (item == null)
                 return NotFound(new { message = "Item de PI não encontrado." });
 
-            item.PedidoInsercao.AssertTenantAccess(afiliadaId);
 
             const long maxBytes = 15 * 1024 * 1024; // Max 15MB conforme TP-2
             if (!_fileValidation.IsValidFile(foto, maxBytes, out var errorMessage))

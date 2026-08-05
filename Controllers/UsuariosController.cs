@@ -20,15 +20,15 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     public class UsuariosController : ControllerBase
     {
         private readonly VeiculandoDataContext _db;
-        private readonly ITenantContext _tenantContext;
+        private readonly ITenantQueries _tenant;
 
         /// <summary>Mesmo mínimo exigido no cadastro e no formulário do painel.</summary>
         private const int SenhaTamanhoMinimo = 8;
 
-        public UsuariosController(VeiculandoDataContext db, ITenantContext tenantContext)
+        public UsuariosController(VeiculandoDataContext db, ITenantQueries tenant)
         {
             _db = db;
-            _tenantContext = tenantContext;
+            _tenant = tenant;
         }
 
         /// <summary>
@@ -37,7 +37,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
             // `String.Split` não tem tradução para SQL: deixá-lo dentro do `Select`
             // faz o EF6 lançar NotSupportedException ao montar a query, e a listagem
@@ -46,9 +46,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // A projeção continua existindo (e não `ToListAsync()` na entidade) para
             // que SenhaHash e TokenRecuperacaoHash não sejam trazidos para memória.
             // O split acontece depois da materialização, já em LINQ to Objects.
-            var brutos = await _db.WlUsuariosAfiliada
+            var brutos = await _tenant.UsuariosAfiliada
                 .AsNoTracking()
-                .Where(u => u.AfiliadaId == afiliadaId && u.StatusExibicao == StatusExibicaoEnum.Ativo)
+                .Where(u => u.StatusExibicao == StatusExibicaoEnum.Ativo)
                 .Select(u => new
                 {
                     u.Id,
@@ -88,16 +88,15 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            var u = await _db.WlUsuariosAfiliada
+            var u = await _tenant.UsuariosAfiliada
                 .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == id && x.AfiliadaId == afiliadaId && x.StatusExibicao == StatusExibicaoEnum.Ativo);
+                .FirstOrDefaultAsync(x => x.Id == id && x.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (u == null)
                 return NotFound(new { message = "Usuário não encontrado." });
 
-            u.AssertTenantAccess(afiliadaId);
 
             return Ok(new WlUsuarioDto
             {
@@ -136,7 +135,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 return BadRequest(new { message = $"A senha precisa ter no mínimo {SenhaTamanhoMinimo} caracteres." });
             }
 
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
             var normalizedEmail = dto.Email.ToLower().Trim();
 
             // A checagem cobre TODOS os status, não só Ativo — inclusive operadores
@@ -154,8 +153,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // comportamento desejado: preserva a trilha de auditoria do registro
             // antigo e evita que um novo operador herde a identidade de um
             // desligado.
-            var emailExiste = await _db.WlUsuarios
-                .AnyAsync(u => u.Email.Endereco == normalizedEmail && u.AfiliadaId == afiliadaId);
+            var emailExiste = await _tenant.Usuarios
+                .AnyAsync(u => u.Email.Endereco == normalizedEmail);
 
             if (emailExiste)
                 return BadRequest(new { message = "Já existe um usuário cadastrado com este e-mail nesta instância." });
@@ -206,18 +205,17 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (dto == null)
                 return BadRequest(new { message = "Dados do usuário são obrigatórios." });
 
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
-            // Anti-IDOR: AfiliadaId filtrado diretamente na query SQL — não via
-            // AssertTenantAccess pós-materialização, que poderia vazar registros de
-            // outras afiliadas em mensagens de erro ou logs intermediários.
-            var usuario = await _db.WlUsuariosAfiliada
-                .FirstOrDefaultAsync(u => u.Id == id && u.AfiliadaId == afiliadaId && u.StatusExibicao == StatusExibicaoEnum.Ativo);
+            // O recorte por afiliada vem de ITenantQueries, aplicado na própria
+            // query: um id de outra exibidora simplesmente não existe aqui, e a
+            // resposta é 404 — 403 confirmaria a existência do registro.
+            var usuario = await _tenant.UsuariosAfiliada
+                .FirstOrDefaultAsync(u => u.Id == id && u.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (usuario == null)
                 return NotFound(new { message = "Usuário não encontrado." });
 
-            usuario.AssertTenantAccess(afiliadaId);
 
             if (dto.Permissoes != null && !WlPermissoesValidas.ValidarPermissoes(dto.Permissoes, out var invalidas))
             {
@@ -262,16 +260,15 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [EnableRateLimiting(Startup.RateLimitEscrita)]
         public async Task<IActionResult> Delete(int id)
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
             // Anti-IDOR: AfiliadaId filtrado diretamente na query SQL.
-            var usuario = await _db.WlUsuariosAfiliada
-                .FirstOrDefaultAsync(u => u.Id == id && u.AfiliadaId == afiliadaId && u.StatusExibicao == StatusExibicaoEnum.Ativo);
+            var usuario = await _tenant.UsuariosAfiliada
+                .FirstOrDefaultAsync(u => u.Id == id && u.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (usuario == null)
                 return NotFound(new { message = "Usuário não encontrado." });
 
-            usuario.AssertTenantAccess(afiliadaId);
 
             usuario.Deletar();
             await _db.SaveChangesAsync();

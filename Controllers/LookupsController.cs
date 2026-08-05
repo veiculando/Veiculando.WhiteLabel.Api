@@ -15,20 +15,20 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     public class LookupsController : ControllerBase
     {
         private readonly VeiculandoDataContext _db;
-        private readonly ITenantContext _tenantContext;
+        private readonly ITenantQueries _tenant;
 
-        public LookupsController(VeiculandoDataContext db, ITenantContext tenantContext)
+        public LookupsController(VeiculandoDataContext db, ITenantQueries tenant)
         {
             _db = db;
-            _tenantContext = tenantContext;
+            _tenant = tenant;
         }
 
         [HttpGet("cidades")]
         public async Task<IActionResult> GetCidades()
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
-            var cidades = await _db.Locais
-                .Where(l => l.IdAfiliada == afiliadaId && l.StatusExibicao == StatusExibicaoEnum.Ativo)
+            var afiliadaId = _tenant.AfiliadaId;
+            var cidades = await _tenant.Locais
+                .Where(l => l.StatusExibicao == StatusExibicaoEnum.Ativo)
                 .Select(l => new { l.Cidade.Id, l.Cidade.Nome, l.Cidade.Estado.Sigla })
                 .Distinct()
                 .ToListAsync();
@@ -39,8 +39,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet("formatos")]
         public async Task<IActionResult> GetFormatos()
         {
-            var formatos = await _db.Pecas
-                .Where(p => p.Local.IdAfiliada == _tenantContext.AfiliadaId && p.StatusExibicao == StatusExibicaoEnum.Ativo)
+            var formatos = await _tenant.Pecas
+                .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo)
                 .Select(p => new { p.Formato.Largura, p.Formato.Altura })
                 .Distinct()
                 .ToListAsync();

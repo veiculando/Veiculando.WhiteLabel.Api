@@ -17,16 +17,16 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     public class DashboardController : ControllerBase
     {
         private readonly VeiculandoDataContext _db;
-        private readonly ITenantContext _tenantContext;
+        private readonly ITenantQueries _tenant;
         private readonly ILocalRepository _localRepository;
 
         public DashboardController(
             VeiculandoDataContext db,
-            ITenantContext tenantContext,
+            ITenantQueries tenant,
             ILocalRepository localRepository)
         {
             _db = db;
-            _tenantContext = tenantContext;
+            _tenant = tenant;
             _localRepository = localRepository;
         }
 
@@ -36,21 +36,21 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet("kpis")]
         public async Task<IActionResult> GetKpis()
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
 
             // AsNoTracking: todas estas consultas são read-only; evita tracking
             // desnecessário no ChangeTracker do EF e reduz uso de memória.
-            var locaisAtivos = await _db.Locais
+            var locaisAtivos = await _tenant.Locais
                 .AsNoTracking()
-                .CountAsync(l => l.IdAfiliada == afiliadaId && l.StatusExibicao == StatusExibicaoEnum.Ativo);
+                .CountAsync(l => l.StatusExibicao == StatusExibicaoEnum.Ativo);
 
-            var pecasEmExibicao = await _db.Pecas
+            var pecasEmExibicao = await _tenant.Pecas
                 .AsNoTracking()
-                .CountAsync(p => p.Local.IdAfiliada == afiliadaId && p.StatusExibicao == StatusExibicaoEnum.Ativo);
+                .CountAsync(p => p.StatusExibicao == StatusExibicaoEnum.Ativo);
 
-            var pedidosPendentes = await _db.PedidosReserva
+            var pedidosPendentes = await _tenant.PedidosReserva
                 .AsNoTracking()
-                .CountAsync(pr => pr.IdAfiliada == afiliadaId && pr.Status == StatusPedidoReservaEnum.Solicitado);
+                .CountAsync(pr => pr.Status == StatusPedidoReservaEnum.Solicitado);
 
             // Reusa a contagem do core (TP-R2, Tarefa 7) em vez de duplicar a regra
             // aqui. Só foi possível depois de corrigir o método: a versão anterior

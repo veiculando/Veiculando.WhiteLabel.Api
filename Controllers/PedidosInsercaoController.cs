@@ -16,12 +16,12 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     public class PedidosInsercaoController : ControllerBase
     {
         private readonly VeiculandoDataContext _db;
-        private readonly ITenantContext _tenantContext;
+        private readonly ITenantQueries _tenant;
 
-        public PedidosInsercaoController(VeiculandoDataContext db, ITenantContext tenantContext)
+        public PedidosInsercaoController(VeiculandoDataContext db, ITenantQueries tenant)
         {
             _db = db;
-            _tenantContext = tenantContext;
+            _tenant = tenant;
         }
 
         /// <summary>
@@ -30,7 +30,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
             var fileServerUrl = Environment.GetEnvironmentVariable("FILE_SERVER_URL") ?? "https://fileserver.veiculando.com.br";
 
             // A interpolacao de string vira String.Format, que o EF6 nao traduz:
@@ -40,8 +40,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // Materializa as colunas reais primeiro e monta PdfUrl e Status depois,
             // ja em memoria. Mesma classe de defeito de Periodo.Nome em
             // LookupsController e ProgramacaoController.
-            var brutos = await _db.PedidosInsercao
-                .Where(pi => pi.IdAfiliada == afiliadaId && pi.StatusExibicao == StatusExibicaoEnum.Ativo)
+            var brutos = await _tenant.PedidosInsercao
+                .Where(pi => pi.StatusExibicao == StatusExibicaoEnum.Ativo)
                 .Select(pi => new
                 {
                     pi.Id,
@@ -77,23 +77,22 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet("{codigo}")]
         public async Task<IActionResult> GetByCodigo(string codigo)
         {
-            var afiliadaId = _tenantContext.AfiliadaId;
+            var afiliadaId = _tenant.AfiliadaId;
             var fileServerUrl = Environment.GetEnvironmentVariable("FILE_SERVER_URL") ?? "https://fileserver.veiculando.com.br";
 
             // Sem estes Includes `pi.Pedido` vem null (lazy loading desligado no
             // contexto do core) e `pi.Pedido.Campanha.Agencia?.Nome` abaixo estoura
             // NullReferenceException — o `?.` protege o último nível, não o
             // primeiro. Era 500 garantido em todo detalhe de PI.
-            var pi = await _db.PedidosInsercao
+            var pi = await _tenant.PedidosInsercao
                 .Include(p => p.Pedido.Campanha.Agencia)
                 .Include(p => p.Pedido.Campanha.Cliente)
                 .Include(p => p.Itens)
-                .FirstOrDefaultAsync(p => p.Codigo == codigo && p.IdAfiliada == afiliadaId && p.StatusExibicao == StatusExibicaoEnum.Ativo);
+                .FirstOrDefaultAsync(p => p.Codigo == codigo && p.StatusExibicao == StatusExibicaoEnum.Ativo);
 
             if (pi == null)
                 return NotFound(new { message = "Pedido de inserção não encontrado." });
 
-            pi.AssertTenantAccess(afiliadaId);
 
             return Ok(new
             {
