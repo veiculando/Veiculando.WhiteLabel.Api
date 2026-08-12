@@ -45,13 +45,17 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         /// <summary>Afiliada que esta instancia do BFF representa.</summary>
         public int AfiliadaId { get; }
 
+        public string Host { get; }
+
         /// <summary>Captura o que o BFF encaminhou ao core.</summary>
         public CoreApiStub Core { get; } = new();
 
-        public WlApiFactory(SqlServerFixture db, int afiliadaId)
+        public WlApiFactory(SqlServerFixture db, int afiliadaId, string? host = null)
         {
             _connectionString = db.ConnectionString;
             AfiliadaId = afiliadaId;
+            Host = host ?? $"afiliada-{afiliadaId}.teste";
+            Seed.DominioAsync(afiliadaId, Host, ativo: true).GetAwaiter().GetResult();
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -63,8 +67,6 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["ConnectionStrings:Veiculando"] = _connectionString,
-                    ["WL:AfiliadaId"] = AfiliadaId.ToString(),
-
                     // >= 32 caracteres: o AuthenticationSetup recusa subir abaixo
                     // disso, e essa validacao tambem esta sob teste.
                     ["JwtSettings:Secret"] = "segredo-de-teste-com-mais-de-32-caracteres-1234567890",
@@ -106,13 +108,22 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         {
             var token = await ObterTokenAsync(email, senha);
 
-            var client = CreateClient();
+            var client = CriarCliente();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
             return client;
         }
 
         /// <summary>Cliente sem autenticacao, para verificar 401.</summary>
-        public HttpClient ClienteAnonimo() => CreateClient();
+        public HttpClient ClienteAnonimo(string? host = null) => CriarCliente(host);
+
+        public Task<string> ObterTokenParaTesteAsync(string email, string senha) =>
+            ObterTokenAsync(email, senha);
+
+        private HttpClient CriarCliente(string? host = null) =>
+            CreateClient(new WebApplicationFactoryClientOptions
+            {
+                BaseAddress = new Uri($"https://{host ?? Host}")
+            });
 
         private async Task<string> ObterTokenAsync(string email, string senha)
         {
@@ -121,7 +132,7 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
             if (_tokens.TryGetValue(chave, out var cacheado))
                 return cacheado;
 
-            using var client = CreateClient();
+            using var client = CriarCliente();
             var resposta = await client.PostAsJsonAsync("/api/wl/auth/login", new { Email = email, Senha = senha });
 
             if (!resposta.IsSuccessStatusCode)
