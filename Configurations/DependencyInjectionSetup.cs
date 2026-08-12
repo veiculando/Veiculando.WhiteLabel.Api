@@ -59,6 +59,7 @@ namespace Veiculando.WhiteLabel.Api.Configurations
 
             // Tenant
             services.AddScoped<ITenantContext, TenantContext>();
+            services.AddScoped<IWlTenantResolver, WlTenantResolver>();
 
             // Superfície de consulta já recortada pela afiliada da instância.
             // Os controllers consultam por aqui em vez de tocar os DbSets crus: o
