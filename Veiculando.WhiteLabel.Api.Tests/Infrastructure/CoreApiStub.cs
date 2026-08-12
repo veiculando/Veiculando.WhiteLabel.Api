@@ -73,7 +73,7 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(
-                        $"{\"token\":\"token-de-servico-para-teste\",\"expires\":60,\"afiliadaId\":{AfiliadaId}}",
+                        $"{{\"token\":\"token-de-servico-para-teste\",\"expires\":60,\"afiliadaId\":{AfiliadaId}}}",
                         System.Text.Encoding.UTF8, "application/json")
                 };
             }
