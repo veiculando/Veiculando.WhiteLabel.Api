@@ -55,6 +55,7 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
             _connectionString = db.ConnectionString;
             AfiliadaId = afiliadaId;
             Host = host ?? $"afiliada-{afiliadaId}.teste";
+            Core.AfiliadaId = afiliadaId;
             Seed.DominioAsync(afiliadaId, Host, ativo: true).GetAwaiter().GetResult();
         }
 
@@ -79,8 +80,8 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                     // Conta de servico: o VeiculandoApiClient recusa autenticar sem
                     // ela. Os valores nao importam — quem responde e o CoreApiStub —
                     // mas a ausencia faz o cliente lancar antes de chegar na rede.
-                    ["SeedAccount:Email"] = "conta-servico@teste.local",
-                    ["SeedAccount:Password"] = "irrelevante-o-stub-responde",
+                    [$"SeedAccounts:{AfiliadaId}:Email"] = "conta-servico@teste.local",
+                    [$"SeedAccounts:{AfiliadaId}:Password"] = "irrelevante-o-stub-responde",
                 });
             });
 

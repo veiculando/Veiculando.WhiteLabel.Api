@@ -67,8 +67,9 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // escrevê-lo. Ver ITenantQueries.
             services.AddScoped<ITenantQueries, TenantQueries>();
 
-            // Configuração do Seed
-            services.Configure<SeedAccountOptions>(configuration.GetSection("SeedAccount"));
+            // Conta de servico resolvida por tenant. IConfiguration pode ser
+            // abastecida pelo Azure Key Vault; nenhum segredo e mantido no banco.
+            services.AddScoped<ISeedAccountResolver, SeedAccountResolver>();
             
             // Cache para o JWT do Seed
             services.AddMemoryCache();
