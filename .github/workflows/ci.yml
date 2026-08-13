@@ -1,0 +1,34 @@
+name: CI
+
+# Chamador dos workflows reutilizaveis mantidos em veiculando/.github.
+#
+# app-dir e core-dir sao irmaos por exigencia do csproj: os ProjectReference
+# apontam para ..\Veiculando\, entao o core precisa estar num diretorio com esse
+# nome exato ao lado deste repositorio.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - 'sprint-*'
+
+jobs:
+  dotnet:
+    uses: veiculando/.github/.github/workflows/_dotnet-ci.yml@main
+    with:
+      app-dir: Veiculando.WhiteLabel.Api
+      needs-core: true
+      core-dir: Veiculando
+      # Sem .sln no repositorio: o alvo precisa ser o PROJETO DE TESTE. Um alvo
+      # implicito alcancaria apenas o csproj da API, na raiz, e o projeto de
+      # teste chegaria ao dotnet test sem restore nem build.
+      project: Veiculando.WhiteLabel.Api.Tests/Veiculando.WhiteLabel.Api.Tests.csproj
+    secrets:
+      core-repo-token: ${{ secrets.CORE_REPO_TOKEN }}
+
+  security:
+    uses: veiculando/.github/.github/workflows/_security-ci.yml@main
+    with:
+      # Repositorio publico: dependency review e gratuito.
+      dependency-review: true

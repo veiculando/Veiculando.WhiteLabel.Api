@@ -1,0 +1,31 @@
+# Ref fixada do repositorio veiculando/Veiculando (core) usada para compilar
+# este BFF.
+#
+# Por que existe: o csproj deste repositorio referencia cinco projetos do core
+# por caminho relativo. Sem um pin, o CI compilaria contra o que estivesse na
+# ponta de um branch movel e o mesmo commit deste repo produziria binarios
+# diferentes conforme o dia. O pin torna o build reproduzivel e transforma
+# "subir a versao do core" numa mudanca revisavel em PR.
+#
+# Formato: um SHA completo de 40 caracteres hex na primeira linha nao comentada.
+# SHA abreviado ou nome de branch e rejeitado pelo workflow de proposito.
+#
+# Para atualizar: troque o SHA, rode o CI e abra PR. Se os 57 testes do BFF
+# passarem com o core novo, o bump esta validado.
+#
+# ---------------------------------------------------------------------------
+# SHA atual: ponta de sprint-9.0 no core em 2026-08-12.
+#
+# O QUE ESTE SHA **NAO** CONTEM: o PR #81 do core (fundacao multi-tenant por
+# Host - entidade WlDominio, tabela WL_Configuracao, migration
+# 202608111630000_AddWlDominioConfiguracao) esta ABERTO, nao integrado. Esse
+# codigo existe apenas no head do proprio PR.
+#
+# Consequencia pratica: enquanto o card de fundacao multi-tenant nao avancar,
+# este BFF nao consegue resolver tenant por Host nem ler branding do banco -
+# esses tipos nao existem no core que ele compila. Assim que o PR #81 for
+# integrado a sprint-9.0, atualize este pin para a nova ponta; caso contrario o
+# CI seguira verde compilando contra um core que nao tem a fundacao, e o gate
+# perde o sentido.
+# ---------------------------------------------------------------------------
+881eceedf9f39f22c628ed04ef11298b6980486d
