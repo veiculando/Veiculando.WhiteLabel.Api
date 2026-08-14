@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Entities.WhiteLabel;
+using Veiculando.Domain.Enums;
 using BC = BCrypt.Net.BCrypt;
 
 namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
@@ -20,6 +21,44 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
     {
         /// <summary>Senha usada por todos os operadores de teste.</summary>
         public const string SenhaPadrao = "SenhaDeTeste123";
+
+        public static async Task DominioAsync(int afiliadaId, string host, bool ativo)
+        {
+            await AfiliadaAsync(afiliadaId);
+            using var ctx = new VeiculandoDataContext();
+            if (await ctx.WlDominios.AnyAsync(x => x.Host == host)) return;
+
+            var dominio = new WlDominio(host, afiliadaId, WlDominioTipoEnum.Painel);
+            if (ativo)
+            {
+                dominio.MarcarVerificado();
+                dominio.Ativar();
+            }
+
+            ctx.WlDominios.Add(dominio);
+            await ctx.SaveChangesAsync();
+        }
+
+        public static async Task BrandingAsync(
+            int afiliadaId, string nomeExibicao, string logoUrl, string primaryColor)
+        {
+            await AfiliadaAsync(afiliadaId);
+            using var ctx = new VeiculandoDataContext();
+            if (await ctx.WlConfiguracoes.AnyAsync(x => x.AfiliadaId == afiliadaId)) return;
+
+            ctx.WlConfiguracoes.Add(new WlConfiguracao(
+                afiliadaId,
+                nomeExibicao,
+                logoUrl,
+                null,
+                primaryColor,
+                null,
+                null,
+                null,
+                null,
+                null));
+            await ctx.SaveChangesAsync();
+        }
 
         /// <summary>
         /// Cria um operador da exibidora e devolve o id.

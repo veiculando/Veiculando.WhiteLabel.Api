@@ -1,6 +1,7 @@
-using System;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Veiculando.WhiteLabel.Api.Middleware;
 
 namespace Veiculando.WhiteLabel.Api.Controllers
 {
@@ -22,15 +23,23 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     [AllowAnonymous]
     public class ConfigController : ControllerBase
     {
-        [HttpGet("branding")]
-        public IActionResult GetBranding()
+        private readonly ITenantContext _tenant;
+        private readonly IWlTenantResolver _resolver;
+
+        public ConfigController(ITenantContext tenant, IWlTenantResolver resolver)
         {
-            var branding = Environment.GetEnvironmentVariable("WL_BRANDING_JSON");
-            if (string.IsNullOrEmpty(branding))
-            {
-                return Ok(new { primaryColor = "#000000", logoUrl = "" });
-            }
-            return Content(branding, "application/json");
+            _tenant = tenant;
+            _resolver = resolver;
+        }
+
+        [HttpGet("branding")]
+        public async Task<IActionResult> GetBranding()
+        {
+            var branding = await _resolver.ObterBrandingAsync(_tenant.AfiliadaId);
+            if (branding == null)
+                return StatusCode(503, new { message = "Branding WhiteLabel não configurado." });
+
+            return Ok(branding);
         }
     }
 }
