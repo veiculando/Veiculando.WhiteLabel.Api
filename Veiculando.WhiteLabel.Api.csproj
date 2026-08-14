@@ -20,10 +20,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Veiculando\Veiculando.Data\Veiculando.Data.csproj" />
-    <ProjectReference Include="..\Veiculando\Veiculando.Infra.IoC\Veiculando.Infra.IoC.csproj" />
     <ProjectReference Include="..\Veiculando\Veiculando.Infra.Security\Veiculando.Infra.Security.csproj" />
     <ProjectReference Include="..\Veiculando\Veiculando.Infra\Veiculando.Infra.csproj" />
-    <ProjectReference Include="..\Veiculando\Veiculando.WhiteLabel.Domain\Veiculando.WhiteLabel.Domain.csproj" />
   </ItemGroup>
 
 </Project>
