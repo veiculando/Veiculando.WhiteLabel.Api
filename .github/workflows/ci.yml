@@ -30,5 +30,6 @@ jobs:
   security:
     uses: veiculando/.github/.github/workflows/_security-ci.yml@main
     with:
-      # Repositorio publico: dependency review e gratuito.
-      dependency-review: true
+      # Repositorio privado no GitHub Free: dependency-review-action exige
+      # licenca paga. Vulnerabilidades continuam cobertas pela auditoria .NET.
+      dependency-review: false
