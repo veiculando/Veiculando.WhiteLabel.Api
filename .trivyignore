@@ -1,0 +1,12 @@
+# Baseline observada com Trivy 0.74.0 em 2026-08-20.
+# Escopo: imagem veiculando-whitelabel-api. Nada novo High/Critical pode entrar.
+# Responsavel: time Veiculando. Revisar/remover ate 2026-12-31.
+
+# MetadataExtractor 2.0.0; corrigido em 2.2.0.
+CVE-2019-14262
+
+# System.Data.SqlClient 4.8.0; corrigido em 4.8.6.
+CVE-2024-0056
+
+# System.Drawing.Common 4.7.0; corrigido em 4.7.2/5.0.3.
+CVE-2021-24112
