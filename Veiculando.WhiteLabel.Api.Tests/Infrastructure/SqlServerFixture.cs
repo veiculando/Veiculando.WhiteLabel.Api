@@ -110,7 +110,11 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         {
             const string indices = @"
 CREATE UNIQUE INDEX [UK_WlUsuario_Email_Afiliada]
-    ON [dbo].[WL_Usuario] ([Email], [AfiliadaId]);";
+    ON [dbo].[WL_Usuario] ([Email], [AfiliadaId]);
+CREATE UNIQUE INDEX [UK_WlDominio_Host]
+    ON [dbo].[WlDominio] ([Host]);
+CREATE UNIQUE INDEX [UK_WlConfiguracao_AfiliadaId]
+    ON [dbo].[WL_Configuracao] ([AfiliadaId]);";
 
             await ExecutarAsync(ConnectionString, indices);
         }

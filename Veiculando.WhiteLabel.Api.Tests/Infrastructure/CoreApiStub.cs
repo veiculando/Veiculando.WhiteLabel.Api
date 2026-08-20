@@ -31,6 +31,9 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         /// <summary>Requisicoes que o BFF enviou ao core, na ordem.</summary>
         public IReadOnlyList<RequisicaoCapturada> Requisicoes => _requisicoes;
 
+        /// <summary>Afiliada que a conta de servico simulada representa.</summary>
+        public int AfiliadaId { get; set; }
+
         /// <summary>
         /// Resposta a devolver para as chamadas de negocio. Trocavel pelo teste
         /// para exercitar o caminho de erro — o BFF repassa corpo e status do core
@@ -70,7 +73,7 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(
-                        "{\"token\":\"token-de-servico-para-teste\",\"expires\":60}",
+                        $"{{\"token\":\"token-de-servico-para-teste\",\"expires\":60,\"afiliadaId\":{AfiliadaId}}}",
                         System.Text.Encoding.UTF8, "application/json")
                 };
             }

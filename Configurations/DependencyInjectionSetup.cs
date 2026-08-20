@@ -59,6 +59,7 @@ namespace Veiculando.WhiteLabel.Api.Configurations
 
             // Tenant
             services.AddScoped<ITenantContext, TenantContext>();
+            services.AddScoped<IWlTenantResolver, WlTenantResolver>();
 
             // Superfície de consulta já recortada pela afiliada da instância.
             // Os controllers consultam por aqui em vez de tocar os DbSets crus: o
@@ -66,8 +67,9 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // escrevê-lo. Ver ITenantQueries.
             services.AddScoped<ITenantQueries, TenantQueries>();
 
-            // Configuração do Seed
-            services.Configure<SeedAccountOptions>(configuration.GetSection("SeedAccount"));
+            // Conta de servico resolvida por tenant. IConfiguration pode ser
+            // abastecida pelo Azure Key Vault; nenhum segredo e mantido no banco.
+            services.AddScoped<ISeedAccountResolver, SeedAccountResolver>();
             
             // Cache para o JWT do Seed
             services.AddMemoryCache();

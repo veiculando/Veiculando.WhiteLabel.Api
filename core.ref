@@ -14,18 +14,11 @@
 # passarem com o core novo, o bump esta validado.
 #
 # ---------------------------------------------------------------------------
-# SHA atual: ponta de sprint-9.0 no core em 2026-08-12.
+# SHA atual: head validado do PR #81 do core (TP-HOST).
 #
-# O QUE ESTE SHA **NAO** CONTEM: o PR #81 do core (fundacao multi-tenant por
-# Host - entidade WlDominio, tabela WL_Configuracao, migration
-# 202608111630000_AddWlDominioConfiguracao) esta ABERTO, nao integrado. Esse
-# codigo existe apenas no head do proprio PR.
-#
-# Consequencia pratica: enquanto o card de fundacao multi-tenant nao avancar,
-# este BFF nao consegue resolver tenant por Host nem ler branding do banco -
-# esses tipos nao existem no core que ele compila. Assim que o PR #81 for
-# integrado a sprint-9.0, atualize este pin para a nova ponta; caso contrario o
-# CI seguira verde compilando contra um core que nao tem a fundacao, e o gate
-# perde o sentido.
+# Este pin contem WlDominio, WlDominioTipoEnum, WL_Configuracao e a migration
+# 202608111630000_AddWlDominioConfiguracao exigidos pela resolucao por Host.
+# O SHA continua valido e reproduzivel depois que o PR for integrado; um bump
+# posterior para a ponta da sprint deve passar novamente pelo CI deste BFF.
 # ---------------------------------------------------------------------------
-881eceedf9f39f22c628ed04ef11298b6980486d
+c5bf4680a3fedb012bc2a659fc3fea303703b53e

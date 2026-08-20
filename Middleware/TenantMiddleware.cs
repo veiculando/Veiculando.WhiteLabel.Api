@@ -1,6 +1,6 @@
+using System;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Veiculando.WhiteLabel.Api.Middleware
@@ -16,30 +16,29 @@ namespace Veiculando.WhiteLabel.Api.Middleware
             _logger = logger;
         }
 
-        public async Task InvokeAsync(HttpContext context, ITenantContext tenantContext, IConfiguration configuration)
+        public async Task InvokeAsync(
+            HttpContext context,
+            ITenantContext tenantContext,
+            IWlTenantResolver resolver)
         {
-            // Resolve o AfiliadaId da instância (via environment variable ou appsettings)
-            var configAfiliadaId = configuration.GetValue<int>("WL:AfiliadaId");
-            
-            if (configAfiliadaId == 0)
+            WlTenantInfo tenant;
+            try
             {
-                _logger.LogWarning("WL:AfiliadaId não configurado corretamente neste ambiente.");
+                tenant = await resolver.ResolverAsync(context.Request.Host.Value);
+            }
+            catch (ArgumentException)
+            {
+                tenant = null;
             }
 
-            // Lê o header enviado pelo frontend
-            var headerValue = context.Request.Headers["X-Tenant-AfiliadaId"].ToString();
-            
-            if (int.TryParse(headerValue, out var headerAfiliadaId))
+            if (tenant == null)
             {
-                if (headerAfiliadaId != configAfiliadaId)
-                {
-                    _logger.LogWarning($"Divergência de Tenant detectada. Header enviou {headerAfiliadaId}, mas a instância está configurada para {configAfiliadaId}. Forçando valor da instância.");
-                }
+                _logger.LogWarning("Host WhiteLabel desconhecido ou inativo: {Host}", context.Request.Host.Host);
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
             }
 
-            // O servidor sempre é a fonte de verdade para a instância WhiteLabel (ADR-WL-005)
-            tenantContext.SetAfiliadaId(configAfiliadaId);
-
+            tenantContext.Definir(tenant);
             await _next(context);
         }
     }

@@ -5,9 +5,11 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.HttpsPolicy;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using System.Net;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -26,11 +28,6 @@ namespace Veiculando.WhiteLabel.Api
 
         public IConfiguration Configuration { get; }
 
-        /// <summary>
-        /// Nome da política de CORS aplicada aos frontends WhiteLabel.
-        /// </summary>
-        private const string CorsFrontendsWl = "FrontendsWl";
-
         /// <summary>Policies de rate limit, referenciadas pelos controllers.</summary>
         public const string RateLimitLogin = "wl-login";
         public const string RateLimitEscrita = "wl-escrita";
@@ -41,23 +38,20 @@ namespace Veiculando.WhiteLabel.Api
             services.AddJwtLocalAuthentication(Configuration);
             services.AddDependencyInjectionSetup(Configuration);
 
-            // Os dois frontends WhiteLabel são CSR (ADR-WL-006): o browser chama o
-            // BFF cross-origin diretamente. Sem CORS o preflight falha e NENHUMA
-            // tela carrega dados — só o Swagger, que é same-origin, funcionaria.
-            // As origens vêm de `WL:AllowedOrigins` para cada instância declarar
-            // o próprio domínio; `AllowAnyOrigin` não serviria porque o
-            // `Authorization` exige credenciais explicitamente permitidas.
-            var origensPermitidas = Configuration.GetSection("WL:AllowedOrigins").Get<string[]>()
-                                    ?? new string[0];
-
-            services.AddCors(options =>
+            services.Configure<ForwardedHeadersOptions>(options =>
             {
-                options.AddPolicy(CorsFrontendsWl, policy =>
+                options.ForwardedHeaders =
+                    ForwardedHeaders.XForwardedFor |
+                    ForwardedHeaders.XForwardedProto |
+                    ForwardedHeaders.XForwardedHost;
+
+                var proxies = Configuration.GetSection("ReverseProxy:KnownProxies").Get<string[]>()
+                              ?? Array.Empty<string>();
+                foreach (var proxy in proxies)
                 {
-                    policy.WithOrigins(origensPermitidas)
-                          .AllowAnyHeader()
-                          .AllowAnyMethod();
-                });
+                    if (IPAddress.TryParse(proxy, out var address))
+                        options.KnownProxies.Add(address);
+                }
             });
 
             // Autorização granular por permissão (TP-R2, blocker B3).
@@ -116,15 +110,10 @@ namespace Veiculando.WhiteLabel.Api
                 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Veiculando.WhiteLabel.Api v1"));
             }
 
+            app.UseForwardedHeaders();
             app.UseHttpsRedirection();
 
             app.UseRouting();
-
-            // Depois de UseRouting e antes de UseAuthentication/UseAuthorization,
-            // como exige a ordem documentada do pipeline: o preflight OPTIONS não
-            // carrega Authorization e precisa ser respondido antes de qualquer
-            // checagem de autenticação.
-            app.UseCors(CorsFrontendsWl);
 
             app.UseMiddleware<Veiculando.WhiteLabel.Api.Middleware.TenantMiddleware>();
 
@@ -133,8 +122,8 @@ namespace Veiculando.WhiteLabel.Api
             app.UseRateLimiter();
 
             app.UseAuthentication();
+            app.UseMiddleware<Veiculando.WhiteLabel.Api.Middleware.TenantBindingMiddleware>();
             app.UseAuthorization();
-
 
             app.UseEndpoints(endpoints =>
             {
