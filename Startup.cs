@@ -37,6 +37,7 @@ namespace Veiculando.WhiteLabel.Api
         {
             services.AddJwtLocalAuthentication(Configuration);
             services.AddDependencyInjectionSetup(Configuration);
+            services.AddHealthChecks();
 
             services.Configure<ForwardedHeadersOptions>(options =>
             {
@@ -111,6 +112,7 @@ namespace Veiculando.WhiteLabel.Api
             }
 
             app.UseForwardedHeaders();
+            app.UseHealthChecks("/health");
             app.UseHttpsRedirection();
 
             app.UseRouting();
