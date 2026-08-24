@@ -36,9 +36,8 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // Fonte Injector
             services.AddScoped<IFonteInjector, FonteInjector>();
 
-            // MediatR (referenciando os assemblies de Domain)
-            services.AddMediatR(typeof(Veiculando.Domain.Entities.EntityBase));
-            // services.AddMediatR(typeof(Veiculando.WhiteLabel.Domain.ValueObjects.SomeStub)); // Ajustar para classe base WL se houver
+            // MediatR (referenciando os assemblies de Domain) — API 12.x: RegisterServicesFromAssembly
+            services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(Veiculando.Domain.Entities.EntityBase).Assembly));
         }
     }
 }

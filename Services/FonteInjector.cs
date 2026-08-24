@@ -26,7 +26,11 @@ namespace Veiculando.WhiteLabel.Api.Services
             // Como este proxy é WhiteLabel, a fonte da agência equivale ao ID da Afiliada do WL
             var agenciaId = _tenantContext.AfiliadaId;
 
-            entity.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, agenciaId, null);
+            // IOrigemRastreavel só expõe os getters (contrato de leitura). RegistrarOrigem é
+            // implementado individualmente por cada entidade rastreável do Core (Local, Peca,
+            // Campanha, ArteFinal, Pedido) com assinatura idêntica, mas não está na interface —
+            // despacho dinâmico evita alterar o contrato do Core a partir do BFF.
+            ((dynamic)entity).RegistrarOrigem(FonteOrigemEnum.WhiteLabel, agenciaId, null);
         }
     }
 }
