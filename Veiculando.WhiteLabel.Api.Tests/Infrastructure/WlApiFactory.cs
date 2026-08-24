@@ -50,6 +50,9 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         /// <summary>Captura o que o BFF encaminhou ao core.</summary>
         public CoreApiStub Core { get; } = new();
 
+        /// <summary>Dublê de e-mail — captura o que seria enviado pela recuperação de senha.</summary>
+        public FakeWlPasswordEmailSender EmailSender { get; } = new();
+
         public WlApiFactory(SqlServerFixture db, int afiliadaId, string? host = null)
         {
             _connectionString = db.ConnectionString;
@@ -99,6 +102,11 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                         client.BaseAddress = new Uri("http://core.invalido/");
                     })
                     .ConfigurePrimaryHttpMessageHandler(() => Core);
+
+                // Substitui o transporte real de e-mail (SendGrid) pelo dublê: os
+                // testes de recuperação de senha não devem depender de rede nem
+                // de uma API key de verdade.
+                services.AddSingleton<IWlPasswordEmailSender>(EmailSender);
             });
         }
 

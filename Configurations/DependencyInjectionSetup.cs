@@ -70,9 +70,20 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // Conta de servico resolvida por tenant. IConfiguration pode ser
             // abastecida pelo Azure Key Vault; nenhum segredo e mantido no banco.
             services.AddScoped<ISeedAccountResolver, SeedAccountResolver>();
-            
+
             // Cache para o JWT do Seed
             services.AddMemoryCache();
+
+            // Recuperação de senha: API key e remetente do SendGrid vêm de
+            // Key Vault/environment (WlPasswordEmail__SendGridApiKey,
+            // WlPasswordEmail__FromEmail) — nunca do appsettings versionado.
+            services.Configure<Services.WlPasswordEmailOptions>(configuration.GetSection("WlPasswordEmail"));
+            services.AddScoped<Services.IWlPasswordEmailSender, Services.SendGridWlPasswordEmailSender>();
+
+            // Segunda camada de limite do esqueci-senha, por hash do e-mail e
+            // independente de IP (ver PasswordResetAttemptGuard). Singleton: o
+            // estado é o próprio IMemoryCache, compartilhado entre requisições.
+            services.AddSingleton<IPasswordResetAttemptGuard, PasswordResetAttemptGuard>();
 
             // Client HTTP para o Core
             var coreApiUrl = configuration.GetValue<string>("CoreApiUrl") ?? "https://localhost:44321/";

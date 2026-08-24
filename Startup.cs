@@ -31,6 +31,7 @@ namespace Veiculando.WhiteLabel.Api
         /// <summary>Policies de rate limit, referenciadas pelos controllers.</summary>
         public const string RateLimitLogin = "wl-login";
         public const string RateLimitEscrita = "wl-escrita";
+        public const string RateLimitRecuperacaoSenha = "wl-recuperacao-senha";
 
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
@@ -76,6 +77,14 @@ namespace Veiculando.WhiteLabel.Api
                 // Escrita autenticada: protege contra automação abusiva sem
                 // atrapalhar o uso normal do painel.
                 options.AddPolicy(RateLimitEscrita, ParticionarPorIp(limite: 60));
+
+                // Esqueci-senha/alterar-senha: particionado por Host+IP (e não só
+                // IP) porque cada instância WL é um Host distinto atrás do mesmo
+                // BFF — um limite só por IP misturaria o consumo de tenants
+                // diferentes atrás do mesmo proxy/CDN. É a primeira camada; a
+                // segunda, por hash do e-mail e independente de IP, vive em
+                // IPasswordResetAttemptGuard.
+                options.AddPolicy(RateLimitRecuperacaoSenha, ParticionarPorHostEIp(limite: 5));
             });
 
             services.AddControllers();
@@ -98,6 +107,27 @@ namespace Veiculando.WhiteLabel.Api
                     Window = TimeSpan.FromMinutes(1),
                     QueueLimit = 0 // excedeu, recusa na hora: enfileirar só adiaria o 429
                 });
+        }
+
+        /// <summary>
+        /// Janela fixa de 1 minuto, particionada por Host + IP de origem.
+        /// </summary>
+        private static Func<HttpContext, RateLimitPartition<string>> ParticionarPorHostEIp(int limite)
+        {
+            return contexto =>
+            {
+                var host = contexto.Request.Host.Host ?? "desconhecido";
+                var ip = contexto.Connection.RemoteIpAddress?.ToString() ?? "desconhecido";
+
+                return RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: $"{host}|{ip}",
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = limite,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0
+                    });
+            };
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
