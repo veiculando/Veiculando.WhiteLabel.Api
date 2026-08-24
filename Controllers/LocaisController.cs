@@ -207,6 +207,83 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             });
         }
 
+        [HttpGet("{id}/publico")]
+        public async Task<IActionResult> GetPublico(int id)
+        {
+            var local = await _tenant.Locais
+                .AsNoTracking()
+                .Include(l => l.Publico.DistribuicaoGenero)
+                .Include(l => l.Publico.DistribuicaoEtaria)
+                .Include(l => l.Publico.DistribuicaoRenda)
+                .Include(l => l.Publico.PerfisPsicograficos)
+                .Include(l => l.Publico.Segmentos)
+                .Include(l => l.Publico.PoiCategorias)
+                .FirstOrDefaultAsync(l => l.Id == id
+                                       && (l.StatusExibicao == StatusExibicaoEnum.Ativo
+                                        || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
+
+            if (local == null)
+                return NotFound(new { message = "Local não encontrado." });
+
+            var publico = local.Publico;
+            var generoPredominante = publico?.DistribuicaoGenero
+                .OrderByDescending(g => g.Porcentegem)
+                .FirstOrDefault();
+
+            return Ok(new
+            {
+                Audiencia = publico == null ? (int?)null : publico.Audiencia,
+                TipoMedicao = publico == null ? (int?)null : publico.TipoMedicao,
+                Fonte = publico?.Fonte,
+                Genero = generoPredominante != null && generoPredominante.Porcentegem > 50
+                    ? (int)generoPredominante.Genero
+                    : 0,
+                FaixaEtaria = publico?.DistribuicaoEtaria.Select(x => x.IdFaixaEtaria).ToArray()
+                    ?? Array.Empty<int>(),
+                FaixaRenda = publico?.DistribuicaoRenda.Select(x => x.IdFaixaRenda).ToArray()
+                    ?? Array.Empty<int>(),
+                PerfisPsicograficos = publico?.PerfisPsicograficos.Select(x => x.IdPerfilPsicografico).ToArray()
+                    ?? Array.Empty<int>(),
+                Segmentos = publico?.Segmentos.Select(x => x.IdSegmento).ToArray()
+                    ?? Array.Empty<int>(),
+                PoiCategorias = publico?.PoiCategorias.Select(x => x.IdPoiCategoria).ToArray()
+                    ?? Array.Empty<int>()
+            });
+        }
+
+        [HttpPut("{id}/publico")]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public async Task<IActionResult> PutPublico(int id, [FromBody] LocalPublicoRequest request)
+        {
+            if (request == null)
+                return BadRequest(new { message = "Dados demográficos são obrigatórios." });
+
+            var localExiste = await _tenant.Locais.AnyAsync(l => l.Id == id
+                && (l.StatusExibicao == StatusExibicaoEnum.Ativo
+                 || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
+
+            if (!localExiste)
+                return NotFound(new { message = "Local não encontrado." });
+
+            var command = new LocalPublicoCadastroCommand
+            {
+                IdLocal = id,
+                Audiencia = request.Audiencia ?? 0,
+                TipoMedicao = request.TipoMedicao ?? 0,
+                Fonte = request.Fonte,
+                Genero = request.Genero,
+                FaixaEtaria = request.FaixaEtaria ?? Array.Empty<int>(),
+                FaixaRenda = request.FaixaRenda ?? Array.Empty<int>(),
+                PerfisPsicograficos = request.PerfisPsicograficos ?? Array.Empty<int>(),
+                Segmentos = request.Segmentos ?? Array.Empty<int>(),
+                PoiCategorias = request.PoiCategorias ?? Array.Empty<int>()
+            };
+
+            var resposta = await _coreCadastro.SalvarPublicoAsync(command);
+            return RepassarResposta(resposta);
+        }
+
         [HttpDelete("{id}")]
         [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
         [EnableRateLimiting(Startup.RateLimitEscrita)]
@@ -226,6 +303,19 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             return NoContent();
         }
+    }
+
+    public sealed class LocalPublicoRequest
+    {
+        public int? Audiencia { get; set; }
+        public int? TipoMedicao { get; set; }
+        public string Fonte { get; set; }
+        public int Genero { get; set; }
+        public int[] FaixaEtaria { get; set; }
+        public int[] FaixaRenda { get; set; }
+        public int[] PerfisPsicograficos { get; set; }
+        public int[] Segmentos { get; set; }
+        public int[] PoiCategorias { get; set; }
     }
 
     [ApiController]
@@ -331,9 +421,17 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         {
             var afiliadaId = _tenant.AfiliadaId;
 
-            var pecas = await _tenant.Pecas
+            // Formato e um complex type do EF6. Comparar `p.Formato != null`
+            // dentro do Select SQL lanca NotSupportedException; materializamos
+            // primeiro e so entao montamos a projecao enxuta da listagem.
+            var entidades = await _tenant.Pecas
                 .AsNoTracking()
-                .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo)
+                .Include(p => p.Local)
+                .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo
+                         || p.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente)
+                .ToListAsync();
+
+            var pecas = entidades
                 .Select(p => new
                 {
                     p.Id,
@@ -342,9 +440,10 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     LocalCodigo = p.Local.Codigo,
                     FormatoDimensao = p.Formato != null ? p.Formato.ToString() : null,
                     p.ValorPadrao,
-                    p.FonteOrigem
+                    p.FonteOrigem,
+                    p.StatusExibicao
                 })
-                .ToListAsync();
+                .ToList();
 
             return Ok(pecas);
         }
@@ -362,7 +461,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var peca = await _tenant.Pecas
                 .AsNoTracking()
                 .Include(p => p.Local)
-                .FirstOrDefaultAsync(p => p.Id == id && p.StatusExibicao == StatusExibicaoEnum.Ativo);
+                .Include(p => p.Suporte)
+                .Include(p => p.Substratos.Select(s => s.SubstratoTipo))
+                .FirstOrDefaultAsync(p => p.Id == id
+                                       && (p.StatusExibicao == StatusExibicaoEnum.Ativo
+                                        || p.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
 
             if (peca == null)
                 return NotFound(new { message = "Peça não encontrada." });
@@ -372,10 +475,47 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             {
                 peca.Id,
                 peca.Codigo,
+                peca.CodigoInterno,
                 peca.IdLocal,
                 LocalCodigo = peca.Local.Codigo,
+                peca.IdTipoSuporte,
+                TipoSuporte = peca.Suporte?.Nome,
+                IdFormato = peca.IdFormatoArteFinal,
                 FormatoDimensao = peca.Formato != null ? peca.Formato.ToString() : null,
+                Formato = peca.Formato == null ? null : new
+                {
+                    peca.Formato.Largura,
+                    peca.Formato.Altura,
+                    peca.Formato.Juncao
+                },
+                EspecificacaoProducao = peca.EspecificacaoProducao == null ? null : new
+                {
+                    peca.EspecificacaoProducao.Largura,
+                    peca.EspecificacaoProducao.Altura,
+                    peca.EspecificacaoProducao.Material,
+                    peca.EspecificacaoProducao.Especificacao
+                },
+                PeriodicidadePadrao = peca.PeriodicidadePadrao == null
+                    ? 0
+                    : (int)peca.PeriodicidadePadrao.Tipo,
                 peca.ValorPadrao,
+                IdsSubstratoTipo = peca.Substratos.Select(s => s.IdSubstratoTipo).ToArray(),
+                peca.Iluminacao,
+                peca.Semaforo,
+                peca.AnguloDeVisao,
+                Via = peca.Via == null ? null : new
+                {
+                    peca.Via.ViaTipo,
+                    peca.Via.Faixas,
+                    peca.Via.Velociade,
+                    peca.Via.Pedestre
+                },
+                peca.RoteiroComercial,
+                peca.Alvara,
+                StreetView = peca.StreetView?.Url,
+                peca.Descricao,
+                peca.Restricao,
+                peca.StatusExibicao,
                 peca.FonteOrigem
             });
         }

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Veiculando.WhiteLabel.Api.Tests.Infrastructure;
@@ -81,6 +82,41 @@ namespace Veiculando.WhiteLabel.Api.Tests
             var peca = await resposta.Content.ReadFromJsonAsync<PecaDto>();
             peca!.LocalCodigo.Should().Be("LOC7201",
                 "o codigo do local vem da navegacao que precisa ter sido carregada");
+            peca.CodigoInterno.Should().Be("INT-PEC7201");
+            peca.IdTipoSuporte.Should().Be(1);
+            peca.Formato.Should().BeEquivalentTo(new PecaFormatoDto(9, 3, 0));
+            peca.Via.Should().BeEquivalentTo(new PecaViaDto(0, 2, 60, 0));
+            peca.PeriodicidadePadrao.Should().Be(0);
+            peca.IdsSubstratoTipo.Should().NotBeNull();
+        }
+
+        /// <summary>
+        /// Pecas criadas pela Exibidora nascem aguardando aprovacao. Se a lista e
+        /// o detalhe aceitarem apenas Ativo, o registro desaparece logo depois do
+        /// cadastro e nao pode ser revisado nem editado pelo operador.
+        /// </summary>
+        [Fact]
+        public async Task Peca_pendente_aparece_na_lista_e_pode_ser_aberta_para_edicao()
+        {
+            const int afiliada = 7204;
+            var email = "peca-pendente@exemplo.com";
+
+            await Seed.OperadorAsync(afiliada, email, new[] { "PecaGerenciar" });
+            var localId = await Seed.LocalAsync(afiliada, "LOC7204");
+            var pecaId = await Seed.PecaAsync(
+                localId,
+                "PEC7204",
+                Seed.StatusExibicaoLocal.AprovacaoPendente);
+
+            using var factory = new WlApiFactory(_db, afiliada);
+            using var client = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
+
+            var lista = await client.GetFromJsonAsync<PecaDto[]>("/api/wl/pecas");
+            lista.Should().ContainSingle(p => p.Id == pecaId)
+                .Which.StatusExibicao.Should().Be(2);
+
+            var detalhe = await client.GetAsync($"/api/wl/pecas/{pecaId}");
+            detalhe.StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
         /// <summary>
@@ -107,6 +143,49 @@ namespace Veiculando.WhiteLabel.Api.Tests
             var local = await resposta.Content.ReadFromJsonAsync<LocalDetalheDto>();
             local!.Cidade.Should().NotBeNullOrEmpty("sem Include(l => l.Cidade.Estado) vinha null");
             local.UF.Should().Be("SP");
+        }
+
+        [Fact]
+        public async Task Demografia_de_local_tem_endpoints_reais_e_arrays_nunca_nulos()
+        {
+            const int afiliada = 7205;
+            var email = "demografia@exemplo.com";
+
+            await Seed.OperadorAsync(afiliada, email, new[] { "PecaGerenciar" });
+            var localId = await Seed.LocalAsync(afiliada, "LOC7205");
+
+            using var factory = new WlApiFactory(_db, afiliada);
+            using var client = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
+
+            var vazio = await client.GetFromJsonAsync<LocalPublicoDto>($"/api/wl/locais/{localId}/publico");
+            vazio!.Audiencia.Should().BeNull();
+            vazio.FaixaEtaria.Should().BeEmpty();
+            vazio.FaixaRenda.Should().BeEmpty();
+            vazio.PerfisPsicograficos.Should().BeEmpty();
+            vazio.Segmentos.Should().BeEmpty();
+            vazio.PoiCategorias.Should().BeEmpty();
+
+            var resposta = await client.PutAsJsonAsync($"/api/wl/locais/{localId}/publico", new
+            {
+                Audiencia = (int?)null,
+                TipoMedicao = (int?)null,
+                Fonte = (string)null,
+                Genero = 0,
+                FaixaEtaria = new[] { 1, 2 },
+                FaixaRenda = System.Array.Empty<int>(),
+                PerfisPsicograficos = System.Array.Empty<int>(),
+                Segmentos = System.Array.Empty<int>(),
+                PoiCategorias = System.Array.Empty<int>()
+            });
+
+            resposta.StatusCode.Should().Be(HttpStatusCode.OK);
+            var chamada = factory.Core.Requisicoes.Should().ContainSingle().Which;
+            chamada.Url.Should().EndWith("api/local/publico");
+
+            using var corpo = JsonDocument.Parse(chamada.Corpo);
+            corpo.RootElement.GetProperty("IdLocal").GetInt32().Should().Be(localId);
+            corpo.RootElement.GetProperty("FaixaEtaria").GetArrayLength().Should().Be(2);
+            corpo.RootElement.GetProperty("FaixaRenda").GetArrayLength().Should().Be(0);
         }
 
         /// <summary>
@@ -144,7 +223,31 @@ namespace Veiculando.WhiteLabel.Api.Tests
         }
 
         private sealed record UsuarioDto(int Id, string Nome, string Email, string[] Permissoes);
-        private sealed record PecaDto(int Id, string Codigo, int IdLocal, string LocalCodigo);
+        private sealed record PecaDto(
+            int Id,
+            string Codigo,
+            string CodigoInterno,
+            int IdLocal,
+            string LocalCodigo,
+            int IdTipoSuporte,
+            int PeriodicidadePadrao,
+            decimal ValorPadrao,
+            PecaFormatoDto Formato,
+            PecaViaDto Via,
+            int[] IdsSubstratoTipo,
+            int StatusExibicao);
+        private sealed record PecaFormatoDto(decimal Largura, decimal Altura, int Juncao);
+        private sealed record PecaViaDto(int ViaTipo, int Faixas, int Velociade, int Pedestre);
         private sealed record LocalDetalheDto(int Id, string Codigo, string Descricao, string Cidade, string UF);
+        private sealed record LocalPublicoDto(
+            int? Audiencia,
+            int? TipoMedicao,
+            string Fonte,
+            int Genero,
+            int[] FaixaEtaria,
+            int[] FaixaRenda,
+            int[] PerfisPsicograficos,
+            int[] Segmentos,
+            int[] PoiCategorias);
     }
 }

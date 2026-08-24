@@ -60,12 +60,17 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var alertasAprovaçãoPendente = _localRepository.CountAprovacaoPendente(
                 afiliadaId, FonteOrigemEnum.WhiteLabel);
 
+            // ReceitaMensal foi removida do payload (TP-B, seção 2): o valor era
+            // sempre 0m fixo, e o PRD vigente proíbe apresentar zero como dado
+            // real — o operador lia "R$ 0,00" como "nenhuma receita neste mês",
+            // não como "ainda não medimos isso". Não há regra financeira aprovada
+            // para calcular o valor de verdade; reintroduzir o campo exige essa
+            // regra primeiro, não um novo placeholder.
             return Ok(new
             {
                 LocaisAtivos = locaisAtivos,
                 PecasEmExibicao = pecasEmExibicao,
                 PedidosPendentes = pedidosPendentes,
-                ReceitaMensal = 0m, // Receita mockada na V1 conforme TP-1
                 AlertasAprovaçãoPendente = alertasAprovaçãoPendente
             });
         }
