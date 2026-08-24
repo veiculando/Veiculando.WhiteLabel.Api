@@ -26,6 +26,7 @@ namespace Veiculando.WhiteLabel.Api
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddJwtLocalAuthentication(Configuration);
+            services.AddWhiteLabelAuthorization();
             services.AddDependencyInjectionSetup(Configuration);
 
             services.AddControllers();

@@ -6,6 +6,7 @@ using Veiculando.Infra.IoC;
 using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
 using Veiculando.WhiteLabel.Api.Services;
+using Veiculando.WhiteLabel.Api.Validation;
 
 namespace Veiculando.WhiteLabel.Api.Configurations
 {
@@ -35,6 +36,11 @@ namespace Veiculando.WhiteLabel.Api.Configurations
 
             // Fonte Injector
             services.AddScoped<IFonteInjector, FonteInjector>();
+
+            // Resolução da conta de serviço (ADR-WL-004) e validação de
+            // resposta de reserva (TP-C §1) — pré-Core, testáveis isoladamente.
+            services.AddScoped<IServiceAccountResolver, ServiceAccountResolver>();
+            services.AddScoped<IPedidoReservaRespostaValidator, PedidoReservaRespostaValidator>();
 
             // Repositórios, MediatR (handlers) e serviços do Core.
             //

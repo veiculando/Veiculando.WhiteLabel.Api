@@ -37,6 +37,11 @@ namespace Veiculando.WhiteLabel.Api.Validation
             new PedidoReservaRespostaValidationOutcome(code, message, null);
     }
 
+    public interface IPedidoReservaRespostaValidator
+    {
+        PedidoReservaRespostaValidationOutcome Validate(PedidoReserva pedidoReserva, PedidoReservaRespostaRequest request, int tenantAfiliadaId);
+    }
+
     /// <summary>
     /// Aplica as validações do TP-C §1 ANTES de qualquer chamada ao Core.
     /// Recebe o <see cref="PedidoReserva"/> já carregado do repositório — não
@@ -44,7 +49,7 @@ namespace Veiculando.WhiteLabel.Api.Validation
     /// falha aqui chega a montar um <see cref="PedidoReservaRespostaCommand"/>
     /// utilizável; o controller nunca despacha para o Core em caso de erro.
     /// </summary>
-    public class PedidoReservaRespostaValidator
+    public class PedidoReservaRespostaValidator : IPedidoReservaRespostaValidator
     {
         private readonly IPecaRepository _pecaRepository;
 
