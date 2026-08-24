@@ -14,6 +14,7 @@ namespace Veiculando.WhiteLabel.Api.Services
     {
         Task<CoreRespostaCadastro> SalvarLocalAsync(LocalCadastroCommand command, int? wlUsuarioId);
         Task<CoreRespostaCadastro> SalvarPecaAsync(PecaCadastroCommand command, int? wlUsuarioId);
+        Task<CoreRespostaCadastro> SalvarPublicoAsync(LocalPublicoCadastroCommand command);
         Task<CoreRespostaCadastro> ResponderReservaAsync(PedidoReservaRespostaCommand command);
     }
 
@@ -87,6 +88,27 @@ namespace Veiculando.WhiteLabel.Api.Services
             // A peça não carrega IdAfiliada: ela pertence a um Local, e o
             // controller já validou que esse local é da afiliada da instância.
             return EnviarAsync("api/peca", command);
+        }
+
+        /// <summary>
+        /// Encaminha o cadastro de demografia (Publico) de um Local ao core.
+        /// </summary>
+        /// <remarks>
+        /// Diferente de Local/Peça, <c>LocalPublicoCadastroCommand</c> não tem
+        /// <c>IdAfiliada</c> nem trilha de origem própria — o
+        /// <c>LocalCadastroHandler.Handle(LocalPublicoCadastroCommand)</c> do
+        /// core resolve o tenant a partir do próprio <c>IdLocal</c> e do
+        /// usuário autenticado (a conta de serviço), então não há nada para o
+        /// BFF sobrescrever aqui além de zerar <c>IdUsuario</c> pelo mesmo
+        /// motivo de <see cref="SalvarLocalAsync"/>.
+        /// </remarks>
+        public Task<CoreRespostaCadastro> SalvarPublicoAsync(LocalPublicoCadastroCommand command)
+        {
+            if (command == null) throw new ArgumentNullException(nameof(command));
+
+            command.IdUsuario = 0;
+
+            return EnviarAsync("api/local/publico", command);
         }
 
         /// <summary>

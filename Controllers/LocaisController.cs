@@ -207,6 +207,73 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             });
         }
 
+        /// <summary>
+        /// Demografia (Publico) do local — contrato separado de propósito
+        /// (T4): editar endereço/geolocalização (Update acima) não deve
+        /// arriscar sobrescrever a demografia já cadastrada, nem vice-versa.
+        /// </summary>
+        [HttpGet("{id}/publico")]
+        public async Task<IActionResult> GetPublico(int id)
+        {
+            var local = await _tenant.Locais
+                .AsNoTracking()
+                .Include(l => l.Publico.DistribuicaoGenero)
+                .Include(l => l.Publico.DistribuicaoEtaria)
+                .Include(l => l.Publico.DistribuicaoRenda)
+                .Include(l => l.Publico.PerfisPsicograficos)
+                .Include(l => l.Publico.Segmentos)
+                .Include(l => l.Publico.PoiCategorias)
+                .FirstOrDefaultAsync(l => l.Id == id && l.StatusExibicao != StatusExibicaoEnum.Deletado);
+
+            if (local == null)
+                return NotFound(new { message = "Local não encontrado." });
+
+            var publico = local.Publico;
+
+            return Ok(new
+            {
+                Audiencia = publico?.Audiencia,
+                TipoMedicao = publico?.TipoMedicao,
+                Fonte = publico?.Fonte,
+                // O core deriva Genero de uma distribuição 75/25 a partir de um
+                // único inteiro (ver LocalPublicoCadastroCommand) — não há como
+                // reconstruir esse inteiro com precisão a partir da distribuição
+                // salva sem assumir a mesma regra 75/25 usada na escrita.
+                Genero = publico == null
+                    ? 0
+                    : publico.DistribuicaoGenero.Any(g => g.Genero == GeneroEnum.Masculino && g.Porcentegem >= 50)
+                        ? 1
+                        : publico.DistribuicaoGenero.Any(g => g.Genero == GeneroEnum.Feminino && g.Porcentegem >= 50)
+                            ? 2
+                            : 0,
+                FaixaEtaria = publico?.DistribuicaoEtaria.Select(f => f.IdFaixaEtaria).ToArray() ?? Array.Empty<int>(),
+                FaixaRenda = publico?.DistribuicaoRenda.Select(f => f.IdFaixaRenda).ToArray() ?? Array.Empty<int>(),
+                PerfisPsicograficos = publico?.PerfisPsicograficos.Select(p => p.IdPerfilPsicografico).ToArray() ?? Array.Empty<int>(),
+                Segmentos = publico?.Segmentos.Select(s => s.IdSegmento).ToArray() ?? Array.Empty<int>(),
+                PoiCategorias = publico?.PoiCategorias.Select(p => p.IdPoiCategoria).ToArray() ?? Array.Empty<int>(),
+            });
+        }
+
+        [HttpPut("{id}/publico")]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public async Task<IActionResult> PutPublico(int id, [FromBody] LocalPublicoCadastroCommand command)
+        {
+            if (command == null)
+                return BadRequest(new { message = "Dados de demografia são obrigatórios." });
+
+            var local = await _tenant.Locais
+                .FirstOrDefaultAsync(l => l.Id == id && l.StatusExibicao != StatusExibicaoEnum.Deletado);
+
+            if (local == null)
+                return NotFound(new { message = "Local não encontrado." });
+
+            command.IdLocal = id;
+
+            var resposta = await _coreCadastro.SalvarPublicoAsync(command);
+            return RepassarResposta(resposta);
+        }
+
         [HttpDelete("{id}")]
         [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
         [EnableRateLimiting(Startup.RateLimitEscrita)]
