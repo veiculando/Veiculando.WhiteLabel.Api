@@ -331,9 +331,17 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         {
             var afiliadaId = _tenant.AfiliadaId;
 
-            var pecas = await _tenant.Pecas
+            // Formato e um complex type do EF6. Comparar `p.Formato != null`
+            // dentro do Select SQL lanca NotSupportedException; materializamos
+            // primeiro e so entao montamos a projecao enxuta da listagem.
+            var entidades = await _tenant.Pecas
                 .AsNoTracking()
-                .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo)
+                .Include(p => p.Local)
+                .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo
+                         || p.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente)
+                .ToListAsync();
+
+            var pecas = entidades
                 .Select(p => new
                 {
                     p.Id,
@@ -342,9 +350,10 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     LocalCodigo = p.Local.Codigo,
                     FormatoDimensao = p.Formato != null ? p.Formato.ToString() : null,
                     p.ValorPadrao,
-                    p.FonteOrigem
+                    p.FonteOrigem,
+                    p.StatusExibicao
                 })
-                .ToListAsync();
+                .ToList();
 
             return Ok(pecas);
         }
@@ -362,7 +371,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var peca = await _tenant.Pecas
                 .AsNoTracking()
                 .Include(p => p.Local)
-                .FirstOrDefaultAsync(p => p.Id == id && p.StatusExibicao == StatusExibicaoEnum.Ativo);
+                .Include(p => p.Suporte)
+                .Include(p => p.Substratos.Select(s => s.SubstratoTipo))
+                .FirstOrDefaultAsync(p => p.Id == id
+                                       && (p.StatusExibicao == StatusExibicaoEnum.Ativo
+                                        || p.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
 
             if (peca == null)
                 return NotFound(new { message = "Peça não encontrada." });
@@ -372,10 +385,47 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             {
                 peca.Id,
                 peca.Codigo,
+                peca.CodigoInterno,
                 peca.IdLocal,
                 LocalCodigo = peca.Local.Codigo,
+                peca.IdTipoSuporte,
+                TipoSuporte = peca.Suporte?.Nome,
+                IdFormato = peca.IdFormatoArteFinal,
                 FormatoDimensao = peca.Formato != null ? peca.Formato.ToString() : null,
+                Formato = peca.Formato == null ? null : new
+                {
+                    peca.Formato.Largura,
+                    peca.Formato.Altura,
+                    peca.Formato.Juncao
+                },
+                EspecificacaoProducao = peca.EspecificacaoProducao == null ? null : new
+                {
+                    peca.EspecificacaoProducao.Largura,
+                    peca.EspecificacaoProducao.Altura,
+                    peca.EspecificacaoProducao.Material,
+                    peca.EspecificacaoProducao.Especificacao
+                },
+                PeriodicidadePadrao = peca.PeriodicidadePadrao == null
+                    ? 0
+                    : (int)peca.PeriodicidadePadrao.Tipo,
                 peca.ValorPadrao,
+                IdsSubstratoTipo = peca.Substratos.Select(s => s.IdSubstratoTipo).ToArray(),
+                peca.Iluminacao,
+                peca.Semaforo,
+                peca.AnguloDeVisao,
+                Via = peca.Via == null ? null : new
+                {
+                    peca.Via.ViaTipo,
+                    peca.Via.Faixas,
+                    peca.Via.Velociade,
+                    peca.Via.Pedestre
+                },
+                peca.RoteiroComercial,
+                peca.Alvara,
+                StreetView = peca.StreetView?.Url,
+                peca.Descricao,
+                peca.Restricao,
+                peca.StatusExibicao,
                 peca.FonteOrigem
             });
         }
