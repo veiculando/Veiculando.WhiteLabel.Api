@@ -207,6 +207,83 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             });
         }
 
+        [HttpGet("{id}/publico")]
+        public async Task<IActionResult> GetPublico(int id)
+        {
+            var local = await _tenant.Locais
+                .AsNoTracking()
+                .Include(l => l.Publico.DistribuicaoGenero)
+                .Include(l => l.Publico.DistribuicaoEtaria)
+                .Include(l => l.Publico.DistribuicaoRenda)
+                .Include(l => l.Publico.PerfisPsicograficos)
+                .Include(l => l.Publico.Segmentos)
+                .Include(l => l.Publico.PoiCategorias)
+                .FirstOrDefaultAsync(l => l.Id == id
+                                       && (l.StatusExibicao == StatusExibicaoEnum.Ativo
+                                        || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
+
+            if (local == null)
+                return NotFound(new { message = "Local não encontrado." });
+
+            var publico = local.Publico;
+            var generoPredominante = publico?.DistribuicaoGenero
+                .OrderByDescending(g => g.Porcentegem)
+                .FirstOrDefault();
+
+            return Ok(new
+            {
+                Audiencia = publico == null ? (int?)null : publico.Audiencia,
+                TipoMedicao = publico == null ? (int?)null : publico.TipoMedicao,
+                Fonte = publico?.Fonte,
+                Genero = generoPredominante != null && generoPredominante.Porcentegem > 50
+                    ? (int)generoPredominante.Genero
+                    : 0,
+                FaixaEtaria = publico?.DistribuicaoEtaria.Select(x => x.IdFaixaEtaria).ToArray()
+                    ?? Array.Empty<int>(),
+                FaixaRenda = publico?.DistribuicaoRenda.Select(x => x.IdFaixaRenda).ToArray()
+                    ?? Array.Empty<int>(),
+                PerfisPsicograficos = publico?.PerfisPsicograficos.Select(x => x.IdPerfilPsicografico).ToArray()
+                    ?? Array.Empty<int>(),
+                Segmentos = publico?.Segmentos.Select(x => x.IdSegmento).ToArray()
+                    ?? Array.Empty<int>(),
+                PoiCategorias = publico?.PoiCategorias.Select(x => x.IdPoiCategoria).ToArray()
+                    ?? Array.Empty<int>()
+            });
+        }
+
+        [HttpPut("{id}/publico")]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public async Task<IActionResult> PutPublico(int id, [FromBody] LocalPublicoRequest request)
+        {
+            if (request == null)
+                return BadRequest(new { message = "Dados demográficos são obrigatórios." });
+
+            var localExiste = await _tenant.Locais.AnyAsync(l => l.Id == id
+                && (l.StatusExibicao == StatusExibicaoEnum.Ativo
+                 || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
+
+            if (!localExiste)
+                return NotFound(new { message = "Local não encontrado." });
+
+            var command = new LocalPublicoCadastroCommand
+            {
+                IdLocal = id,
+                Audiencia = request.Audiencia ?? 0,
+                TipoMedicao = request.TipoMedicao ?? 0,
+                Fonte = request.Fonte,
+                Genero = request.Genero,
+                FaixaEtaria = request.FaixaEtaria ?? Array.Empty<int>(),
+                FaixaRenda = request.FaixaRenda ?? Array.Empty<int>(),
+                PerfisPsicograficos = request.PerfisPsicograficos ?? Array.Empty<int>(),
+                Segmentos = request.Segmentos ?? Array.Empty<int>(),
+                PoiCategorias = request.PoiCategorias ?? Array.Empty<int>()
+            };
+
+            var resposta = await _coreCadastro.SalvarPublicoAsync(command);
+            return RepassarResposta(resposta);
+        }
+
         [HttpDelete("{id}")]
         [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
         [EnableRateLimiting(Startup.RateLimitEscrita)]
@@ -226,6 +303,19 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             return NoContent();
         }
+    }
+
+    public sealed class LocalPublicoRequest
+    {
+        public int? Audiencia { get; set; }
+        public int? TipoMedicao { get; set; }
+        public string Fonte { get; set; }
+        public int Genero { get; set; }
+        public int[] FaixaEtaria { get; set; }
+        public int[] FaixaRenda { get; set; }
+        public int[] PerfisPsicograficos { get; set; }
+        public int[] Segmentos { get; set; }
+        public int[] PoiCategorias { get; set; }
     }
 
     [ApiController]

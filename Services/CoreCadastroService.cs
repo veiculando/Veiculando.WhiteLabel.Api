@@ -13,6 +13,7 @@ namespace Veiculando.WhiteLabel.Api.Services
     public interface ICoreCadastroService
     {
         Task<CoreRespostaCadastro> SalvarLocalAsync(LocalCadastroCommand command, int? wlUsuarioId);
+        Task<CoreRespostaCadastro> SalvarPublicoAsync(LocalPublicoCadastroCommand command);
         Task<CoreRespostaCadastro> SalvarPecaAsync(PecaCadastroCommand command, int? wlUsuarioId);
         Task<CoreRespostaCadastro> ResponderReservaAsync(PedidoReservaRespostaCommand command);
     }
@@ -87,6 +88,22 @@ namespace Veiculando.WhiteLabel.Api.Services
             // A peça não carrega IdAfiliada: ela pertence a um Local, e o
             // controller já validou que esse local é da afiliada da instância.
             return EnviarAsync("api/peca", command);
+        }
+
+        public Task<CoreRespostaCadastro> SalvarPublicoAsync(LocalPublicoCadastroCommand command)
+        {
+            if (command == null) throw new ArgumentNullException(nameof(command));
+
+            // O core substitui IdUsuario pelo usuario da conta de servico. O
+            // controller do BFF valida antes que o Local pertence ao tenant.
+            command.IdUsuario = 0;
+            command.FaixaEtaria ??= Array.Empty<int>();
+            command.FaixaRenda ??= Array.Empty<int>();
+            command.PerfisPsicograficos ??= Array.Empty<int>();
+            command.Segmentos ??= Array.Empty<int>();
+            command.PoiCategorias ??= Array.Empty<int>();
+
+            return EnviarAsync("api/local/publico", command);
         }
 
         /// <summary>

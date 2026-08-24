@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Veiculando.WhiteLabel.Api.Tests.Infrastructure;
@@ -144,6 +145,49 @@ namespace Veiculando.WhiteLabel.Api.Tests
             local.UF.Should().Be("SP");
         }
 
+        [Fact]
+        public async Task Demografia_de_local_tem_endpoints_reais_e_arrays_nunca_nulos()
+        {
+            const int afiliada = 7205;
+            var email = "demografia@exemplo.com";
+
+            await Seed.OperadorAsync(afiliada, email, new[] { "PecaGerenciar" });
+            var localId = await Seed.LocalAsync(afiliada, "LOC7205");
+
+            using var factory = new WlApiFactory(_db, afiliada);
+            using var client = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
+
+            var vazio = await client.GetFromJsonAsync<LocalPublicoDto>($"/api/wl/locais/{localId}/publico");
+            vazio!.Audiencia.Should().BeNull();
+            vazio.FaixaEtaria.Should().BeEmpty();
+            vazio.FaixaRenda.Should().BeEmpty();
+            vazio.PerfisPsicograficos.Should().BeEmpty();
+            vazio.Segmentos.Should().BeEmpty();
+            vazio.PoiCategorias.Should().BeEmpty();
+
+            var resposta = await client.PutAsJsonAsync($"/api/wl/locais/{localId}/publico", new
+            {
+                Audiencia = (int?)null,
+                TipoMedicao = (int?)null,
+                Fonte = (string)null,
+                Genero = 0,
+                FaixaEtaria = new[] { 1, 2 },
+                FaixaRenda = System.Array.Empty<int>(),
+                PerfisPsicograficos = System.Array.Empty<int>(),
+                Segmentos = System.Array.Empty<int>(),
+                PoiCategorias = System.Array.Empty<int>()
+            });
+
+            resposta.StatusCode.Should().Be(HttpStatusCode.OK);
+            var chamada = factory.Core.Requisicoes.Should().ContainSingle().Which;
+            chamada.Url.Should().EndWith("api/local/publico");
+
+            using var corpo = JsonDocument.Parse(chamada.Corpo);
+            corpo.RootElement.GetProperty("IdLocal").GetInt32().Should().Be(localId);
+            corpo.RootElement.GetProperty("FaixaEtaria").GetArrayLength().Should().Be(2);
+            corpo.RootElement.GetProperty("FaixaRenda").GetArrayLength().Should().Be(0);
+        }
+
         /// <summary>
         /// A exclusao de operador e soft (StatusExibicao = Deletado), mas
         /// UK_WlUsuario_Email_Afiliada e unico sobre (Email, AfiliadaId) SEM filtro.
@@ -195,5 +239,15 @@ namespace Veiculando.WhiteLabel.Api.Tests
         private sealed record PecaFormatoDto(decimal Largura, decimal Altura, int Juncao);
         private sealed record PecaViaDto(int ViaTipo, int Faixas, int Velociade, int Pedestre);
         private sealed record LocalDetalheDto(int Id, string Codigo, string Descricao, string Cidade, string UF);
+        private sealed record LocalPublicoDto(
+            int? Audiencia,
+            int? TipoMedicao,
+            string Fonte,
+            int Genero,
+            int[] FaixaEtaria,
+            int[] FaixaRenda,
+            int[] PerfisPsicograficos,
+            int[] Segmentos,
+            int[] PoiCategorias);
     }
 }
