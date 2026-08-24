@@ -434,16 +434,55 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (peca == null)
                 return NotFound(new { message = "Peça não encontrada." });
 
-
+            // GetAll fica enxuto de propósito (é uma lista); este detalhe
+            // precisa devolver TUDO que PecaCadastroCommand aceita — senão o
+            // formulário de edição não tem como reidratar Via/Formato/
+            // EspecificacaoProducao/StreetView, e um PUT feito a partir de um
+            // form pré-carregado incompleto apagaria esses campos (mesmo risco
+            // já documentado no GetById de Local).
             return Ok(new
             {
                 peca.Id,
                 peca.Codigo,
+                peca.CodigoInterno,
                 peca.IdLocal,
                 LocalCodigo = peca.Local.Codigo,
+                peca.IdTipoSuporte,
+                TipoSuporte = peca.Suporte?.Nome,
+                IdFormato = peca.IdFormatoArteFinal,
                 FormatoDimensao = peca.Formato != null ? peca.Formato.ToString() : null,
+                Formato = peca.Formato == null ? null : new
+                {
+                    peca.Formato.Largura,
+                    peca.Formato.Altura,
+                    peca.Formato.Juncao,
+                },
+                EspecificacaoProducao = peca.EspecificacaoProducao == null ? null : new
+                {
+                    peca.EspecificacaoProducao.Largura,
+                    peca.EspecificacaoProducao.Altura,
+                    peca.EspecificacaoProducao.Material,
+                    peca.EspecificacaoProducao.Especificacao,
+                },
+                PeriodicidadePadrao = (int)(peca.PeriodicidadePadrao?.Tipo ?? default),
                 peca.ValorPadrao,
-                peca.FonteOrigem
+                peca.Iluminacao,
+                peca.Semaforo,
+                peca.AnguloDeVisao,
+                Via = peca.Via == null ? null : new
+                {
+                    peca.Via.ViaTipo,
+                    peca.Via.Faixas,
+                    peca.Via.Velociade,
+                    peca.Via.Pedestre,
+                },
+                peca.RoteiroComercial,
+                peca.Alvara,
+                StreetView = peca.StreetView?.Url,
+                peca.Descricao,
+                peca.Restricao,
+                peca.StatusExibicao,
+                peca.FonteOrigem,
             });
         }
 
