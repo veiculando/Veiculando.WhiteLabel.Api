@@ -29,9 +29,16 @@ namespace Veiculando.WhiteLabel.Api.Configurations
 
             // Client HTTP para o Core
             var coreApiUrl = configuration.GetValue<string>("CoreApiUrl") ?? "https://localhost:44321/";
-            services.AddHttpClient<IVeiculandoApiClient, VeiculandoApiClient>(client => 
+            services.AddHttpClient<IVeiculandoApiClient, VeiculandoApiClient>(client =>
             {
                 client.BaseAddress = new Uri(coreApiUrl);
+            });
+
+            // Client HTTP para o FileServer (TP-C §2) — rede interna, nunca exposto ao navegador.
+            var fileServerUrl = configuration.GetValue<string>("FileServerUrl") ?? "https://localhost:44322/";
+            services.AddHttpClient<IFileServerClient, FileServerClient>(client =>
+            {
+                client.BaseAddress = new Uri(fileServerUrl);
             });
 
             // Fonte Injector
