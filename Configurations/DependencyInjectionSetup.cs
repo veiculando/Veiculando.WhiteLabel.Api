@@ -1,8 +1,8 @@
-using MediatR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using System;
 using Veiculando.Data.Contexts;
+using Veiculando.Infra.IoC;
 using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
 using Veiculando.WhiteLabel.Api.Services;
@@ -36,8 +36,18 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // Fonte Injector
             services.AddScoped<IFonteInjector, FonteInjector>();
 
-            // MediatR (referenciando os assemblies de Domain) — API 12.x: RegisterServicesFromAssembly
-            services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(Veiculando.Domain.Entities.EntityBase).Assembly));
+            // Repositórios, MediatR (handlers) e serviços do Core.
+            //
+            // O BFF referencia o Core via ProjectReference (não HTTP) para o
+            // caminho de leitura e para delegar comandos como
+            // PedidoReservaRespostaCommand em processo. Sem este wiring,
+            // qualquer handler do Core resolvido por IMediator falha em
+            // runtime por falta de repositório (ex.: IPedidoReservaRepository,
+            // IUsuarioAfiliadaRepository) — o registro ficava só declarado em
+            // Veiculando.Infra.IoC, nunca chamado a partir daqui.
+            DataContextDependencyInjector.RegisterServices(services);
+            CommandHandlerDependencyInjector.RegisterServices(services);
+            ServiceDependencyInjector.RegisterServices(services);
         }
     }
 }
