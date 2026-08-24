@@ -5,6 +5,16 @@
     <UserSecretsId>aspnet-Veiculando.WhiteLabel.Api-A90B666C-DE1C-4688-ADB2-144C4529C5A2</UserSecretsId>
   </PropertyGroup>
 
+  <!-- O projeto de testes ficou aninhado nesta pasta (Veiculando.WhiteLabel.Api.Tests\);
+       sem esta exclusão, o glob padrão do SDK compilava os specs de Xunit/Moq
+       dentro deste projeto também, que não tem essas referências. -->
+  <ItemGroup>
+    <Compile Remove="Veiculando.WhiteLabel.Api.Tests\**\*.cs" />
+    <Content Remove="Veiculando.WhiteLabel.Api.Tests\**\*" />
+    <None Remove="Veiculando.WhiteLabel.Api.Tests\**\*" />
+    <EmbeddedResource Remove="Veiculando.WhiteLabel.Api.Tests\**\*" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.0" />
