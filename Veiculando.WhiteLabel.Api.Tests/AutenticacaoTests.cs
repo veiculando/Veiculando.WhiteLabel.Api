@@ -1,8 +1,10 @@
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.AspNetCore.WebUtilities;
 using Veiculando.WhiteLabel.Api.Tests.Infrastructure;
 using Xunit;
 
@@ -152,7 +154,83 @@ namespace Veiculando.WhiteLabel.Api.Tests
             corpo.Permissoes.Should().BeEquivalentTo("Checking");
         }
 
+        [Fact]
+        public async Task Criacao_de_operador_envia_convite_e_primeiro_acesso_define_senha_uma_unica_vez()
+        {
+            var afiliada = Afiliada + 80;
+            var adminEmail = "admin-convite@exemplo.com";
+            var convidadoEmail = "convidado@exemplo.com";
+            await Seed.OperadorAsync(afiliada, adminEmail, new[] { "UsuarioAfiliadaGerenciar" });
+
+            using var factory = new WlApiFactory(_db, afiliada);
+            using var admin = await factory.ClienteAutenticadoAsync(adminEmail, Seed.SenhaPadrao);
+            var criacao = await admin.PostAsJsonAsync("/api/wl/usuarios", new
+            {
+                Nome = "Operador Convidado",
+                Email = convidadoEmail,
+                Permissoes = new[] { "Checking" }
+            });
+
+            criacao.StatusCode.Should().Be(HttpStatusCode.Created);
+            factory.EmailSender.Convites.Should().ContainSingle();
+            var convite = factory.EmailSender.Convites.Single();
+            convite.DestinatarioEmail.Should().Be(convidadoEmail);
+            convite.LinkPrimeiroAcesso.Should().StartWith($"https://{factory.Host}/login/primeiro-acesso?");
+
+            using var anonimo = factory.ClienteAnonimo();
+            var loginPendente = await anonimo.PostAsJsonAsync("/api/wl/auth/login",
+                new { Email = convidadoEmail, Senha = "NovaSenha123" });
+            loginPendente.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+            var query = QueryHelpers.ParseQuery(new System.Uri(convite.LinkPrimeiroAcesso).Query);
+            var token = query["token"].ToString();
+            var aceite = await anonimo.PostAsJsonAsync("/api/wl/auth/primeiro-acesso", new
+            {
+                Email = convidadoEmail,
+                Token = token,
+                NovaSenha = "NovaSenha123"
+            });
+            aceite.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var replay = await anonimo.PostAsJsonAsync("/api/wl/auth/primeiro-acesso", new
+            {
+                Email = convidadoEmail,
+                Token = token,
+                NovaSenha = "OutraSenha123"
+            });
+            replay.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+            var loginAceito = await anonimo.PostAsJsonAsync("/api/wl/auth/login",
+                new { Email = convidadoEmail, Senha = "NovaSenha123" });
+            loginAceito.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        [Fact]
+        public async Task Falha_no_envio_do_convite_reverte_a_criacao_do_operador()
+        {
+            var afiliada = Afiliada + 81;
+            var adminEmail = "admin-falha-convite@exemplo.com";
+            var convidadoEmail = "nao-persistir@exemplo.com";
+            await Seed.OperadorAsync(afiliada, adminEmail, new[] { "UsuarioAfiliadaGerenciar" });
+
+            using var factory = new WlApiFactory(_db, afiliada);
+            factory.EmailSender.FalharProximoEnvio = true;
+            using var admin = await factory.ClienteAutenticadoAsync(adminEmail, Seed.SenhaPadrao);
+
+            var criacao = await admin.PostAsJsonAsync("/api/wl/usuarios", new
+            {
+                Nome = "Não Persistir",
+                Email = convidadoEmail
+            });
+
+            criacao.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+
+            var listagem = await admin.GetFromJsonAsync<UsuarioLista[]>("/api/wl/usuarios");
+            listagem.Should().NotContain(u => u.Email == convidadoEmail);
+        }
+
         private sealed record LoginResposta(string Token, int ExpiresInMinutes, string Nome, string Email, string[] Permissoes);
         private sealed record MeResposta(int Id, string Nome, string Email, string[] Permissoes);
+        private sealed record UsuarioLista(int Id, string Email, string StatusConvite);
     }
 }

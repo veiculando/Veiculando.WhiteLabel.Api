@@ -14,6 +14,7 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
     public sealed class FakeWlPasswordEmailSender : IWlPasswordEmailSender
     {
         private readonly ConcurrentQueue<EnvioCapturado> _envios = new();
+        private readonly ConcurrentQueue<ConviteCapturado> _convites = new();
 
         /// <summary>
         /// Quando <c>true</c>, o próximo envio lança <see cref="WlPasswordEmailException"/> —
@@ -22,6 +23,23 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         public bool FalharProximoEnvio { get; set; }
 
         public IReadOnlyCollection<EnvioCapturado> Envios => _envios.ToArray();
+        public IReadOnlyCollection<ConviteCapturado> Convites => _convites.ToArray();
+
+        public Task EnviarConviteAsync(
+            string destinatarioEmail,
+            string nomeExibicaoMarca,
+            string linkPrimeiroAcesso,
+            CancellationToken cancellationToken = default)
+        {
+            if (FalharProximoEnvio)
+            {
+                FalharProximoEnvio = false;
+                throw new WlPasswordEmailException("Falha simulada de envio (teste).");
+            }
+
+            _convites.Enqueue(new ConviteCapturado(destinatarioEmail, nomeExibicaoMarca, linkPrimeiroAcesso));
+            return Task.CompletedTask;
+        }
 
         public Task EnviarRecuperacaoAsync(
             string destinatarioEmail,
@@ -40,5 +58,6 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         }
 
         public sealed record EnvioCapturado(string DestinatarioEmail, string NomeExibicaoMarca, string LinkReset);
+        public sealed record ConviteCapturado(string DestinatarioEmail, string NomeExibicaoMarca, string LinkPrimeiroAcesso);
     }
 }

@@ -91,7 +91,10 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .FirstOrDefaultAsync(u => u.Email.Endereco == normalizedEmail 
                                        && u.StatusExibicao == StatusExibicaoEnum.Ativo );
 
-            if (usuario == null || !BC.Verify(request.Senha, usuario.SenhaHash))
+            if (usuario == null ||
+                usuario.StatusConvite != StatusConviteWlEnum.Aceito ||
+                string.IsNullOrWhiteSpace(usuario.SenhaHash) ||
+                !BC.Verify(request.Senha, usuario.SenhaHash))
                 return Unauthorized(new { message = "Credenciais inválidas." });
 
             usuario.RegistrarLogin();
@@ -159,6 +162,43 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         }
 
         /// <summary>
+        /// Conclui o primeiro acesso de um operador convidado, criando a senha.
+        /// O token é exclusivo do tenant do Host, armazenado somente como hash e
+        /// invalidado no mesmo SaveChanges que grava a senha.
+        /// </summary>
+        [AllowAnonymous]
+        [EnableRateLimiting(Startup.RateLimitRecuperacaoSenha)]
+        [HttpPost("primeiro-acesso")]
+        public async Task<IActionResult> PrimeiroAcesso([FromBody] PrimeiroAcessoRequest request, CancellationToken ct)
+        {
+            const string erroGenerico = "Convite inválido, expirado ou já utilizado. Solicite um novo convite ao administrador.";
+
+            if (string.IsNullOrWhiteSpace(request?.Email) ||
+                string.IsNullOrWhiteSpace(request?.Token) ||
+                string.IsNullOrWhiteSpace(request?.NovaSenha))
+                return BadRequest(new { message = "E-mail, token e nova senha são obrigatórios." });
+
+            if (request.NovaSenha.Trim().Length < SenhaTamanhoMinimo)
+                return BadRequest(new { message = $"A senha precisa ter no mínimo {SenhaTamanhoMinimo} caracteres." });
+
+            var normalizedEmail = request.Email.ToLowerInvariant().Trim();
+            var usuario = await _tenant.UsuariosAfiliada
+                .FirstOrDefaultAsync(u => u.Email.Endereco == normalizedEmail
+                                       && u.StatusExibicao == StatusExibicaoEnum.Ativo, ct);
+
+            if (usuario == null || !usuario.ValidarTokenConvite(request.Token.Trim()))
+                return BadRequest(new { message = erroGenerico });
+
+            usuario.ConcluirPrimeiroAcesso(BC.HashPassword(request.NovaSenha.Trim()));
+
+            if (!usuario.IsValid())
+                return BadRequest(usuario.Notifications);
+
+            await _db.SaveChangesAsync(ct);
+            return Ok(new { message = "Senha criada com sucesso. Faça login para continuar." });
+        }
+
+        /// <summary>
         /// Inicia a recuperação de senha do operador dentro do tenant do Host.
         /// </summary>
         /// <remarks>
@@ -190,7 +230,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
                 var usuario = await _tenant.UsuariosAfiliada
                     .FirstOrDefaultAsync(u => u.Email.Endereco == normalizedEmail
-                                           && u.StatusExibicao == StatusExibicaoEnum.Ativo, ct);
+                                           && u.StatusExibicao == StatusExibicaoEnum.Ativo
+                                           && u.StatusConvite == StatusConviteWlEnum.Aceito, ct);
 
                 // Usuário inexistente: nenhum caminho perceptível além do piso de
                 // tempo comum ao fim do método — não há token para gerar nem
@@ -262,7 +303,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             var usuario = await _tenant.UsuariosAfiliada
                 .FirstOrDefaultAsync(u => u.Email.Endereco == normalizedEmail
-                                       && u.StatusExibicao == StatusExibicaoEnum.Ativo, ct);
+                                       && u.StatusExibicao == StatusExibicaoEnum.Ativo
+                                       && u.StatusConvite == StatusConviteWlEnum.Aceito, ct);
 
             if (usuario == null || !usuario.ValidarTokenRecuperacao(request.Token.Trim()))
                 return BadRequest(new { message = erroGenerico });
@@ -351,6 +393,13 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     }
 
     public class AlterarSenhaRequest
+    {
+        public string Email { get; set; }
+        public string Token { get; set; }
+        public string NovaSenha { get; set; }
+    }
+
+    public class PrimeiroAcessoRequest
     {
         public string Email { get; set; }
         public string Token { get; set; }

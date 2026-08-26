@@ -1,16 +1,18 @@
 ﻿using System;
 using System.Data.Entity;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Logging;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Entities.WhiteLabel;
 using Veiculando.Domain.Enums;
 using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
-using BC = BCrypt.Net.BCrypt;
+using Veiculando.WhiteLabel.Api.Services;
 
 namespace Veiculando.WhiteLabel.Api.Controllers
 {
@@ -21,14 +23,25 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     {
         private readonly VeiculandoDataContext _db;
         private readonly ITenantQueries _tenant;
+        private readonly ITenantContext _tenantContext;
+        private readonly IWlTenantResolver _tenantResolver;
+        private readonly IWlPasswordEmailSender _emailSender;
+        private readonly ILogger<UsuariosController> _logger;
 
-        /// <summary>Mesmo mínimo exigido no cadastro e no formulário do painel.</summary>
-        private const int SenhaTamanhoMinimo = 8;
-
-        public UsuariosController(VeiculandoDataContext db, ITenantQueries tenant)
+        public UsuariosController(
+            VeiculandoDataContext db,
+            ITenantQueries tenant,
+            ITenantContext tenantContext,
+            IWlTenantResolver tenantResolver,
+            IWlPasswordEmailSender emailSender,
+            ILogger<UsuariosController> logger)
         {
             _db = db;
             _tenant = tenant;
+            _tenantContext = tenantContext;
+            _tenantResolver = tenantResolver;
+            _emailSender = emailSender;
+            _logger = logger;
         }
 
         /// <summary>
@@ -58,6 +71,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     u.Departamento,
                     u.TelefoneComercial,
                     u.DataUltimoLogin,
+                    u.StatusConvite,
                     u.PermissoesRaw
                 })
                 .ToListAsync();
@@ -73,6 +87,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     Departamento = u.Departamento,
                     TelefoneComercial = u.TelefoneComercial,
                     DataUltimoLogin = u.DataUltimoLogin,
+                    StatusConvite = u.StatusConvite.ToString(),
                     Permissoes = string.IsNullOrWhiteSpace(u.PermissoesRaw)
                         ? Array.Empty<string>()
                         : u.PermissoesRaw.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
@@ -107,6 +122,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 Departamento = u.Departamento,
                 TelefoneComercial = u.TelefoneComercial,
                 DataUltimoLogin = u.DataUltimoLogin,
+                StatusConvite = u.StatusConvite.ToString(),
                 Permissoes = u.ObterPermissoes()
             });
         }
@@ -117,26 +133,18 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpPost]
         [Authorize(Policy = AuthorizationSetup.UsuarioAfiliadaGerenciar)]
         [EnableRateLimiting(Startup.RateLimitEscrita)]
-        public async Task<IActionResult> Create([FromBody] WlUsuarioCreateDto dto)
+        public async Task<IActionResult> Create([FromBody] WlUsuarioCreateDto dto, CancellationToken ct)
         {
-            if (string.IsNullOrWhiteSpace(dto?.Email) || string.IsNullOrWhiteSpace(dto?.Senha) || string.IsNullOrWhiteSpace(dto?.Nome))
-                return BadRequest(new { message = "Nome, email e senha são obrigatórios." });
+            if (string.IsNullOrWhiteSpace(dto?.Email) || string.IsNullOrWhiteSpace(dto?.Nome))
+                return BadRequest(new { message = "Nome e email são obrigatórios." });
 
             if (dto.Permissoes != null && !WlPermissoesValidas.ValidarPermissoes(dto.Permissoes, out var invalidas))
             {
                 return BadRequest(new { message = $"Permissões inválidas detectadas: {string.Join(", ", invalidas)}" });
             }
 
-            // O formulário do painel já exige 8 caracteres, mas validação de UI não
-            // é validação: sem esta checagem uma chamada direta cria operador com
-            // senha de 1 caractere.
-            if (dto.Senha.Trim().Length < SenhaTamanhoMinimo)
-            {
-                return BadRequest(new { message = $"A senha precisa ter no mínimo {SenhaTamanhoMinimo} caracteres." });
-            }
-
             var afiliadaId = _tenant.AfiliadaId;
-            var normalizedEmail = dto.Email.ToLower().Trim();
+            var normalizedEmail = dto.Email.ToLowerInvariant().Trim();
 
             // A checagem cobre TODOS os status, não só Ativo — inclusive operadores
             // excluídos.
@@ -159,11 +167,10 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (emailExiste)
                 return BadRequest(new { message = "Já existe um usuário cadastrado com este e-mail nesta instância." });
 
-            var senhaHash = BC.HashPassword(dto.Senha);
             var novoUsuario = new WlUsuarioAfiliada(
                 dto.Nome,
                 normalizedEmail,
-                senhaHash,
+                null,
                 afiliadaId,
                 dto.Cargo,
                 dto.Departamento,
@@ -174,10 +181,31 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (!novoUsuario.IsValid())
                 return BadRequest(novoUsuario.Notifications);
 
-            _db.WlUsuariosAfiliada.Add(novoUsuario);
-            await _db.SaveChangesAsync();
+            var tokenBruto = novoUsuario.GerarTokenConvite();
+            using var transaction = _db.Database.BeginTransaction();
+            try
+            {
+                _db.WlUsuariosAfiliada.Add(novoUsuario);
+                await _db.SaveChangesAsync(ct);
 
-            return CreatedAtAction(nameof(GetById), new { id = novoUsuario.Id }, new { id = novoUsuario.Id, message = "Usuário cadastrado com sucesso." });
+                var branding = await _tenantResolver.ObterBrandingAsync(afiliadaId);
+                var query = $"token={Uri.EscapeDataString(tokenBruto)}&email={Uri.EscapeDataString(normalizedEmail)}";
+                var link = $"https://{_tenantContext.Host}/login/primeiro-acesso?{query}";
+                await _emailSender.EnviarConviteAsync(normalizedEmail, branding?.NomeExibicao, link, ct);
+
+                transaction.Commit();
+            }
+            catch (WlPasswordEmailException ex)
+            {
+                transaction.Rollback();
+                _logger.LogError(ex,
+                    "Falha ao enviar convite de primeiro acesso para a afiliada {AfiliadaId}; criação revertida.",
+                    afiliadaId);
+                return StatusCode(503, new { message = "Não foi possível enviar o convite. O usuário não foi criado; tente novamente." });
+            }
+
+            return CreatedAtAction(nameof(GetById), new { id = novoUsuario.Id },
+                new { id = novoUsuario.Id, message = "Usuário criado. Enviamos o convite para criação de senha." });
         }
 
         /// <summary>
@@ -222,11 +250,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 return BadRequest(new { message = $"Permissões inválidas detectadas: {string.Join(", ", invalidas)}" });
             }
 
-            if (!string.IsNullOrWhiteSpace(dto.Senha) && dto.Senha.Trim().Length < SenhaTamanhoMinimo)
-            {
-                return BadRequest(new { message = $"A senha precisa ter no mínimo {SenhaTamanhoMinimo} caracteres." });
-            }
-
             usuario.AtualizarDados(
                 // `??` e não `?? string.Empty`: omitir o campo mantém o valor atual.
                 string.IsNullOrWhiteSpace(dto.Nome) ? usuario.Nome : dto.Nome.Trim(),
@@ -237,12 +260,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (dto.Permissoes != null)
             {
                 usuario.AtualizarPermissoes(dto.Permissoes);
-            }
-
-            if (!string.IsNullOrWhiteSpace(dto.Senha))
-            {
-                // Mesmo algoritmo do cadastro e do login do painel (BCrypt).
-                usuario.AlterarSenha(BC.HashPassword(dto.Senha.Trim()));
             }
 
             if (!usuario.IsValid())
@@ -286,6 +303,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         public string Departamento { get; set; }
         public string TelefoneComercial { get; set; }
         public DateTime? DataUltimoLogin { get; set; }
+        public string StatusConvite { get; set; }
         public string[] Permissoes { get; set; }
     }
 
@@ -293,7 +311,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     {
         public string Nome { get; set; }
         public string Email { get; set; }
-        public string Senha { get; set; }
         public string Cargo { get; set; }
         public string Departamento { get; set; }
         public string TelefoneComercial { get; set; }
@@ -303,7 +320,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     public class WlUsuarioUpdateDto
     {
         public string Nome { get; set; }
-        public string Senha { get; set; }
         public string Cargo { get; set; }
         public string Departamento { get; set; }
         public string TelefoneComercial { get; set; }
