@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -102,6 +103,34 @@ namespace Veiculando.WhiteLabel.Api.Tests
             });
 
             resposta.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+
+        [Theory]
+        [InlineData("GET", "/api/wl/usuarios")]
+        [InlineData("GET", "/api/wl/locais")]
+        [InlineData("GET", "/api/wl/pecas")]
+        [InlineData("GET", "/api/wl/checking/pis-autorizadas")]
+        [InlineData("GET", "/api/wl/pedidos-reserva")]
+        [InlineData("GET", "/api/wl/pedidos-insercao")]
+        [InlineData("POST", "/api/wl/programacao/listar")]
+        public async Task Modulos_exigem_a_policy_correspondente_tambem_nas_leituras(
+            string metodo,
+            string caminho)
+        {
+            var afiliada = Afiliada + 20 + caminho.Length;
+            var email = $"sem-claim-{caminho.Length}@exemplo.com";
+            await Seed.OperadorAsync(afiliada, email, new string[0]);
+
+            using var factory = new WlApiFactory(_db, afiliada);
+            using var client = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
+            using var request = new HttpRequestMessage(new HttpMethod(metodo), caminho);
+            if (metodo == "POST")
+                request.Content = JsonContent.Create(new { });
+
+            var resposta = await client.SendAsync(request);
+
+            resposta.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+                "esconder o menu no frontend nao substitui autorizacao server-side");
         }
 
         [Fact]

@@ -222,6 +222,28 @@ namespace Veiculando.WhiteLabel.Api.Tests
                 "o e-mail de um operador excluido permanece reservado pelo indice unico");
         }
 
+        [Fact]
+        public async Task Local_pendente_pode_ser_cancelado_sem_404()
+        {
+            const int afiliada = 7206;
+            var email = "cancelar-pendente@exemplo.com";
+            await Seed.OperadorAsync(afiliada, email, new[] { "PecaGerenciar" });
+            var localId = await Seed.LocalAsync(
+                afiliada,
+                "LOC-PENDENTE",
+                Seed.StatusExibicaoLocal.AprovacaoPendente);
+
+            using var factory = new WlApiFactory(_db, afiliada);
+            using var client = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
+
+            var resposta = await client.DeleteAsync($"/api/wl/locais/{localId}");
+
+            resposta.StatusCode.Should().Be(HttpStatusCode.NoContent,
+                "a listagem oferece a acao para pendentes e o DELETE deve usar o mesmo conjunto de estados");
+            (await client.GetAsync($"/api/wl/locais/{localId}"))
+                .StatusCode.Should().Be(HttpStatusCode.NotFound);
+        }
+
         private sealed record UsuarioDto(int Id, string Nome, string Email, string[] Permissoes);
         private sealed record PecaDto(
             int Id,

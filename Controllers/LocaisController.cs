@@ -18,7 +18,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 {
     [ApiController]
     [Route("api/wl/[controller]")]
-    [Authorize]
+    [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
     public class LocaisController : WlCoreProxyControllerBase
     {
         private readonly VeiculandoDataContext _db;
@@ -292,7 +292,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var afiliadaId = _tenant.AfiliadaId;
 
             var local = await _tenant.Locais
-                .FirstOrDefaultAsync(l => l.Id == id && l.StatusExibicao == StatusExibicaoEnum.Ativo);
+                .FirstOrDefaultAsync(l => l.Id == id
+                    && (l.StatusExibicao == StatusExibicaoEnum.Ativo
+                     || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
 
             if (local == null)
                 return NotFound(new { message = "Local não encontrado." });
@@ -320,7 +322,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
     [ApiController]
     [Route("api/wl/[controller]")]
-    [Authorize]
+    [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
     public class PecasController : WlCoreProxyControllerBase
     {
         private readonly VeiculandoDataContext _db;

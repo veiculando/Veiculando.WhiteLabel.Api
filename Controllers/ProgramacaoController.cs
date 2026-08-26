@@ -5,13 +5,14 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Enums;
+using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
 
 namespace Veiculando.WhiteLabel.Api.Controllers
 {
     [ApiController]
     [Route("api/wl/[controller]")]
-    [Authorize]
+    [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
     public class ProgramacaoController : ControllerBase
     {
         private readonly VeiculandoDataContext _db;

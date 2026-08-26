@@ -6,13 +6,14 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Enums;
+using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
 
 namespace Veiculando.WhiteLabel.Api.Controllers
 {
     [ApiController]
     [Route("api/wl/pedidos-insercao")]
-    [Authorize]
+    [Authorize(Policy = AuthorizationSetup.PedidoInsercaoGerenciar)]
     public class PedidosInsercaoController : ControllerBase
     {
         private readonly VeiculandoDataContext _db;
