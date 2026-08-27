@@ -102,6 +102,12 @@ namespace Veiculando.WhiteLabel.Api.Tests
             // Outra requisição percorre os registros EF6 gravados, não o objeto ainda rastreado.
             var recarregado = await client.GetFromJsonAsync<System.Text.Json.JsonElement[]>($"/api/wl/checking/item/{idItem}/fotos");
             recarregado.Should().HaveCount(1);
+            using var segundo = new MultipartFormDataContent();
+            var novaFoto = new ByteArrayContent(jpeg);
+            novaFoto.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+            segundo.Add(novaFoto, "foto", "segunda.jpg");
+            (await client.PostAsync($"/api/wl/checking/enviar-foto/{idItem}", segundo)).StatusCode.Should().Be(HttpStatusCode.OK);
+            (await client.GetFromJsonAsync<System.Text.Json.JsonElement[]>($"/api/wl/checking/item/{idItem}/fotos")).Should().HaveCount(2);
             using var anonimo = factory.ClienteAnonimo();
             (await anonimo.GetAsync(url)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         }

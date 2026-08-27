@@ -69,6 +69,7 @@ public sealed class UploadsController : WlCoreProxyControllerBase
         var item = await _tenant.PedidoInsercaoItens
             .Include(i => i.PedidoItem.Peca.Local)
             .Include(i => i.PedidoInsercao.Pedido)
+            .Include(i => i.PedidoInsercao.Pedido.Campanha.Pedidos.Select(p => p.PedidosInsercao))
             .Include(i => i.PedidoInsercao.Itens.Select(x => x.PedidoItem))
             .SingleOrDefaultAsync(i => i.IdPedidoItem == idItemPI && i.PedidoInsercao.StatusExibicao == StatusExibicaoEnum.Ativo, ct);
         if (item == null) return NotFound(new { message = "Item de PI não encontrado." });
