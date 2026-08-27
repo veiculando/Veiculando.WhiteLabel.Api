@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Data.Entity;
+using System.Data.Entity.Infrastructure;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,6 +8,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Entities.WhiteLabel;
 using Veiculando.Domain.Enums;
@@ -23,25 +25,28 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     {
         private readonly VeiculandoDataContext _db;
         private readonly ITenantQueries _tenant;
-        private readonly ITenantContext _tenantContext;
+        private readonly WlPublicLinks _publicLinks;
         private readonly IWlTenantResolver _tenantResolver;
         private readonly IWlPasswordEmailSender _emailSender;
         private readonly ILogger<UsuariosController> _logger;
+        private readonly WlPasswordEmailOptions _emailOptions;
 
         public UsuariosController(
             VeiculandoDataContext db,
             ITenantQueries tenant,
-            ITenantContext tenantContext,
+            WlPublicLinks publicLinks,
             IWlTenantResolver tenantResolver,
             IWlPasswordEmailSender emailSender,
-            ILogger<UsuariosController> logger)
+            ILogger<UsuariosController> logger,
+            IOptions<WlPasswordEmailOptions> emailOptions)
         {
             _db = db;
             _tenant = tenant;
-            _tenantContext = tenantContext;
+            _publicLinks = publicLinks;
             _tenantResolver = tenantResolver;
             _emailSender = emailSender;
             _logger = logger;
+            _emailOptions = emailOptions.Value;
         }
 
         /// <summary>
@@ -181,35 +186,84 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (!novoUsuario.IsValid())
                 return BadRequest(novoUsuario.Notifications);
 
-            var tokenBruto = novoUsuario.GerarTokenConvite();
-            using var transaction = _db.Database.BeginTransaction();
-            try
-            {
-                _db.WlUsuariosAfiliada.Add(novoUsuario);
-                await _db.SaveChangesAsync(ct);
-
-                var branding = await _tenantResolver.ObterBrandingAsync(afiliadaId);
-                var query = $"token={Uri.EscapeDataString(tokenBruto)}&email={Uri.EscapeDataString(normalizedEmail)}";
-                var link = $"https://{_tenantContext.Host}/login/primeiro-acesso?{query}";
-                await _emailSender.EnviarConviteAsync(normalizedEmail, branding?.NomeExibicao, link, ct);
-
-                transaction.Commit();
-            }
-            catch (WlPasswordEmailException ex)
-            {
-                transaction.Rollback();
-                _logger.LogError(ex,
-                    "Falha ao enviar convite de primeiro acesso para a afiliada {AfiliadaId}; criação revertida.",
-                    afiliadaId);
-                return StatusCode(503, new { message = "Não foi possível enviar o convite. O usuário não foi criado; tente novamente." });
-            }
+            // O usuário pendente permanece recuperável se o provedor estiver fora.
+            // Não manter transação SQL aberta durante uma chamada de rede.
+            _db.WlUsuariosAfiliada.Add(novoUsuario);
+            await _db.SaveChangesAsync(ct);
+            var erroEnvio = await EnviarConvite(novoUsuario, ct);
+            if (erroEnvio != null) return erroEnvio;
 
             return CreatedAtAction(nameof(GetById), new { id = novoUsuario.Id },
                 new { id = novoUsuario.Id, message = "Usuário criado. Enviamos o convite para criação de senha." });
         }
 
+        [HttpPost("{id}/reenviar-convite")]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public async Task<IActionResult> ReenviarConvite(int id, CancellationToken ct)
+        {
+            var usuario = await _tenant.UsuariosAfiliada
+                .FirstOrDefaultAsync(u => u.Id == id && u.StatusExibicao == StatusExibicaoEnum.Ativo, ct);
+            if (usuario == null) return NotFound(new { message = "Usuário não encontrado." });
+            if (usuario.StatusConvite != StatusConviteWlEnum.Pendente)
+                return Conflict(new { message = "Este operador já concluiu o primeiro acesso. Utilize a recuperação de senha." });
+
+            return await EnviarConvite(usuario, ct)
+                ?? Ok(new { message = "Novo convite enviado. O link anterior não é mais válido." });
+        }
+
+        private async Task<IActionResult> EnviarConvite(WlUsuarioAfiliada usuario, CancellationToken ct)
+        {
+            var tokenBruto = usuario.GerarTokenConvite(TimeSpan.FromHours(_emailOptions.ConviteValidadeHoras));
+            var hashDesteEnvio = usuario.TokenConviteHash;
+            try
+            {
+                // Rowversion impede que reenvio e aceite sobrescrevam um ao outro.
+                await _db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "O operador foi atualizado por outra solicitação. Recarregue a lista." });
+            }
+
+            bool enviado;
+            try
+            {
+                var branding = await _tenantResolver.ObterBrandingAsync(_tenant.AfiliadaId);
+                var link = _publicLinks.Convite(tokenBruto, usuario.Email.Endereco);
+                await _emailSender.EnviarConviteAsync(usuario.Email.Endereco, branding?.NomeExibicao, link, ct);
+                enviado = true;
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            {
+                // Não registrar exception/link: transportes podem incluir PII na mensagem.
+                _logger.LogError("Falha de convite. AfiliadaId={AfiliadaId} UsuarioId={UsuarioId} Tipo={Tipo}",
+                    _tenant.AfiliadaId, usuario.Id, ex.GetType().Name);
+                enviado = false;
+            }
+
+            await _db.Entry(usuario).ReloadAsync(ct);
+            if (usuario.TokenConviteHash == hashDesteEnvio)
+            {
+                if (enviado) usuario.RegistrarEnvioConvite();
+                else usuario.InvalidarTokenConvite();
+                try { await _db.SaveChangesAsync(ct); }
+                catch (DbUpdateConcurrencyException)
+                {
+                    // Um aceite/reenvio concorrente venceu. Nunca invalidar seu token.
+                    return Conflict(new { message = "O convite foi atualizado por outra solicitação. Recarregue a lista." });
+                }
+            }
+
+            return enviado ? null : StatusCode(503, new
+            {
+                id = usuario.Id,
+                conviteEnviado = false,
+                message = "Operador cadastrado, mas o convite não foi enviado. Use Reenviar convite na lista."
+            });
+        }
+
         /// <summary>
-        /// Atualiza dados cadastrais, permissões e — opcionalmente — a senha de um
+        /// Atualiza dados cadastrais e permissões de um
         /// operador, com validação Anti-IDOR e whitelist de permissões.
         /// </summary>
         /// <remarks>

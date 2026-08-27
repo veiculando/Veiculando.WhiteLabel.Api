@@ -109,6 +109,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
 
         [Theory]
         [InlineData("GET", "/api/wl/usuarios")]
+        [InlineData("POST", "/api/wl/usuarios/1/reenviar-convite")]
         [InlineData("GET", "/api/wl/locais")]
         [InlineData("GET", "/api/wl/pecas")]
         [InlineData("GET", "/api/wl/checking/pis-autorizadas")]
@@ -206,7 +207,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
         }
 
         [Fact]
-        public async Task Falha_no_envio_do_convite_reverte_a_criacao_do_operador()
+        public async Task Falha_no_envio_preserva_operador_pendente_para_reenvio()
         {
             var afiliada = Afiliada + 81;
             var adminEmail = "admin-falha-convite@exemplo.com";
@@ -226,7 +227,11 @@ namespace Veiculando.WhiteLabel.Api.Tests
             criacao.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
 
             var listagem = await admin.GetFromJsonAsync<UsuarioLista[]>("/api/wl/usuarios");
-            listagem.Should().NotContain(u => u.Email == convidadoEmail);
+            var pendente = listagem.Single(u => u.Email == convidadoEmail);
+            pendente.StatusConvite.Should().Be("Pendente");
+            var reenvio = await admin.PostAsJsonAsync($"/api/wl/usuarios/{pendente.Id}/reenviar-convite", new { });
+            reenvio.StatusCode.Should().Be(HttpStatusCode.OK);
+            factory.EmailSender.Convites.Should().ContainSingle();
         }
 
         private sealed record LoginResposta(string Token, int ExpiresInMinutes, string Nome, string Email, string[] Permissoes);

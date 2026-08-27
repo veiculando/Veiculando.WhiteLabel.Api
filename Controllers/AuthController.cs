@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Data.Entity;
+using System.Data.Entity.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Veiculando.Data.Contexts;
@@ -29,7 +30,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         private readonly VeiculandoDataContext _db;
         private readonly JwtSettings _jwtSettings;
         private readonly ITenantQueries _tenant;
-        private readonly ITenantContext _tenantContext;
+        private readonly WlPublicLinks _publicLinks;
         private readonly IWlTenantResolver _tenantResolver;
         private readonly IWlPasswordEmailSender _emailSender;
         private readonly IPasswordResetAttemptGuard _attemptGuard;
@@ -56,7 +57,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             VeiculandoDataContext db,
             IOptions<JwtSettings> jwtSettings,
             ITenantQueries tenant,
-            ITenantContext tenantContext,
+            WlPublicLinks publicLinks,
             IWlTenantResolver tenantResolver,
             IWlPasswordEmailSender emailSender,
             IPasswordResetAttemptGuard attemptGuard,
@@ -65,7 +66,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             _db = db;
             _jwtSettings = jwtSettings.Value;
             _tenant = tenant;
-            _tenantContext = tenantContext;
+            _publicLinks = publicLinks;
             _tenantResolver = tenantResolver;
             _emailSender = emailSender;
             _attemptGuard = attemptGuard;
@@ -194,7 +195,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (!usuario.IsValid())
                 return BadRequest(usuario.Notifications);
 
-            await _db.SaveChangesAsync(ct);
+            try { await _db.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return BadRequest(new { message = erroGenerico });
+            }
             return Ok(new { message = "Senha criada com sucesso. Faça login para continuar." });
         }
 
@@ -328,8 +333,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// </summary>
         private string MontarLinkRedefinicao(string tokenBruto, string email)
         {
-            var query = $"token={Uri.EscapeDataString(tokenBruto)}&email={Uri.EscapeDataString(email)}";
-            return $"https://{_tenantContext.Host}/login/alterar-senha?{query}";
+            return _publicLinks.Recuperacao(tokenBruto, email);
         }
 
         private static readonly object RespostaRecuperacaoSenha = new

@@ -25,6 +25,7 @@ namespace Veiculando.WhiteLabel.Api.Services
         public string SendGridApiKey { get; set; }
         public string FromEmail { get; set; }
         public string FromName { get; set; } = "Veiculando WhiteLabel";
+        public int ConviteValidadeHoras { get; set; } = 48;
     }
 
     /// <summary>
@@ -185,11 +186,11 @@ namespace Veiculando.WhiteLabel.Api.Services
                 subject: $"Crie sua senha — {marca}",
                 plainTextContent:
                     $"Você foi convidado para acessar {marca}.\n\n" +
-                    "Use o link abaixo para criar sua senha. O convite expira em 48 horas e só pode ser usado uma vez.\n\n" +
+                    $"Use o link abaixo para criar sua senha. O convite expira em {_options.ConviteValidadeHoras} horas e só pode ser usado uma vez.\n\n" +
                     $"{linkPrimeiroAcesso}\n\nSe você não esperava este convite, ignore este e-mail.",
                 htmlContent:
                     $"<p>Você foi convidado para acessar <strong>{WebUtility.HtmlEncode(marca)}</strong>.</p>" +
-                    "<p>Crie sua senha pelo botão abaixo. O convite expira em <strong>48 horas</strong> e só pode ser usado uma vez.</p>" +
+                    $"<p>Crie sua senha pelo botão abaixo. O convite expira em <strong>{_options.ConviteValidadeHoras} horas</strong> e só pode ser usado uma vez.</p>" +
                     $"<p><a href=\"{linkEscapado}\" style=\"display:inline-block;padding:10px 20px;background:#1a1a1a;color:#fff;text-decoration:none;border-radius:4px;\">Criar minha senha</a></p>" +
                     "<p>Se você não esperava este convite, ignore este e-mail.</p>");
 

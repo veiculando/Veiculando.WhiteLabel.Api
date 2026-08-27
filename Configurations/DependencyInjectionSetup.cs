@@ -77,8 +77,13 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // Recuperação de senha: API key e remetente do SendGrid vêm de
             // Key Vault/environment (WlPasswordEmail__SendGridApiKey,
             // WlPasswordEmail__FromEmail) — nunca do appsettings versionado.
-            services.Configure<Services.WlPasswordEmailOptions>(configuration.GetSection("WlPasswordEmail"));
+            services.AddOptions<WlPasswordEmailOptions>()
+                .Bind(configuration.GetSection("WlPasswordEmail"))
+                .Validate(o => o.ConviteValidadeHoras >= 1 && o.ConviteValidadeHoras <= 168,
+                    "ConviteValidadeHoras deve estar entre 1 e 168.")
+                .ValidateOnStart();
             services.AddScoped<Services.IWlPasswordEmailSender, Services.SendGridWlPasswordEmailSender>();
+            services.AddScoped<WlPublicLinks>();
 
             // Segunda camada de limite do esqueci-senha, por hash do e-mail e
             // independente de IP (ver PasswordResetAttemptGuard). Singleton: o

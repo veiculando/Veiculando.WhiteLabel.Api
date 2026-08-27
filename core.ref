@@ -14,11 +14,11 @@
 # passarem com o core novo, o bump esta validado.
 #
 # ---------------------------------------------------------------------------
-# SHA atual: head validado do PR #81 do core (TP-HOST).
+# SHA atual: hotfix de primeiro acesso no PR #108 do Core.
 #
 # Este pin contem WlDominio, WlDominioTipoEnum, WL_Configuracao e a migration
 # 202608111630000_AddWlDominioConfiguracao exigidos pela resolucao por Host.
 # O SHA continua valido e reproduzivel depois que o PR for integrado; um bump
 # posterior para a ponta da sprint deve passar novamente pelo CI deste BFF.
 # ---------------------------------------------------------------------------
-c5bf4680a3fedb012bc2a659fc3fea303703b53e
+6590768bb3f08ec5c144b9daa15e390c7970ba4c
