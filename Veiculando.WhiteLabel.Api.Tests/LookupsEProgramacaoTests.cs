@@ -58,7 +58,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
         public async Task Grade_de_programacao_traz_status_por_peca_e_periodo()
         {
             var email = "prog@exemplo.com";
-            await Seed.OperadorAsync(Afiliada, email);
+            await Seed.OperadorAsync(Afiliada, email, new[] { "PecaGerenciar" });
 
             var localId = await Seed.LocalAsync(Afiliada, "LPROG-A");
             var pecaId = await Seed.PecaAsync(localId, "PPROG-A");
@@ -89,7 +89,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
             const int outra = 9100;
 
             var email = "prog-iso@exemplo.com";
-            await Seed.OperadorAsync(Afiliada, email);
+            await Seed.OperadorAsync(Afiliada, email, new[] { "PecaGerenciar" });
 
             var localDeB = await Seed.LocalAsync(outra, "LPRG-B");
             var pecaDeB = await Seed.PecaAsync(localDeB, "PPRG-B");
@@ -102,6 +102,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
             var resposta = await client.PostAsJsonAsync("/api/wl/programacao/listar",
                 new { IdPeriodo = (int?)null, IdLocal = (int?)null });
 
+            resposta.EnsureSuccessStatusCode();
             var grade = await resposta.Content.ReadFromJsonAsync<GradeDto[]>();
 
             grade.Should().NotBeNull();
