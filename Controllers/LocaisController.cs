@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Data.Entity;
+using System.Data.Entity.Infrastructure;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -60,6 +61,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // verificação de propriedade que o Update faz.
             command.Id = 0;
 
+            var validacao = ValidarDadosLocal(command);
+            if (validacao != null) return validacao;
+
             var resposta = await _coreCadastro.SalvarLocalAsync(command, WlUsuarioId);
             return RepassarResposta(resposta);
         }
@@ -97,6 +101,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             command.Id = id;
 
+            var validacao = ValidarDadosLocal(command);
+            if (validacao != null) return validacao;
+
             var resposta = await _coreCadastro.SalvarLocalAsync(command, WlUsuarioId);
             return RepassarResposta(resposta);
         }
@@ -111,7 +118,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// (ADR-WL-004). O operador cadastrava e o registro não aparecia em
         /// lugar nenhum — indistinguível de uma falha no cadastro.
         ///
-        /// Deletados (-1) e Inativos (0) continuam fora. O <c>StatusExibicao</c>
+        /// Somente deletados ficam fora. Inativos precisam aparecer para reativação. O <c>StatusExibicao</c>
         /// passou a ser projetado para o frontend poder rotular a situação em vez
         /// de assumir que tudo que veio está ativo.
         /// </remarks>
@@ -122,8 +129,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             var locais = await _tenant.Locais
                 .AsNoTracking()
-                .Where(l => (l.StatusExibicao == StatusExibicaoEnum.Ativo
-                          || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente))
+                .Where(l => l.StatusExibicao != StatusExibicaoEnum.Deletado)
                 .Select(l => new
                 {
                     l.Id,
@@ -133,7 +139,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     UF = l.Cidade.Estado.Sigla,
                     l.FonteOrigem,
                     l.FonteTimestamp,
-                    l.StatusExibicao
+                    l.StatusExibicao,
+                    l.TimeStamp
                 })
                 .ToListAsync();
 
@@ -169,8 +176,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .Include(l => l.Cidade.Estado)
                 .FirstOrDefaultAsync(l => l.Id == id
                                       
-                                       && (l.StatusExibicao == StatusExibicaoEnum.Ativo
-                                        || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
+                                       && l.StatusExibicao != StatusExibicaoEnum.Deletado);
 
             if (local == null)
                 return NotFound(new { message = "Local não encontrado." });
@@ -187,6 +193,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 local.CodigoInterno,
                 local.PalavrasChave,
                 local.StatusExibicao,
+                local.TimeStamp,
                 Endereco = new
                 {
                     local.Endereco?.Logradouro,
@@ -284,6 +291,46 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             return RepassarResposta(resposta);
         }
 
+        private IActionResult ValidarDadosLocal(LocalCadastroCommand command)
+        {
+            if (command.IdCidade <= 0 || string.IsNullOrWhiteSpace(command.Endereco?.Logradouro)
+                || command.Geolocalizacao == null || !command.Geolocalizacao.IsValid())
+                return BadRequest(new { message = "Informe cidade, logradouro e coordenadas válidas." });
+            return null;
+        }
+
+        [HttpPost("{id}/cancelar")]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public Task<IActionResult> Cancelar(int id, [FromBody] LocalStatusRequest request) =>
+            AlterarStatus(id, request, StatusExibicaoEnum.Deletado);
+
+        [HttpPost("{id}/inativar")]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public Task<IActionResult> Inativar(int id, [FromBody] LocalStatusRequest request) =>
+            AlterarStatus(id, request, StatusExibicaoEnum.Inativo);
+
+        [HttpPost("{id}/reativar")]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public Task<IActionResult> Reativar(int id, [FromBody] LocalStatusRequest request) =>
+            AlterarStatus(id, request, StatusExibicaoEnum.AprovacaoPendente);
+
+        private async Task<IActionResult> AlterarStatus(int id, LocalStatusRequest request, StatusExibicaoEnum destino)
+        {
+            var local = await _tenant.Locais.SingleOrDefaultAsync(l => l.Id == id && l.StatusExibicao != StatusExibicaoEnum.Deletado);
+            if (local == null) return NotFound(new { message = "Local não encontrado." });
+            if (request?.TimeStamp == null || request.TimeStamp.Length != 8)
+                return BadRequest(new { message = "Recarregue o local antes de alterar sua situação." });
+            if (!request.TimeStamp.SequenceEqual(local.TimeStamp) || !local.TentarAlterarStatusWhiteLabel(destino))
+                return Conflict(new { message = "A situação do local mudou ou esta transição não é permitida. Recarregue a listagem." });
+            local.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, null, WlUsuarioId);
+            try { await _db.SaveChangesAsync(); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "O local foi alterado por outra operação. Recarregue a listagem." });
+            }
+            return Ok(new { local.Id, local.StatusExibicao, local.TimeStamp });
+        }
+
         [HttpDelete("{id}")]
         [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
         [EnableRateLimiting(Startup.RateLimitEscrita)]
@@ -301,7 +348,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
 
             local.Delete();
-            await _db.SaveChangesAsync();
+            try { await _db.SaveChangesAsync(); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "O local foi alterado por outra operação. Recarregue a listagem." });
+            }
 
             return NoContent();
         }
@@ -318,6 +369,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         public int[] PerfisPsicograficos { get; set; }
         public int[] Segmentos { get; set; }
         public int[] PoiCategorias { get; set; }
+    }
+
+    public sealed class LocalStatusRequest
+    {
+        public byte[] TimeStamp { get; set; }
     }
 
     [ApiController]
