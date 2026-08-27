@@ -42,7 +42,7 @@ public class UploadsIntegrationTests
         var fotos = await client.GetFromJsonAsync<JsonElement[]>(route + "s");
         fotos.Should().ContainSingle();
         fotos[0].GetProperty("sha256").GetString().Should().HaveLength(64);
-        fotos[0].GetProperty("fileName").GetString().Should().MatchRegex("^[a-f0-9]{32}\\.png$");
+        fotos[0].GetProperty("fileName").GetString().Should().MatchRegex("^wl-[a-f0-9]{32}\\.png$");
         var download = fotos[0].GetProperty("downloadUrl").GetString();
         (await client.GetByteArrayAsync(download)).Length.Should().BeGreaterThan(8);
 

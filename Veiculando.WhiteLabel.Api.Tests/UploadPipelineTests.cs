@@ -12,7 +12,7 @@ namespace Veiculando.WhiteLabel.Api.Tests;
 
 public class UploadPipelineTests
 {
-    private static readonly WlStoredFile File = new("tenant-1/pecas/2/0123456789abcdef0123456789abcdef.jpg", "0123456789abcdef0123456789abcdef.jpg", "image/jpeg", 3, "abc", DateTimeOffset.UtcNow.AddDays(-2));
+    private static readonly WlStoredFile File = new("tenant-1/pecas/2/wl-0123456789abcdef0123456789abcdef.jpg", "wl-0123456789abcdef0123456789abcdef.jpg", "image/jpeg", 3, "abc", DateTimeOffset.UtcNow.AddDays(-2));
 
     [Fact]
     public async Task Confirma_blob_antes_de_gravar_referencia()

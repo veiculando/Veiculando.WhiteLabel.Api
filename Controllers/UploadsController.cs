@@ -127,7 +127,7 @@ public sealed class UploadsController : WlCoreProxyControllerBase
             && p.StatusExibicao != StatusExibicaoEnum.Deletado && p.Local.StatusExibicao != StatusExibicaoEnum.Deletado, ct);
         if (peca == null) return NotFound(new { message = "Peça não encontrada neste local." });
         var name = peca.Foto?.ArquivoNome;
-        if (string.IsNullOrEmpty(name) || !System.Text.RegularExpressions.Regex.IsMatch(name, @"^[a-f0-9]{32}\.(jpg|png)$"))
+        if (string.IsNullOrEmpty(name) || !System.Text.RegularExpressions.Regex.IsMatch(name, @"^wl-[a-f0-9]{32}\.(jpg|png)$"))
             return Ok(Array.Empty<object>()); // Foto legada não é um blob privado WL.
         var key = Key("pecas", pecaId, name);
         try { return Ok(new[] { Descriptor(await _storage.InfoAsync(key, ct), $"/api/wl/pecas/locais/{idLocal}/pecas/{pecaId}/foto") }); }
@@ -220,7 +220,7 @@ public sealed class UploadsController : WlCoreProxyControllerBase
             body.Position = 0;
             var hash = Convert.ToHexString(await SHA256.HashDataAsync(body, ct)).ToLowerInvariant();
             body.Position = 0;
-            var name = Guid.NewGuid().ToString("N") + (foto.ContentType == "image/png" ? ".png" : ".jpg");
+            var name = "wl-" + Guid.NewGuid().ToString("N") + (foto.ContentType == "image/png" ? ".png" : ".jpg");
             var file = new WlStoredFile(Key(kind, id, name), name, foto.ContentType, body.Length, hash, DateTimeOffset.UtcNow);
             await _pipeline.SaveAsync(file, body, WlUsuarioId.Value, () => commit(file),
                 () => _references.ExistsAsync(file.Key, CancellationToken.None), ct);

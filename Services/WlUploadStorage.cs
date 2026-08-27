@@ -113,7 +113,7 @@ public sealed record WlUploadKey(int TenantId, string Kind, int ResourceId, stri
     public static WlUploadKey Parse(string key)
     {
         var match = System.Text.RegularExpressions.Regex.Match(key ?? "",
-            @"^tenant-([1-9][0-9]*)/(pecas|checking)/([1-9][0-9]*)/([a-f0-9]{32}\.(?:jpg|png))$");
+            @"^tenant-([1-9][0-9]*)/(pecas|checking)/([1-9][0-9]*)/(wl-[a-f0-9]{32}\.(?:jpg|png))$");
         if (!match.Success || !int.TryParse(match.Groups[1].Value, out var tenant) || !int.TryParse(match.Groups[3].Value, out var resource))
             throw new ArgumentException("Referência de upload inválida.");
         return new(tenant, match.Groups[2].Value, resource, match.Groups[4].Value);
