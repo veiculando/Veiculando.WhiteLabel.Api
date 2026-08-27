@@ -21,4 +21,4 @@
 # O SHA continua valido e reproduzivel depois que o PR for integrado; um bump
 # posterior para a ponta da sprint deve passar novamente pelo CI deste BFF.
 # ---------------------------------------------------------------------------
-82260c3d8efe78c3bc7c14c09a1dd8912be0229f
+4cce4dde1a7ba974ffbafc3735644c1265ec7dcd

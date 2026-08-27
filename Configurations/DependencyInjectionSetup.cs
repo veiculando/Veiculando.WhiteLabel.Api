@@ -102,6 +102,10 @@ namespace Veiculando.WhiteLabel.Api.Configurations
 
             // Validação de arquivos (magic bytes + tamanho).
             services.AddSingleton<IFileValidationService, FileValidationService>();
+            services.AddSingleton<IWlUploadStorage, AzureWlUploadStorage>();
+            services.AddScoped<WlUploadPipeline>();
+            services.AddScoped<WlUploadReferences>();
+            services.AddHostedService<WlUploadReconciler>();
 
             // Não há filtro de sanitização de entrada por lista de padrões, e a
             // ausência é deliberada.

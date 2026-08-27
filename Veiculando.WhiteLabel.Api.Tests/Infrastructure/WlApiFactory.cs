@@ -52,6 +52,7 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
 
         /// <summary>Dublê de e-mail — captura o que seria enviado pela recuperação de senha.</summary>
         public FakeWlPasswordEmailSender EmailSender { get; } = new();
+        public FakeWlUploadStorage Uploads { get; } = new();
 
         public WlApiFactory(SqlServerFixture db, int afiliadaId, string? host = null)
         {
@@ -83,7 +84,7 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                     // Conta de servico: o VeiculandoApiClient recusa autenticar sem
                     // ela. Os valores nao importam — quem responde e o CoreApiStub —
                     // mas a ausencia faz o cliente lancar antes de chegar na rede.
-                    [$"SeedAccounts:{AfiliadaId}:Email"] = "conta-servico@teste.local",
+                    [$"SeedAccounts:{AfiliadaId}:Email"] = $"conta-servico-{AfiliadaId}@teste.local",
                     [$"SeedAccounts:{AfiliadaId}:Password"] = "irrelevante-o-stub-responde",
                 });
             });
@@ -107,6 +108,7 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                 // testes de recuperação de senha não devem depender de rede nem
                 // de uma API key de verdade.
                 services.AddSingleton<IWlPasswordEmailSender>(EmailSender);
+                services.AddSingleton<IWlUploadStorage>(Uploads);
             });
         }
 

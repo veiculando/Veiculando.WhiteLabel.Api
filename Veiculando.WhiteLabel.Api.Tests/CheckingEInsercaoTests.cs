@@ -75,9 +75,10 @@ namespace Veiculando.WhiteLabel.Api.Tests
         /// evidencia de que a insercao aconteceu.
         /// </summary>
         [Fact]
-        public async Task Envio_de_foto_responde_501_e_nao_finge_sucesso()
+        public async Task Envio_de_foto_persiste_e_permite_listar_e_baixar_apos_nova_requisicao()
         {
             var (factory, client, codigo) = await PrepararAsync("fot");
+            await Seed.ServicoCoreAsync(Afiliada);
             using var _ = factory;
             using var __ = client;
 
@@ -92,12 +93,17 @@ namespace Veiculando.WhiteLabel.Api.Tests
 
             var resposta = await client.PostAsync($"/api/wl/checking/enviar-foto/{idItem}", conteudo);
 
-            resposta.StatusCode.Should().Be(HttpStatusCode.NotImplemented,
-                "enquanto nao ha armazenamento, a resposta honesta e 501");
-
-            var corpo = await resposta.Content.ReadAsStringAsync();
-            corpo.Should().Contain("Nenhuma foto foi salva",
-                "o operador precisa saber que a comprovacao NAO foi registrada");
+            resposta.StatusCode.Should().Be(HttpStatusCode.OK);
+            factory.Uploads.Files.Should().ContainSingle();
+            var fotos = await client.GetFromJsonAsync<System.Text.Json.JsonElement[]>($"/api/wl/checking/item/{idItem}/fotos");
+            fotos.Should().ContainSingle();
+            var url = fotos[0].GetProperty("downloadUrl").GetString();
+            (await client.GetByteArrayAsync(url)).Should().Equal(jpeg);
+            // Outra requisição percorre os registros EF6 gravados, não o objeto ainda rastreado.
+            var recarregado = await client.GetFromJsonAsync<System.Text.Json.JsonElement[]>($"/api/wl/checking/item/{idItem}/fotos");
+            recarregado.Should().HaveCount(1);
+            using var anonimo = factory.ClienteAnonimo();
+            (await anonimo.GetAsync(url)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         }
 
         /// <summary>

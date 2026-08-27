@@ -11,7 +11,7 @@ namespace Veiculando.WhiteLabel.Api.Services
         private static readonly Dictionary<string, byte[]> AllowedMagicBytes = new Dictionary<string, byte[]>
         {
             { "image/jpeg", new byte[] { 0xFF, 0xD8, 0xFF } },
-            { "image/png",  new byte[] { 0x89, 0x50, 0x4E, 0x47 } },
+            { "image/png",  new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A } },
             { "application/pdf", new byte[] { 0x25, 0x50, 0x44, 0x46 } }
         };
 
@@ -35,7 +35,7 @@ namespace Veiculando.WhiteLabel.Api.Services
             // IFormFile.OpenReadStream() pode ser chamado múltiplas vezes.
             using var stream = file.OpenReadStream();
             var header = new byte[8];
-            _ = stream.Read(header, 0, 8);
+            var read = stream.ReadAtLeast(header, header.Length, throwOnEndOfStream: false);
             // Nota: o stream deste using é descartado ao sair do bloco.
             // O caller deve chamar file.OpenReadStream() novamente para obter
             // um stream posicionado em 0 para gravação no storage.
@@ -43,7 +43,8 @@ namespace Veiculando.WhiteLabel.Api.Services
             foreach (var kvp in AllowedMagicBytes)
             {
                 var magic = kvp.Value;
-                if (header.Take(magic.Length).SequenceEqual(magic))
+                if (read >= magic.Length && string.Equals(file.ContentType, kvp.Key, StringComparison.OrdinalIgnoreCase)
+                    && header.Take(magic.Length).SequenceEqual(magic))
                 {
                     errorMessage = null;
                     return true;
