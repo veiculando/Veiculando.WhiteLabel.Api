@@ -167,12 +167,21 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// grava a primeira em <c>IdPecaRecomendada</c>; é o mecanismo de
         /// "motivo" que o domínio tem).</para>
         ///
-        /// <para><b>O que é validado aqui e não no core.</b> O handler do core
-        /// itera sobre os itens que recebe e não exige que todos os pendentes
-        /// venham — omitir um item o deixaria pendente para sempre, com o pedido
-        /// já marcado como respondido. Ele também não valida a afiliada da peça
-        /// sugerida (a checagem de tenant lá está comentada, com um TODO). As
-        /// duas coisas são barradas aqui, antes da chamada remota.</para>
+        /// <para><b>Resposta completa é regra desta camada, não do core.</b> O
+        /// handler do core aceita resposta parcial de propósito: seu
+        /// <c>AtualizaStatus()</c> verifica <c>pendente</c> primeiro e mantém o
+        /// pedido em <c>Solicitado</c> enquanto houver item sem resposta, então
+        /// responder um subconjunto é coerente lá.
+        ///
+        /// Aqui a resposta é completa ou não é, porque é o que o Cenário 3 do
+        /// card <c>67d92ac5</c> pede e é o que a tela faz — ela carrega o pedido
+        /// inteiro e decide item a item numa submissão só. Se um dia a UI
+        /// precisar responder em partes, esta guarda é o que sai; o core já
+        /// suporta.</para>
+        ///
+        /// <para><b>Duplicidade e item desconhecido</b> também são barrados aqui,
+        /// antes da chamada remota — o core recusa item desconhecido, mas com uma
+        /// notificação genérica e só ao chegar nele dentro do laço.</para>
         /// </remarks>
         [HttpPost("resposta")]
         [Authorize(Policy = AuthorizationSetup.PedidoReservaGerenciar)]
@@ -238,8 +247,12 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 });
             }
 
-            // Omitir um item o deixaria pendente para sempre enquanto o pedido ja
-            // constaria respondido — por isso a resposta e completa ou nao e.
+            // Cenario 3 do card 67d92ac5: o payload que OMITE um item pendente e
+            // recusado. Nao e para compensar defeito do core — la a resposta
+            // parcial e valida e coerente (AtualizaStatus mantem Solicitado
+            // enquanto houver pendente). E que a tela WL responde o pedido
+            // inteiro de uma vez, e meia resposta vinda dela indica bug de
+            // cliente, nao intencao do operador.
             var faltantes = esperados.Where(id => !recebidos.Contains(id)).ToList();
             if (faltantes.Any())
             {
@@ -253,6 +266,12 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // Peca sugerida so pode ser do proprio tenant. `_tenant.Pecas` ja
             // recorta pela afiliada do Local, entao o que nao voltar da consulta
             // ou e de outra exibidora ou nao existe — nos dois casos, recusa.
+            //
+            // Esta guarda tambem existe no core desde o PR #112 do repo
+            // Veiculando — la ela e a barreira de verdade, porque vale para todos
+            // os chamadores do handler (o painel Afiliada inclusive). Mantida aqui
+            // para recusar antes da chamada remota e com mensagem util a tela; nao
+            // e mais a unica linha de defesa, e nao deve ser removida por isso.
             var sugeridas = dto.Itens
                 .Where(i => i.IdsPecaSugerida != null)
                 .SelectMany(i => i.IdsPecaSugerida)
