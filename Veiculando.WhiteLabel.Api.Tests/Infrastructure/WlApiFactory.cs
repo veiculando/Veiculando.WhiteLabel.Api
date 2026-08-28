@@ -54,6 +54,9 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         public FakeWlPasswordEmailSender EmailSender { get; } = new();
         public FakeWlUploadStorage Uploads { get; } = new();
 
+        /// <summary>Captura o que o BFF pediu ao FileServer (PDF de PI).</summary>
+        public FileServerStub FileServer { get; } = new();
+
         public WlApiFactory(SqlServerFixture db, int afiliadaId, string? host = null)
         {
             _connectionString = db.ConnectionString;
@@ -80,6 +83,10 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                     ["JwtSettings:ValidAt"] = "wl-tests",
 
                     ["CoreApiUrl"] = "http://core.invalido/",
+
+                    // Host inalcançável de proposito: se algum caminho escapar do
+                    // FileServerStub a chamada falha em vez de sair para a rede.
+                    ["FileServerUrl"] = "http://fileserver.invalido/",
 
                     // Conta de servico: o VeiculandoApiClient recusa autenticar sem
                     // ela. Os valores nao importam — quem responde e o CoreApiStub —
@@ -109,6 +116,14 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                 // de uma API key de verdade.
                 services.AddSingleton<IWlPasswordEmailSender>(EmailSender);
                 services.AddSingleton<IWlUploadStorage>(Uploads);
+
+                // Intercepta o cliente tipado do FileServer, pelo mesmo mecanismo
+                // usado no core: o teste precisa observar se a chamada saiu.
+                services.AddHttpClient<IWlPiPdfSource, FileServerPiPdfSource>(client =>
+                    {
+                        client.BaseAddress = new Uri("http://fileserver.invalido/");
+                    })
+                    .ConfigurePrimaryHttpMessageHandler(() => FileServer);
             });
         }
 

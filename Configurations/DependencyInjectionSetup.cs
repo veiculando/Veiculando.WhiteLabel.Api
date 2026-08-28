@@ -100,6 +100,22 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // Cadastro de Local/Peça delegado ao core (ver CoreCadastroService)
             services.AddScoped<ICoreCadastroService, CoreCadastroService>();
 
+            // PDF de PI. O FileServer é alcançado SOMENTE por aqui: ele não tem
+            // [Authorize] e busca a PI só pelo código, sem AfiliadaId, então a
+            // URL dele nunca pode chegar ao browser (ver IWlPiPdfSource).
+            //
+            // `FileServerUrl` é a chave nova — é o nome que o
+            // preview/docker-compose.preview.yml já usa. O env var FILE_SERVER_URL
+            // continua sendo lido para não quebrar deploys que ainda o definem.
+            var fileServerUrl = configuration.GetValue<string>("FileServerUrl")
+                ?? Environment.GetEnvironmentVariable("FILE_SERVER_URL")
+                ?? "https://fileserver.veiculando.com.br/";
+
+            services.AddHttpClient<IWlPiPdfSource, FileServerPiPdfSource>(client =>
+            {
+                client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
+            });
+
             // Validação de arquivos (magic bytes + tamanho).
             services.AddSingleton<IFileValidationService, FileValidationService>();
             services.AddSingleton<IWlUploadStorage, AzureWlUploadStorage>();

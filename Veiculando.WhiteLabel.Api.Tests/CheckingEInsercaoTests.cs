@@ -178,7 +178,12 @@ namespace Veiculando.WhiteLabel.Api.Tests
             pi!.Codigo.Should().Be(codigo);
             pi.Anunciante.Should().Be("Cliente Teste", "vem de Pedido.Campanha.Cliente");
             pi.Agencia.Should().Be("Agencia Teste", "vem de Pedido.Campanha.Agencia");
-            pi.PdfUrl.Should().Contain("/pedidoinsercao/detalhes/");
+
+            // A assercao sobre PdfUrl saiu daqui de proposito. Ela fixava o
+            // defeito: o campo publicava o host do FileServer no payload, e a
+            // rota que ele montava (`/pedidoinsercao/detalhes/{Id}`) nem existe
+            // naquele servico. O PDF agora sai por `{codigo}/pdf` neste mesmo
+            // controller — ver PedidosInsercaoPdfTests.
         }
 
         [Fact]
@@ -197,6 +202,6 @@ namespace Veiculando.WhiteLabel.Api.Tests
 
         private sealed record PiDto(int Id, string Codigo);
         private sealed record ItemPiDto(int IdPedidoItem, int IdPedidoInsercao, string Status, string PecaCodigo, string LocalCodigo);
-        private sealed record PiDetalheDto(int Id, string Codigo, string Status, string Agencia, string Anunciante, string PdfUrl);
+        private sealed record PiDetalheDto(int Id, string Codigo, string Status, string Agencia, string Anunciante);
     }
 }
