@@ -77,8 +77,13 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // Recuperação de senha: API key e remetente do SendGrid vêm de
             // Key Vault/environment (WlPasswordEmail__SendGridApiKey,
             // WlPasswordEmail__FromEmail) — nunca do appsettings versionado.
-            services.Configure<Services.WlPasswordEmailOptions>(configuration.GetSection("WlPasswordEmail"));
+            services.AddOptions<WlPasswordEmailOptions>()
+                .Bind(configuration.GetSection("WlPasswordEmail"))
+                .Validate(o => o.ConviteValidadeHoras >= 1 && o.ConviteValidadeHoras <= 168,
+                    "ConviteValidadeHoras deve estar entre 1 e 168.")
+                .ValidateOnStart();
             services.AddScoped<Services.IWlPasswordEmailSender, Services.SendGridWlPasswordEmailSender>();
+            services.AddScoped<WlPublicLinks>();
 
             // Segunda camada de limite do esqueci-senha, por hash do e-mail e
             // independente de IP (ver PasswordResetAttemptGuard). Singleton: o
@@ -95,8 +100,28 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // Cadastro de Local/Peça delegado ao core (ver CoreCadastroService)
             services.AddScoped<ICoreCadastroService, CoreCadastroService>();
 
+            // PDF de PI. O FileServer é alcançado SOMENTE por aqui: ele não tem
+            // [Authorize] e busca a PI só pelo código, sem AfiliadaId, então a
+            // URL dele nunca pode chegar ao browser (ver IWlPiPdfSource).
+            //
+            // `FileServerUrl` é a chave nova — é o nome que o
+            // preview/docker-compose.preview.yml já usa. O env var FILE_SERVER_URL
+            // continua sendo lido para não quebrar deploys que ainda o definem.
+            var fileServerUrl = configuration.GetValue<string>("FileServerUrl")
+                ?? Environment.GetEnvironmentVariable("FILE_SERVER_URL")
+                ?? "https://fileserver.veiculando.com.br/";
+
+            services.AddHttpClient<IWlPiPdfSource, FileServerPiPdfSource>(client =>
+            {
+                client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
+            });
+
             // Validação de arquivos (magic bytes + tamanho).
             services.AddSingleton<IFileValidationService, FileValidationService>();
+            services.AddSingleton<IWlUploadStorage, AzureWlUploadStorage>();
+            services.AddScoped<WlUploadPipeline>();
+            services.AddScoped<WlUploadReferences>();
+            services.AddHostedService<WlUploadReconciler>();
 
             // Não há filtro de sanitização de entrada por lista de padrões, e a
             // ausência é deliberada.

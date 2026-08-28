@@ -25,6 +25,7 @@ namespace Veiculando.WhiteLabel.Api.Services
         public string SendGridApiKey { get; set; }
         public string FromEmail { get; set; }
         public string FromName { get; set; } = "Veiculando WhiteLabel";
+        public int ConviteValidadeHoras { get; set; } = 48;
     }
 
     /// <summary>
@@ -38,6 +39,12 @@ namespace Veiculando.WhiteLabel.Api.Services
     /// </remarks>
     public interface IWlPasswordEmailSender
     {
+        Task EnviarConviteAsync(
+            string destinatarioEmail,
+            string nomeExibicaoMarca,
+            string linkPrimeiroAcesso,
+            CancellationToken cancellationToken = default);
+
         /// <summary>
         /// Envia o e-mail de recuperação de senha.
         /// </summary>
@@ -152,6 +159,56 @@ namespace Veiculando.WhiteLabel.Api.Services
             {
                 _logger.LogError(
                     "SendGrid recusou o envio do e-mail de recuperação de senha. StatusCode={StatusCode}",
+                    (int)resposta.StatusCode);
+                throw new WlPasswordEmailException($"SendGrid recusou o envio (status {(int)resposta.StatusCode}).");
+            }
+        }
+
+        public async Task EnviarConviteAsync(
+            string destinatarioEmail,
+            string nomeExibicaoMarca,
+            string linkPrimeiroAcesso,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(destinatarioEmail))
+                throw new ArgumentException("Destinatário é obrigatório.", nameof(destinatarioEmail));
+            if (string.IsNullOrWhiteSpace(linkPrimeiroAcesso))
+                throw new ArgumentException("Link de primeiro acesso é obrigatório.", nameof(linkPrimeiroAcesso));
+            if (string.IsNullOrWhiteSpace(_options.SendGridApiKey) || string.IsNullOrWhiteSpace(_options.FromEmail))
+                throw new WlPasswordEmailException(
+                    "Remetente de e-mail não configurado (WlPasswordEmail:SendGridApiKey / FromEmail).");
+
+            var marca = string.IsNullOrWhiteSpace(nomeExibicaoMarca) ? "Veiculando" : nomeExibicaoMarca.Trim();
+            var linkEscapado = WebUtility.HtmlEncode(linkPrimeiroAcesso);
+            var mensagem = MailHelper.CreateSingleEmail(
+                from: new EmailAddress(_options.FromEmail, _options.FromName),
+                to: new EmailAddress(destinatarioEmail),
+                subject: $"Crie sua senha — {marca}",
+                plainTextContent:
+                    $"Você foi convidado para acessar {marca}.\n\n" +
+                    $"Use o link abaixo para criar sua senha. O convite expira em {_options.ConviteValidadeHoras} horas e só pode ser usado uma vez.\n\n" +
+                    $"{linkPrimeiroAcesso}\n\nSe você não esperava este convite, ignore este e-mail.",
+                htmlContent:
+                    $"<p>Você foi convidado para acessar <strong>{WebUtility.HtmlEncode(marca)}</strong>.</p>" +
+                    $"<p>Crie sua senha pelo botão abaixo. O convite expira em <strong>{_options.ConviteValidadeHoras} horas</strong> e só pode ser usado uma vez.</p>" +
+                    $"<p><a href=\"{linkEscapado}\" style=\"display:inline-block;padding:10px 20px;background:#1a1a1a;color:#fff;text-decoration:none;border-radius:4px;\">Criar minha senha</a></p>" +
+                    "<p>Se você não esperava este convite, ignore este e-mail.</p>");
+
+            var client = new SendGridClient(_options.SendGridApiKey);
+            Response resposta;
+            try
+            {
+                resposta = await client.SendEmailAsync(mensagem, cancellationToken);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            {
+                _logger.LogError(ex, "Falha de transporte ao enviar convite de primeiro acesso via SendGrid.");
+                throw new WlPasswordEmailException("Falha ao enviar convite de primeiro acesso.", ex);
+            }
+
+            if (!resposta.IsSuccessStatusCode)
+            {
+                _logger.LogError("SendGrid recusou o convite de primeiro acesso. StatusCode={StatusCode}",
                     (int)resposta.StatusCode);
                 throw new WlPasswordEmailException($"SendGrid recusou o envio (status {(int)resposta.StatusCode}).");
             }

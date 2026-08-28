@@ -79,3 +79,28 @@ Excedido, a resposta é **429**.
 ⚠️ O particionamento usa `RemoteIpAddress`. Atrás de proxy ou CDN esse endereço
 passa a ser o do proxy, e o limite vira global em vez de por cliente — nesse
 cenário, configurar `ForwardedHeaders` antes de confiar nos números.
+# Hotfix — primeiro acesso e links públicos
+
+O administrador cria operadores sem senha. `POST /api/wl/usuarios` persiste o
+operador pendente e tenta enviar o convite. Em falha do provedor, responde 503
+com `id`, `conviteEnviado=false` e mensagem explícita; a conta permanece sem
+senha, para `POST /api/wl/usuarios/{id}/reenviar-convite`. Este endpoint exige
+`UsuarioAfiliadaGerenciar`, revoga o token anterior e recusa contas já ativadas
+com 409. Falhas de envio invalidam somente o token daquela tentativa.
+
+`POST /api/wl/auth/primeiro-acesso` consome o convite por Host/e-mail/hash e cria
+a senha. A rowversion do EF6 protege aceite versus reenvio concorrente. Não
+retorna JWT. Convite e recuperação são independentes.
+
+- `WlPasswordEmail__ConviteValidadeHoras`: 1–168 horas (padrão 48).
+- Links usam HTTPS e o Host cadastrado em `WlDominio` por padrão.
+- `WlPublicOrigins__Hosts__<host>` permite explicitar origem/porta do **mesmo**
+  Host. Não permite caminho, query, fragmento, credenciais ou outro domínio.
+- HTTP só é aceito com `ASPNETCORE_ENVIRONMENT=Preview` **e**
+  `WlPublicOrigins__AllowHttpPreview=true`. Nunca habilitar para usuários/dados
+  reais: HTTP expõe senha/token em trânsito. Preferir HTTPS no preview.
+- Exemplo de origem para dados sintéticos:
+  `WlPublicOrigins__Hosts__exibidora-preview.20.42.92.186.nip.io=http://exibidora-preview.20.42.92.186.nip.io:9080`.
+
+Esta configuração não migra o banco. Aplicar a migration EF6 do Core antes de
+subir o BFF; `core.ref` fixa o SHA compatível para o CI.

@@ -75,9 +75,10 @@ namespace Veiculando.WhiteLabel.Api.Tests
         /// evidencia de que a insercao aconteceu.
         /// </summary>
         [Fact]
-        public async Task Envio_de_foto_responde_501_e_nao_finge_sucesso()
+        public async Task Envio_de_foto_persiste_e_permite_listar_e_baixar_apos_nova_requisicao()
         {
             var (factory, client, codigo) = await PrepararAsync("fot");
+            await Seed.ServicoCoreAsync(Afiliada);
             using var _ = factory;
             using var __ = client;
 
@@ -92,12 +93,23 @@ namespace Veiculando.WhiteLabel.Api.Tests
 
             var resposta = await client.PostAsync($"/api/wl/checking/enviar-foto/{idItem}", conteudo);
 
-            resposta.StatusCode.Should().Be(HttpStatusCode.NotImplemented,
-                "enquanto nao ha armazenamento, a resposta honesta e 501");
-
-            var corpo = await resposta.Content.ReadAsStringAsync();
-            corpo.Should().Contain("Nenhuma foto foi salva",
-                "o operador precisa saber que a comprovacao NAO foi registrada");
+            resposta.StatusCode.Should().Be(HttpStatusCode.OK);
+            factory.Uploads.Files.Should().ContainSingle();
+            var fotos = await client.GetFromJsonAsync<System.Text.Json.JsonElement[]>($"/api/wl/checking/item/{idItem}/fotos");
+            fotos.Should().ContainSingle();
+            var url = fotos[0].GetProperty("downloadUrl").GetString();
+            (await client.GetByteArrayAsync(url)).Should().Equal(jpeg);
+            // Outra requisição percorre os registros EF6 gravados, não o objeto ainda rastreado.
+            var recarregado = await client.GetFromJsonAsync<System.Text.Json.JsonElement[]>($"/api/wl/checking/item/{idItem}/fotos");
+            recarregado.Should().HaveCount(1);
+            using var segundo = new MultipartFormDataContent();
+            var novaFoto = new ByteArrayContent(jpeg);
+            novaFoto.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+            segundo.Add(novaFoto, "foto", "segunda.jpg");
+            (await client.PostAsync($"/api/wl/checking/enviar-foto/{idItem}", segundo)).StatusCode.Should().Be(HttpStatusCode.OK);
+            (await client.GetFromJsonAsync<System.Text.Json.JsonElement[]>($"/api/wl/checking/item/{idItem}/fotos")).Should().HaveCount(2);
+            using var anonimo = factory.ClienteAnonimo();
+            (await anonimo.GetAsync(url)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         }
 
         /// <summary>
@@ -166,7 +178,12 @@ namespace Veiculando.WhiteLabel.Api.Tests
             pi!.Codigo.Should().Be(codigo);
             pi.Anunciante.Should().Be("Cliente Teste", "vem de Pedido.Campanha.Cliente");
             pi.Agencia.Should().Be("Agencia Teste", "vem de Pedido.Campanha.Agencia");
-            pi.PdfUrl.Should().Contain("/pedidoinsercao/detalhes/");
+
+            // A assercao sobre PdfUrl saiu daqui de proposito. Ela fixava o
+            // defeito: o campo publicava o host do FileServer no payload, e a
+            // rota que ele montava (`/pedidoinsercao/detalhes/{Id}`) nem existe
+            // naquele servico. O PDF agora sai por `{codigo}/pdf` neste mesmo
+            // controller — ver PedidosInsercaoPdfTests.
         }
 
         [Fact]
@@ -185,6 +202,6 @@ namespace Veiculando.WhiteLabel.Api.Tests
 
         private sealed record PiDto(int Id, string Codigo);
         private sealed record ItemPiDto(int IdPedidoItem, int IdPedidoInsercao, string Status, string PecaCodigo, string LocalCodigo);
-        private sealed record PiDetalheDto(int Id, string Codigo, string Status, string Agencia, string Anunciante, string PdfUrl);
+        private sealed record PiDetalheDto(int Id, string Codigo, string Status, string Agencia, string Anunciante);
     }
 }

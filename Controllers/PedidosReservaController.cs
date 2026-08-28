@@ -16,7 +16,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 {
     [ApiController]
     [Route("api/wl/pedidos-reserva")]
-    [Authorize]
+    [Authorize(Policy = AuthorizationSetup.PedidoReservaGerenciar)]
     public class PedidosReservaController : WlCoreProxyControllerBase
     {
         private readonly VeiculandoDataContext _db;

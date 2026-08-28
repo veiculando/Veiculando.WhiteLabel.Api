@@ -87,6 +87,7 @@ namespace Veiculando.WhiteLabel.Api
                 options.AddPolicy(RateLimitRecuperacaoSenha, ParticionarPorHostEIp(limite: 5));
             });
 
+            services.AddHealthChecks();
             services.AddControllers();
             services.AddSwaggerGen(c =>
             {
@@ -141,6 +142,9 @@ namespace Veiculando.WhiteLabel.Api
             }
 
             app.UseForwardedHeaders();
+            // Liveness do processo: não depende de Host/tenant nem consulta dados.
+            // Mantém as rotas de negócio atrás da resolução e autorização usuais.
+            app.UseHealthChecks("/health");
             app.UseHttpsRedirection();
 
             app.UseRouting();

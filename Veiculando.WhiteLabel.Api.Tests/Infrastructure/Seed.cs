@@ -383,6 +383,19 @@ VALUES ({pedidoId}, {afiliadaId}, '{codigo}', 0, 0,
             return insercaoId;
         }
 
+        public static async Task ServicoCoreAsync(int afiliadaId)
+        {
+            using var ctx = new VeiculandoDataContext();
+            await ctx.Database.ExecuteSqlCommandAsync(@"
+IF NOT EXISTS (SELECT 1 FROM Usuario WHERE Email = @p0)
+BEGIN
+    INSERT Usuario (Nome, Email, Senha, StatusAprovacao, Acessos, DataUltimoLogin,
+                    EmailConfirmado, DataCadastro, DataAtualizacao, StatusExibicao, IdPerfil)
+    VALUES ('Servico Upload', @p0, 'not-a-login-password', 1, 0, GETUTCDATE(), 1, GETUTCDATE(), GETUTCDATE(), 1, 1);
+    INSERT UsuarioAfiliada (Id, IdAfiliada) VALUES (SCOPE_IDENTITY(), @p1);
+END", $"conta-servico-{afiliadaId}@teste.local", afiliadaId);
+        }
+
         /// <summary>
         /// Marca a peca como disponivel no periodo 1, para a grade de programacao.
         /// </summary>

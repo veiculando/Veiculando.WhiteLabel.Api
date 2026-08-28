@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Data.Entity;
+using System.Data.Entity.Infrastructure;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -18,7 +19,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 {
     [ApiController]
     [Route("api/wl/[controller]")]
-    [Authorize]
+    [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
     public class LocaisController : WlCoreProxyControllerBase
     {
         private readonly VeiculandoDataContext _db;
@@ -60,6 +61,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // verificação de propriedade que o Update faz.
             command.Id = 0;
 
+            var validacao = ValidarDadosLocal(command);
+            if (validacao != null) return validacao;
+
             var resposta = await _coreCadastro.SalvarLocalAsync(command, WlUsuarioId);
             return RepassarResposta(resposta);
         }
@@ -97,6 +101,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             command.Id = id;
 
+            var validacao = ValidarDadosLocal(command);
+            if (validacao != null) return validacao;
+
             var resposta = await _coreCadastro.SalvarLocalAsync(command, WlUsuarioId);
             return RepassarResposta(resposta);
         }
@@ -111,7 +118,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// (ADR-WL-004). O operador cadastrava e o registro não aparecia em
         /// lugar nenhum — indistinguível de uma falha no cadastro.
         ///
-        /// Deletados (-1) e Inativos (0) continuam fora. O <c>StatusExibicao</c>
+        /// Somente deletados ficam fora. Inativos precisam aparecer para reativação. O <c>StatusExibicao</c>
         /// passou a ser projetado para o frontend poder rotular a situação em vez
         /// de assumir que tudo que veio está ativo.
         /// </remarks>
@@ -122,8 +129,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             var locais = await _tenant.Locais
                 .AsNoTracking()
-                .Where(l => (l.StatusExibicao == StatusExibicaoEnum.Ativo
-                          || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente))
+                .Where(l => l.StatusExibicao != StatusExibicaoEnum.Deletado)
                 .Select(l => new
                 {
                     l.Id,
@@ -133,7 +139,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     UF = l.Cidade.Estado.Sigla,
                     l.FonteOrigem,
                     l.FonteTimestamp,
-                    l.StatusExibicao
+                    l.StatusExibicao,
+                    l.TimeStamp
                 })
                 .ToListAsync();
 
@@ -169,8 +176,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .Include(l => l.Cidade.Estado)
                 .FirstOrDefaultAsync(l => l.Id == id
                                       
-                                       && (l.StatusExibicao == StatusExibicaoEnum.Ativo
-                                        || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
+                                       && l.StatusExibicao != StatusExibicaoEnum.Deletado);
 
             if (local == null)
                 return NotFound(new { message = "Local não encontrado." });
@@ -187,6 +193,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 local.CodigoInterno,
                 local.PalavrasChave,
                 local.StatusExibicao,
+                local.TimeStamp,
                 Endereco = new
                 {
                     local.Endereco?.Logradouro,
@@ -219,8 +226,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .Include(l => l.Publico.Segmentos)
                 .Include(l => l.Publico.PoiCategorias)
                 .FirstOrDefaultAsync(l => l.Id == id
-                                       && (l.StatusExibicao == StatusExibicaoEnum.Ativo
-                                        || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
+                                       && l.StatusExibicao != StatusExibicaoEnum.Deletado);
 
             if (local == null)
                 return NotFound(new { message = "Local não encontrado." });
@@ -260,8 +266,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 return BadRequest(new { message = "Dados demográficos são obrigatórios." });
 
             var localExiste = await _tenant.Locais.AnyAsync(l => l.Id == id
-                && (l.StatusExibicao == StatusExibicaoEnum.Ativo
-                 || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
+                && l.StatusExibicao != StatusExibicaoEnum.Deletado);
 
             if (!localExiste)
                 return NotFound(new { message = "Local não encontrado." });
@@ -284,6 +289,46 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             return RepassarResposta(resposta);
         }
 
+        private IActionResult ValidarDadosLocal(LocalCadastroCommand command)
+        {
+            if (command.IdCidade <= 0 || string.IsNullOrWhiteSpace(command.Endereco?.Logradouro)
+                || command.Geolocalizacao == null || !command.Geolocalizacao.IsValid())
+                return BadRequest(new { message = "Informe cidade, logradouro e coordenadas válidas." });
+            return null;
+        }
+
+        [HttpPost("{id}/cancelar")]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public Task<IActionResult> Cancelar(int id, [FromBody] LocalStatusRequest request) =>
+            AlterarStatus(id, request, StatusExibicaoEnum.Deletado);
+
+        [HttpPost("{id}/inativar")]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public Task<IActionResult> Inativar(int id, [FromBody] LocalStatusRequest request) =>
+            AlterarStatus(id, request, StatusExibicaoEnum.Inativo);
+
+        [HttpPost("{id}/reativar")]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public Task<IActionResult> Reativar(int id, [FromBody] LocalStatusRequest request) =>
+            AlterarStatus(id, request, StatusExibicaoEnum.AprovacaoPendente);
+
+        private async Task<IActionResult> AlterarStatus(int id, LocalStatusRequest request, StatusExibicaoEnum destino)
+        {
+            var local = await _tenant.Locais.SingleOrDefaultAsync(l => l.Id == id && l.StatusExibicao != StatusExibicaoEnum.Deletado);
+            if (local == null) return NotFound(new { message = "Local não encontrado." });
+            if (request?.TimeStamp == null || request.TimeStamp.Length != 8)
+                return BadRequest(new { message = "Recarregue o local antes de alterar sua situação." });
+            if (!request.TimeStamp.SequenceEqual(local.TimeStamp) || !local.TentarAlterarStatusWhiteLabel(destino))
+                return Conflict(new { message = "A situação do local mudou ou esta transição não é permitida. Recarregue a listagem." });
+            local.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, null, WlUsuarioId);
+            try { await _db.SaveChangesAsync(); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "O local foi alterado por outra operação. Recarregue a listagem." });
+            }
+            return Ok(new { local.Id, local.StatusExibicao, local.TimeStamp });
+        }
+
         [HttpDelete("{id}")]
         [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
         [EnableRateLimiting(Startup.RateLimitEscrita)]
@@ -292,14 +337,20 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var afiliadaId = _tenant.AfiliadaId;
 
             var local = await _tenant.Locais
-                .FirstOrDefaultAsync(l => l.Id == id && l.StatusExibicao == StatusExibicaoEnum.Ativo);
+                .FirstOrDefaultAsync(l => l.Id == id
+                    && (l.StatusExibicao == StatusExibicaoEnum.Ativo
+                     || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
 
             if (local == null)
                 return NotFound(new { message = "Local não encontrado." });
 
 
             local.Delete();
-            await _db.SaveChangesAsync();
+            try { await _db.SaveChangesAsync(); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "O local foi alterado por outra operação. Recarregue a listagem." });
+            }
 
             return NoContent();
         }
@@ -318,9 +369,14 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         public int[] PoiCategorias { get; set; }
     }
 
+    public sealed class LocalStatusRequest
+    {
+        public byte[] TimeStamp { get; set; }
+    }
+
     [ApiController]
     [Route("api/wl/[controller]")]
-    [Authorize]
+    [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
     public class PecasController : WlCoreProxyControllerBase
     {
         private readonly VeiculandoDataContext _db;
@@ -520,63 +576,5 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             });
         }
 
-        /// <summary>
-        /// Valida uma foto de peça. **Não persiste o arquivo** — ver o remarks.
-        /// </summary>
-        /// <remarks>
-        /// Este endpoint respondia 200 com "Foto da peça recebida e validada com
-        /// sucesso" sem gravar coisa alguma: a validação rodava, o nome sanitizado
-        /// era devolvido e o arquivo era descartado no fim do request. Para quem
-        /// usa o painel isso é indistinguível de um upload que funcionou — o
-        /// operador só descobriria a perda quando a foto não aparecesse.
-        ///
-        /// <para>A gravação depende de integrar o BFF ao Veiculando.FileServer,
-        /// que é escopo do TP-2 e traz decisões próprias (autenticação entre os
-        /// dois serviços, isolamento de tenant nos diretórios, colisão de nomes —
-        /// hoje o FileServer grava pelo nome original e aceita só .jpg até 2MB).
-        /// Enquanto isso não existe, a resposta honesta é 501: o frontend já
-        /// traduz esse status para "Recurso ainda não implementado no servidor"
-        /// em <c>api-error.ts</c>.</para>
-        ///
-        /// <para>A validação foi mantida antes do 501 de propósito — assim um
-        /// arquivo inválido continua sendo recusado com a mensagem específica, e
-        /// o contrato de validação segue exercitado quando a persistência entrar.</para>
-        /// </remarks>
-        [HttpPost("locais/{idLocal}/pecas/{pecaId}/foto")]
-        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
-        [EnableRateLimiting(Startup.RateLimitEscrita)]
-        public async Task<IActionResult> UploadFotoPeca(int idLocal, int pecaId, IFormFile foto)
-        {
-            var afiliadaId = _tenant.AfiliadaId;
-
-            // A peça precisa existir E pertencer ao local informado. Antes só o
-            // local era verificado e o pecaId era ecoado de volta sem checagem
-            // nenhuma: com a persistência do TP-2 no lugar, isso viraria gravação
-            // de foto em peça de outra afiliada informando um id qualquer.
-            var peca = await _tenant.Pecas
-                .AsNoTracking()
-                .Include(p => p.Local)
-                .FirstOrDefaultAsync(p => p.Id == pecaId
-                                       && p.IdLocal == idLocal
-                                      
-                                       && p.StatusExibicao != StatusExibicaoEnum.Deletado);
-
-            if (peca == null)
-                return NotFound(new { message = "Peça não encontrada neste local." });
-
-
-            const long maxBytes = 10 * 1024 * 1024; // Max 10MB conforme TP-2
-            if (!_fileValidation.IsValidFile(foto, maxBytes, out var errorMessage))
-            {
-                return BadRequest(new { message = errorMessage });
-            }
-
-            return StatusCode(501, new
-            {
-                message = "O envio de fotos de peça ainda não está disponível: o arquivo " +
-                          "foi validado, mas o armazenamento será entregue no TP-2. " +
-                          "Nenhuma foto foi salva."
-            });
-        }
     }
 }
