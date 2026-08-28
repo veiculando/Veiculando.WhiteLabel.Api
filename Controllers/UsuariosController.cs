@@ -53,7 +53,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// Lista os operadores WlUsuarioAfiliada pertencentes à afiliada ativa.
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetAll()
+        public async Task<IActionResult> GetAll([FromQuery] bool incluirExcluidos = false)
         {
             var afiliadaId = _tenant.AfiliadaId;
 
@@ -66,7 +66,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // O split acontece depois da materialização, já em LINQ to Objects.
             var brutos = await _tenant.UsuariosAfiliada
                 .AsNoTracking()
-                .Where(u => u.StatusExibicao == StatusExibicaoEnum.Ativo)
+                .Where(u => u.StatusExibicao == StatusExibicaoEnum.Ativo
+                    || (incluirExcluidos && u.StatusExibicao == StatusExibicaoEnum.Deletado))
+                .OrderBy(u => u.Nome).ThenBy(u => u.Id)
                 .Select(u => new
                 {
                     u.Id,
@@ -77,6 +79,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     u.TelefoneComercial,
                     u.DataUltimoLogin,
                     u.StatusConvite,
+                    u.StatusExibicao,
+                    u.DataExclusao,
                     u.PermissoesRaw
                 })
                 .ToListAsync();
@@ -93,6 +97,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     TelefoneComercial = u.TelefoneComercial,
                     DataUltimoLogin = u.DataUltimoLogin,
                     StatusConvite = u.StatusConvite.ToString(),
+                    Excluido = u.StatusExibicao == StatusExibicaoEnum.Deletado,
+                    // EF6 materializa datetime sem Kind; o domínio grava a exclusão em UTC.
+                    DataExclusao = u.DataExclusao.HasValue
+                        ? DateTime.SpecifyKind(u.DataExclusao.Value, DateTimeKind.Utc)
+                        : (DateTime?)null,
                     Permissoes = string.IsNullOrWhiteSpace(u.PermissoesRaw)
                         ? Array.Empty<string>()
                         : u.PermissoesRaw.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
@@ -358,6 +367,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         public string TelefoneComercial { get; set; }
         public DateTime? DataUltimoLogin { get; set; }
         public string StatusConvite { get; set; }
+        public bool Excluido { get; set; }
+        public DateTime? DataExclusao { get; set; }
         public string[] Permissoes { get; set; }
     }
 

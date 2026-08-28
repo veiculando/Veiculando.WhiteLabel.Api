@@ -1,6 +1,5 @@
 using System;
 using System.Data.Entity;
-using System.Linq;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -45,6 +44,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
             var removido = todos.Should().ContainSingle(u => u.Id == excluido).Which;
             removido.Excluido.Should().BeTrue();
             removido.DataExclusao.Should().NotBeNull();
+            removido.DataExclusao.Value.Kind.Should().Be(DateTimeKind.Utc);
             todos.Should().NotContain(u => u.Id == outro);
             todos.Should().Contain(u => u.Email == admin && !u.Excluido);
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -85,7 +85,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
             var email = "sem-permissao-excluidos@exemplo.com";
             await Seed.OperadorAsync(tenant, email);
             using var factory = new WlApiFactory(_db, tenant);
-            using var anonimo = factory.CreateClient();
+            using var anonimo = factory.ClienteAnonimo();
             (await anonimo.GetAsync("/api/wl/usuarios?incluirExcluidos=true")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
             using var client = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
             (await client.GetAsync("/api/wl/usuarios?incluirExcluidos=true")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
