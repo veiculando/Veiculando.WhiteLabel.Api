@@ -14,11 +14,19 @@
 # passarem com o core novo, o bump esta validado.
 #
 # ---------------------------------------------------------------------------
-# SHA atual: hotfix de primeiro acesso no PR #108 do Core.
+# SHA atual: ponta da sprint-9.0 apos o merge do PR #108 do Core.
 #
-# Este pin contem WlDominio, WlDominioTipoEnum, WL_Configuracao e a migration
-# 202608111630000_AddWlDominioConfiguracao exigidos pela resolucao por Host.
-# O SHA continua valido e reproduzivel depois que o PR for integrado; um bump
-# posterior para a ponta da sprint deve passar novamente pelo CI deste BFF.
+# O pin anterior era 4cce4dde, um commit DO MEIO da branch do PR #108 e ausente
+# da sprint-9.0. Isso era uma bomba-relogio: um squash-merge do #108 criaria um
+# SHA novo, colapsaria os 17 commits e a exclusao da branch tornaria 4cce4dde
+# inalcancavel — o workflow deste repo faz fetch do core exatamente nesse SHA,
+# entao o build quebraria sem nenhum arquivo daqui ter mudado. O #108 acabou
+# integrado com merge commit, o que preservou a alcancabilidade, mas o pin
+# continuava apontando para um core defasado em 9 commits.
+#
+# 4dc98315 e o merge commit do #108 na sprint-9.0. Contem WlDominio,
+# WlDominioTipoEnum, WL_Configuracao, as migrations AddWlDominioConfiguracao e
+# PrimeiroAcessoWlUsuario, e os fixes de ciclo de vida de Local e de projecao de
+# identidade que nao estavam no pin antigo.
 # ---------------------------------------------------------------------------
-4cce4dde1a7ba974ffbafc3735644c1265ec7dcd
+4dc983150a69d3a95160fe29df9fde7a7c9ec186
