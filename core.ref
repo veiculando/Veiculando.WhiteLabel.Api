@@ -10,23 +10,20 @@
 # Formato: um SHA completo de 40 caracteres hex na primeira linha nao comentada.
 # SHA abreviado ou nome de branch e rejeitado pelo workflow de proposito.
 #
-# Para atualizar: troque o SHA, rode o CI e abra PR. Se os 57 testes do BFF
-# passarem com o core novo, o bump esta validado.
+# Para atualizar: troque o SHA, rode o CI e abra PR. Se a suite do BFF passar
+# com o core novo, o bump esta validado.
 #
 # ---------------------------------------------------------------------------
-# SHA atual: ponta da sprint-9.0 apos o merge do PR #108 do Core.
+# SHA atual: ponta da sprint-9.0 apos o merge do PR #112 do Core.
 #
-# O pin anterior era 4cce4dde, um commit DO MEIO da branch do PR #108 e ausente
-# da sprint-9.0. Isso era uma bomba-relogio: um squash-merge do #108 criaria um
-# SHA novo, colapsaria os 17 commits e a exclusao da branch tornaria 4cce4dde
-# inalcancavel — o workflow deste repo faz fetch do core exatamente nesse SHA,
-# entao o build quebraria sem nenhum arquivo daqui ter mudado. O #108 acabou
-# integrado com merge commit, o que preservou a alcancabilidade, mas o pin
-# continuava apontando para um core defasado em 9 commits.
+# c1d702ae traz a barreira de tenant do PedidoReservaRespostaHandler: a
+# titularidade do pedido (que estava comentada com um //TODO) e a validacao da
+# afiliada da peca sugerida. Sao as duas guardas que este BFF ja aplicava antes
+# de delegar; agora elas valem tambem para os outros chamadores do handler,
+# incluindo o painel Afiliada.
 #
-# 4dc98315 e o merge commit do #108 na sprint-9.0. Contem WlDominio,
-# WlDominioTipoEnum, WL_Configuracao, as migrations AddWlDominioConfiguracao e
-# PrimeiroAcessoWlUsuario, e os fixes de ciclo de vida de Local e de projecao de
-# identidade que nao estavam no pin antigo.
+# Continua contendo tudo do pin anterior (4dc98315): WlDominio, WL_Configuracao,
+# as migrations AddWlDominioConfiguracao e PrimeiroAcessoWlUsuario, e os fixes de
+# ciclo de vida de Local e projecao de identidade pos-commit.
 # ---------------------------------------------------------------------------
-4dc983150a69d3a95160fe29df9fde7a7c9ec186
+c1d702ae13a723e475541ef600433363b9c08e33
