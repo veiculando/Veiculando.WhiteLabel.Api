@@ -32,6 +32,8 @@ public class LocalLifecycleTests
         (await client.PostAsJsonAsync($"/api/wl/locais/{id}/inativar", new { timeStamp = versao })).StatusCode.Should().Be(HttpStatusCode.OK);
         var inativo = await client.GetFromJsonAsync<JsonElement>($"/api/wl/locais/{id}");
         inativo.GetProperty("statusExibicao").GetInt32().Should().Be(0);
+        (await client.GetAsync($"/api/wl/locais/{id}/publico")).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.PutAsJsonAsync($"/api/wl/locais/{id}/publico", new { audiencia = 12345, fonte = "QA inativo" })).StatusCode.Should().Be(HttpStatusCode.OK);
         var lista = await client.GetFromJsonAsync<JsonElement[]>("/api/wl/locais");
         lista.Should().Contain(x => x.GetProperty("id").GetInt32() == id);
         (await client.PostAsJsonAsync($"/api/wl/locais/{id}/reativar", new { timeStamp = versao })).StatusCode.Should().Be(HttpStatusCode.Conflict);
@@ -41,6 +43,8 @@ public class LocalLifecycleTests
         (await client.PostAsJsonAsync($"/api/wl/locais/{id}/inativar", new { timeStamp = pendente.GetProperty("timeStamp").GetString() })).StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await client.PostAsJsonAsync($"/api/wl/locais/{id}/cancelar", new { timeStamp = pendente.GetProperty("timeStamp").GetString() })).StatusCode.Should().Be(HttpStatusCode.OK);
         (await client.GetAsync($"/api/wl/locais/{id}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await client.GetAsync($"/api/wl/locais/{id}/publico")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await client.PutAsJsonAsync($"/api/wl/locais/{id}/publico", new { audiencia = 12345 })).StatusCode.Should().Be(HttpStatusCode.NotFound);
         using var context = new VeiculandoDataContext();
         ((int)(await context.Locais.SingleAsync(x => x.Id == id)).StatusExibicao).Should().Be(-1);
     }
