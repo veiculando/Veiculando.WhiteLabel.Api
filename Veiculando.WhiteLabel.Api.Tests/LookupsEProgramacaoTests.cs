@@ -1,4 +1,4 @@
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Veiculando.WhiteLabel.Api.Tests.Infrastructure;
@@ -73,9 +73,9 @@ namespace Veiculando.WhiteLabel.Api.Tests
 
             resposta.EnsureSuccessStatusCode();
 
-            var grade = await resposta.Content.ReadFromJsonAsync<GradeDto[]>();
-            grade.Should().NotBeNull();
-            grade!.Should().Contain(g => g.PecaCodigo == "PPROG-A");
+            var pagina = await resposta.Content.ReadFromJsonAsync<PaginaDto<GradeDto>>();
+            pagina.Should().NotBeNull();
+            pagina!.Itens.Should().Contain(g => g.PecaCodigo == "PPROG-A");
         }
 
         /// <summary>
@@ -103,10 +103,10 @@ namespace Veiculando.WhiteLabel.Api.Tests
                 new { IdPeriodo = (int?)null, IdLocal = (int?)null });
 
             resposta.EnsureSuccessStatusCode();
-            var grade = await resposta.Content.ReadFromJsonAsync<GradeDto[]>();
+            var pagina = await resposta.Content.ReadFromJsonAsync<PaginaDto<GradeDto>>();
 
-            grade.Should().NotBeNull();
-            grade!.Should().NotContain(g => g.PecaCodigo == "PPRG-B");
+            pagina.Should().NotBeNull();
+            pagina!.Itens.Should().NotContain(g => g.PecaCodigo == "PPRG-B");
         }
 
         private sealed record CidadeDto(int Id, string Nome, string Sigla);

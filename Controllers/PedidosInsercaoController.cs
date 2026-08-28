@@ -48,8 +48,34 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// é onde o recorte de tenant existe.
         /// </remarks>
         [HttpGet]
-        public async Task<IActionResult> GetAll()
+        public async Task<IActionResult> GetAll([FromQuery] WlPaginaRequest pagina)
         {
+            var (page, pageSize) = WlPaginacao.Normalizar(pagina);
+            var sort = WlPaginacao.Ordenacao(
+                pagina?.Sort, "dataCadastro", "codigo", "dataCadastro", "status", "valor");
+            var desc = pagina?.Desc ?? true;
+
+            var query = _tenant.PedidosInsercao
+                .Where(pi => pi.StatusExibicao == StatusExibicaoEnum.Ativo);
+
+            var total = await query.CountAsync();
+
+            // O desempate por Id e o que torna a paginacao estavel: sem ele, PIs
+            // com o mesmo DataCadastro (ou o mesmo Status) nao tem ordem total e
+            // o SQL Server pode devolve-las em ordem diferente entre duas
+            // consultas — a pagina 2 repetiria ou pularia registros da 1.
+            var ordenada = (sort, desc) switch
+            {
+                ("codigo", false) => query.OrderBy(pi => pi.Codigo).ThenBy(pi => pi.Id),
+                ("codigo", true) => query.OrderByDescending(pi => pi.Codigo).ThenBy(pi => pi.Id),
+                ("status", false) => query.OrderBy(pi => pi.Status).ThenBy(pi => pi.Id),
+                ("status", true) => query.OrderByDescending(pi => pi.Status).ThenBy(pi => pi.Id),
+                ("valor", false) => query.OrderBy(pi => pi.ValorLiquidoVeiculacao).ThenBy(pi => pi.Id),
+                ("valor", true) => query.OrderByDescending(pi => pi.ValorLiquidoVeiculacao).ThenBy(pi => pi.Id),
+                (_, false) => query.OrderBy(pi => pi.DataCadastro).ThenBy(pi => pi.Id),
+                (_, true) => query.OrderByDescending(pi => pi.DataCadastro).ThenBy(pi => pi.Id),
+            };
+
             // A interpolacao de string vira String.Format, que o EF6 nao traduz:
             // dentro do Select isso lancava NotSupportedException e a listagem de
             // PIs respondia 500 sempre. O mesmo vale para `Status.ToString()`.
@@ -57,8 +83,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // Materializa as colunas reais primeiro e monta Status depois, ja em
             // memoria. Mesma classe de defeito de Periodo.Nome em
             // LookupsController e ProgramacaoController.
-            var brutos = await _tenant.PedidosInsercao
-                .Where(pi => pi.StatusExibicao == StatusExibicaoEnum.Ativo)
+            var brutos = await ordenada
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
                 .Select(pi => new
                 {
                     pi.Id,
@@ -84,7 +111,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 })
                 .ToList();
 
-            return Ok(pis);
+            return Ok(WlPaginacao.Montar(pis, page, pageSize, total));
         }
 
         /// <summary>

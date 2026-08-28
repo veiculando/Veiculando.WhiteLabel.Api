@@ -221,11 +221,17 @@ VALUES ({localId}, 1, 1, '{codigo}', 'INT-{codigo}',
         /// sao criadas uma vez com ids fixos e reaproveitadas; so pedido, item e
         /// reserva sao por teste.</para>
         /// </remarks>
+        /// <param name="pecaIdExtra">
+        /// Segunda peça, para os cenários de resposta mista: sem um pedido com
+        /// mais de um item não há como exercitar "aceita alguns e rejeita
+        /// outros", nem a validação de item omitido.
+        /// </param>
         public static async Task<(int Id, string Codigo)> ReservaAsync(
             int afiliadaId,
             string codigo,
             int pecaId,
-            StatusPedidoReserva status = StatusPedidoReserva.Solicitado)
+            StatusPedidoReserva status = StatusPedidoReserva.Solicitado,
+            int? pecaIdExtra = null)
         {
             using var ctx = new VeiculandoDataContext();
 
@@ -337,6 +343,26 @@ VALUES ({pedidoId}, {afiliadaId}, '{codigo}', {(int)status},
 
             await ctx.Database.ExecuteSqlCommandAsync(
                 $"INSERT INTO PedidoReservaItem (IdPedidoItem, IdPedidoReserva, Status) VALUES ({itemId}, {reservaId}, 0);");
+
+            if (pecaIdExtra.HasValue)
+            {
+                await ctx.Database.ExecuteSqlCommandAsync($@"
+INSERT INTO PedidoItem (IdPedido, IdPeca, IdPeriodo, Status,
+                        DescontoNegociado, ValorTabela, ValorBruto, ValorDescontoNegociado,
+                        ValorDescontoFinanceiro, ValorComissaoAgencia, ValorBonificacaoVolume,
+                        ValorComissaoVeiculando, ValorLiquidoVeiculacao, ValorLiquidoAnunciante)
+VALUES ({pedidoId}, {pecaIdExtra.Value}, 1, 0,
+        0, 1000, 1000, 0,
+        0, 0, 0,
+        0, 1000, 1000);");
+
+                var itemExtraId = await ctx.Database
+                    .SqlQuery<int>($"SELECT TOP 1 Id FROM PedidoItem WHERE IdPedido = {pedidoId} ORDER BY Id DESC")
+                    .SingleAsync();
+
+                await ctx.Database.ExecuteSqlCommandAsync(
+                    $"INSERT INTO PedidoReservaItem (IdPedidoItem, IdPedidoReserva, Status) VALUES ({itemExtraId}, {reservaId}, 0);");
+            }
 
             return (reservaId, codigo);
         }
