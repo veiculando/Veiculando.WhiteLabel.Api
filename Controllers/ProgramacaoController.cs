@@ -1,3 +1,4 @@
+using System;
 using System.Data.Entity;
 using System.Linq;
 using System.Threading.Tasks;
@@ -7,6 +8,7 @@ using Veiculando.Data.Contexts;
 using Veiculando.Domain.Enums;
 using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
+using Veiculando.WhiteLabel.Api.Services;
 
 namespace Veiculando.WhiteLabel.Api.Controllers
 {
@@ -25,7 +27,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         }
 
         [HttpPost("listar")]
-        public async Task<IActionResult> ListarGrade([FromBody] ProgramacaoFiltroDto dto)
+        public async Task<IActionResult> ListarGrade(
+            [FromBody] ProgramacaoFiltroDto dto,
+            [FromQuery] WlPaginaRequest pagina)
         {
             var afiliadaId = _tenant.AfiliadaId;
 
@@ -41,6 +45,43 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 query = query.Where(pps => pps.Peca.IdLocal == dto.IdLocal.Value);
             }
 
+            // A pagina e de PECAS, nao de celulas.
+            //
+            // A grade e peca (linha) x periodo (coluna). Paginar a lista plana de
+            // celulas cortaria uma peca no meio: parte dos periodos dela na pagina
+            // 1, o resto na 2, e a linha apareceria duas vezes incompleta. Entao
+            // primeiro se decide QUAIS pecas entram na pagina, depois se busca
+            // todas as celulas delas.
+            var (page, pageSize) = WlPaginacao.Normalizar(pagina);
+
+            var pecasQuery = query
+                .Select(pps => new
+                {
+                    PecaId = pps.IdPeca,
+                    PecaCodigo = pps.Peca.Codigo,
+                    LocalId = pps.Peca.IdLocal,
+                    LocalCodigo = pps.Peca.Local.Codigo
+                })
+                .Distinct();
+
+            var total = await pecasQuery.CountAsync();
+
+            // Desempate por PecaId: locais e codigos de peca se repetem entre
+            // pecas diferentes, e sem ordem total a pagina 2 pode repetir uma
+            // linha que a 1 ja trouxe.
+            var pecasPagina = await pecasQuery
+                .OrderBy(p => p.LocalCodigo)
+                .ThenBy(p => p.PecaCodigo)
+                .ThenBy(p => p.PecaId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            var idsPecaPagina = pecasPagina.Select(p => p.PecaId).ToList();
+
+            if (idsPecaPagina.Count == 0)
+                return Ok(WlPaginacao.Montar(Array.Empty<object>(), page, pageSize, total));
+
             // `Periodo.Nome` e propriedade calculada e esta marcada com
             // `Ignore(x => x.Nome)` no PeriodoMap — nao existe coluna equivalente.
             // Projeta-la aqui fazia o EF6 lancar NotSupportedException ao traduzir a
@@ -49,6 +90,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // A projecao traz o Periodo inteiro e o Nome e resolvido depois, ja em
             // memoria. Mesma correcao aplicada em LookupsController.GetPeriodos.
             var brutos = await query
+                .Where(pps => idsPecaPagina.Contains(pps.IdPeca))
                 .Select(pps => new
                 {
                     PecaId = pps.IdPeca,
@@ -74,7 +116,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 })
                 .ToList();
 
-            return Ok(grade);
+            return Ok(WlPaginacao.Montar(grade, page, pageSize, total));
         }
     }
 

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Data.Entity;
 using System.Linq;
 using System.Threading.Tasks;
@@ -37,16 +38,36 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// Lista as solicitações de reserva da exibidora ativa com coluna Agência (TP-3).
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetAll()
+        public async Task<IActionResult> GetAll([FromQuery] WlPaginaRequest pagina)
         {
-            var afiliadaId = _tenant.AfiliadaId;
+            var (page, pageSize) = WlPaginacao.Normalizar(pagina);
+            var sort = WlPaginacao.Ordenacao(
+                pagina?.Sort, "dataCadastro", "codigo", "dataCadastro", "status");
+            var desc = pagina?.Desc ?? true;
 
-            var reservas = await _tenant.PedidosReserva
+            var query = _tenant.PedidosReserva;
+            var total = await query.CountAsync();
+
+            // Desempate por Id: varios pedidos compartilham DataCadastro e Status,
+            // e sem ordem total a navegacao entre paginas repete ou pula registros.
+            var ordenada = (sort, desc) switch
+            {
+                ("codigo", false) => query.OrderBy(pr => pr.Codigo).ThenBy(pr => pr.Id),
+                ("codigo", true) => query.OrderByDescending(pr => pr.Codigo).ThenBy(pr => pr.Id),
+                ("status", false) => query.OrderBy(pr => pr.Status).ThenBy(pr => pr.Id),
+                ("status", true) => query.OrderByDescending(pr => pr.Status).ThenBy(pr => pr.Id),
+                (_, false) => query.OrderBy(pr => pr.DataCadastro).ThenBy(pr => pr.Id),
+                (_, true) => query.OrderByDescending(pr => pr.DataCadastro).ThenBy(pr => pr.Id),
+            };
+
+            var brutos = await ordenada
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
                 .Select(pr => new
                 {
                     pr.Id,
                     pr.Codigo,
-                    Status = pr.Status.ToString(),
+                    pr.Status,
                     pr.DataCadastro,
                     Agencia = pr.Pedido.Campanha.Agencia != null ? pr.Pedido.Campanha.Agencia.Nome : null,
                     Cliente = pr.Pedido.Campanha.Cliente != null ? pr.Pedido.Campanha.Cliente.Nome : null,
@@ -54,7 +75,20 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 })
                 .ToListAsync();
 
-            return Ok(reservas);
+            var reservas = brutos
+                .Select(pr => new
+                {
+                    pr.Id,
+                    pr.Codigo,
+                    Status = pr.Status.ToString(),
+                    pr.DataCadastro,
+                    pr.Agencia,
+                    pr.Cliente,
+                    pr.ItensCount
+                })
+                .ToList();
+
+            return Ok(WlPaginacao.Montar(reservas, page, pageSize, total));
         }
 
         /// <summary>
@@ -125,10 +159,20 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// disponibilidade, grava o usuário que respondeu e propaga o status para o
         /// <c>Pedido</c> pai — regra que não deve existir em duplicata aqui.</para>
         ///
-        /// <para>A resposta continua sendo tudo-ou-nada por item, que é o contrato
-        /// do DTO atual (<c>{ pedidoReservaId, aceitar }</c>). Resposta item a item
-        /// existe no command do core e pode ser exposta depois sem mudar este
-        /// caminho.</para>
+        /// <para><b>Resposta mista por item.</b> O contrato anterior era
+        /// <c>{ pedidoReservaId, aceitar }</c> e aplicava a mesma decisão a todos
+        /// os itens. O command do core sempre suportou decisão por item — o que
+        /// faltava era expor isso. Agora o cliente envia uma decisão por item, e
+        /// a rejeição pode carregar peças sugeridas como alternativa (o handler
+        /// grava a primeira em <c>IdPecaRecomendada</c>; é o mecanismo de
+        /// "motivo" que o domínio tem).</para>
+        ///
+        /// <para><b>O que é validado aqui e não no core.</b> O handler do core
+        /// itera sobre os itens que recebe e não exige que todos os pendentes
+        /// venham — omitir um item o deixaria pendente para sempre, com o pedido
+        /// já marcado como respondido. Ele também não valida a afiliada da peça
+        /// sugerida (a checagem de tenant lá está comentada, com um TODO). As
+        /// duas coisas são barradas aqui, antes da chamada remota.</para>
         /// </remarks>
         [HttpPost("resposta")]
         [Authorize(Policy = AuthorizationSetup.PedidoReservaGerenciar)]
@@ -160,22 +204,104 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (pedido.Itens == null || !pedido.Itens.Any())
                 return Conflict(new { message = "Este pedido de reserva não possui itens para responder." });
 
-            var disponibilidade = dto.Aceitar
-                ? StatusPedidoReservaItemEnum.Reservado
-                : StatusPedidoReservaItemEnum.Indisponivel;
+            if (dto.Itens == null || dto.Itens.Count == 0)
+                return BadRequest(new { message = "Informe a decisão de cada item do pedido." });
+
+            var pendentes = pedido.Itens
+                .Where(i => i.Status == StatusPedidoReservaItemEnum.Solicitado)
+                .ToList();
+
+            if (pendentes.Count == 0)
+                return Conflict(new { message = "Este pedido não possui itens pendentes de resposta." });
+
+            var recebidos = dto.Itens.Select(i => i.IdItemPedidoReserva).ToList();
+
+            var duplicados = recebidos.GroupBy(id => id).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+            if (duplicados.Any())
+            {
+                return BadRequest(new
+                {
+                    message = "Cada item deve ser respondido uma única vez.",
+                    itens = duplicados
+                });
+            }
+
+            var esperados = pendentes.Select(i => i.IdPedidoItem).ToHashSet();
+
+            var desconhecidos = recebidos.Where(id => !esperados.Contains(id)).ToList();
+            if (desconhecidos.Any())
+            {
+                return BadRequest(new
+                {
+                    message = "Há itens que não pertencem a este pedido.",
+                    itens = desconhecidos
+                });
+            }
+
+            // Omitir um item o deixaria pendente para sempre enquanto o pedido ja
+            // constaria respondido — por isso a resposta e completa ou nao e.
+            var faltantes = esperados.Where(id => !recebidos.Contains(id)).ToList();
+            if (faltantes.Any())
+            {
+                return BadRequest(new
+                {
+                    message = "Todos os itens pendentes precisam de uma decisão.",
+                    itens = faltantes
+                });
+            }
+
+            // Peca sugerida so pode ser do proprio tenant. `_tenant.Pecas` ja
+            // recorta pela afiliada do Local, entao o que nao voltar da consulta
+            // ou e de outra exibidora ou nao existe — nos dois casos, recusa.
+            var sugeridas = dto.Itens
+                .Where(i => i.IdsPecaSugerida != null)
+                .SelectMany(i => i.IdsPecaSugerida)
+                .Where(id => id > 0)
+                .Distinct()
+                .ToList();
+
+            if (sugeridas.Any())
+            {
+                var proprias = await _tenant.Pecas
+                    .Where(p => sugeridas.Contains(p.Id))
+                    .Select(p => p.Id)
+                    .ToListAsync();
+
+                var alheias = sugeridas.Where(id => !proprias.Contains(id)).ToList();
+                if (alheias.Any())
+                {
+                    return BadRequest(new
+                    {
+                        message = "Há peças sugeridas que não pertencem a esta exibidora.",
+                        pecas = alheias
+                    });
+                }
+            }
+
+            var decisoes = dto.Itens.ToDictionary(i => i.IdItemPedidoReserva);
 
             var command = new PedidoReservaRespostaCommand
             {
                 CodigoPedidoReserva = pedido.Codigo,
-                Itens = pedido.Itens.Select(i => new PedidoReservaRespostaCommand.PedidoReservaItemResposta
+                // IdPeca e IdPeriodo saem do pedido carregado, nunca do corpo da
+                // requisicao: o cliente decide o QUE responder, o servidor decide
+                // SOBRE O QUE. Aceitar esses ids do cliente permitiria mover a
+                // resposta para outra peca.
+                Itens = pendentes.Select(i => new PedidoReservaRespostaCommand.PedidoReservaItemResposta
                 {
                     IdItemPedidoReserva = i.IdPedidoItem,
                     IdPeca = i.PedidoItem.IdPeca,
                     IdPeriodo = i.PedidoItem.IdPeriodo,
-                    Disponibilidade = disponibilidade,
+                    Disponibilidade = decisoes[i.IdPedidoItem].Aceitar
+                        ? StatusPedidoReservaItemEnum.Reservado
+                        : StatusPedidoReservaItemEnum.Indisponivel,
                     // Array vazio, não null: o handler do core acessa
-                    // `IdsPecaSugerida.Length` sem checar nulidade.
-                    IdsPecaSugerida = Array.Empty<int>()
+                    // `IdsPecaSugerida.Length` sem checar nulidade. Sugestão só
+                    // faz sentido na rejeição — numa aceitação ela é ignorada.
+                    IdsPecaSugerida = !decisoes[i.IdPedidoItem].Aceitar
+                        ? (decisoes[i.IdPedidoItem].IdsPecaSugerida ?? Array.Empty<int>())
+                            .Where(id => id > 0).ToArray()
+                        : Array.Empty<int>()
                 }).ToList()
             };
 
@@ -189,18 +315,50 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (!resposta.Sucesso)
                 return RepassarResposta(resposta);
 
+            var aceitos = dto.Itens.Count(i => i.Aceitar);
+            var rejeitados = dto.Itens.Count - aceitos;
+
             return Ok(new
             {
-                message = dto.Aceitar
+                message = rejeitados == 0
                     ? "Reserva confirmada com sucesso."
-                    : "Reserva rejeitada com sucesso."
+                    : aceitos == 0
+                        ? "Reserva rejeitada com sucesso."
+                        : $"Resposta registrada: {aceitos} item(ns) aceito(s) e {rejeitados} recusado(s).",
+                aceitos,
+                rejeitados
             });
         }
     }
 
+    /// <summary>
+    /// Resposta a um pedido de reserva, com uma decisão por item.
+    /// </summary>
+    /// <remarks>
+    /// O campo <c>Aceitar</c> de nível superior saiu de propósito. Ele aplicava a
+    /// mesma decisão a todos os itens, e mantê-lo ao lado de <c>Itens</c> criaria
+    /// duas fontes de verdade para a mesma pergunta — com a dúvida de qual vence
+    /// quando as duas vêm preenchidas e discordam.
+    /// </remarks>
     public class PedidoReservaRespostaDto
     {
         public int PedidoReservaId { get; set; }
+
+        /// <summary>Uma entrada por item pendente do pedido — nem a mais, nem a menos.</summary>
+        public List<PedidoReservaItemRespostaDto> Itens { get; set; }
+    }
+
+    public class PedidoReservaItemRespostaDto
+    {
+        /// <summary>Id do item do pedido (<c>IdPedidoItem</c>).</summary>
+        public int IdItemPedidoReserva { get; set; }
+
         public bool Aceitar { get; set; }
+
+        /// <summary>
+        /// Peças oferecidas como alternativa na rejeição. Precisam ser da própria
+        /// exibidora; o core grava a primeira em <c>IdPecaRecomendada</c>.
+        /// </summary>
+        public int[] IdsPecaSugerida { get; set; }
     }
 }

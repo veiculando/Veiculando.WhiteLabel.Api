@@ -156,6 +156,80 @@ namespace Veiculando.WhiteLabel.Api.Tests
             }
         }
 
+        /// <summary>
+        /// Cenario 6 — paginacao estavel na listagem de PIs.
+        /// </summary>
+        /// <remarks>
+        /// Todas as PIs sao criadas na mesma DataCadastro (o Seed usa GETDATE()),
+        /// que e o campo de ordenacao padrao. Sem o desempate por Id nao ha ordem
+        /// total entre elas, e o SQL Server pode devolve-las em ordem diferente
+        /// entre duas consultas — a pagina 2 repetiria ou pularia registros.
+        /// </remarks>
+        [Fact]
+        public async Task Listagem_e_paginada_e_nao_repete_nem_pula_entre_paginas()
+        {
+            const int afiliadaPag = 8770;
+
+            var email = $"pdf-pag-{afiliadaPag}@exemplo.com";
+            await Seed.OperadorAsync(afiliadaPag, email, new[] { "PedidoInsercaoGerenciar" });
+
+            var localId = await Seed.LocalAsync(afiliadaPag, "Lpag");
+            for (var i = 0; i < 5; i++)
+            {
+                var pecaId = await Seed.PecaAsync(localId, $"Ppag{i}");
+                await Seed.InsercaoAsync(afiliadaPag, $"PXpag{i}", pecaId);
+            }
+
+            using var factory = new WlApiFactory(_db, afiliadaPag);
+            using var client = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
+
+            var p1 = await client.GetFromJsonAsync<PaginaDto<PiListDto>>(
+                "/api/wl/pedidos-insercao?page=1&pageSize=2");
+            var p2 = await client.GetFromJsonAsync<PaginaDto<PiListDto>>(
+                "/api/wl/pedidos-insercao?page=2&pageSize=2");
+            var p3 = await client.GetFromJsonAsync<PaginaDto<PiListDto>>(
+                "/api/wl/pedidos-insercao?page=3&pageSize=2");
+
+            p1!.Total.Should().Be(5);
+            p1.TotalPaginas.Should().Be(3);
+            p1.Itens.Should().HaveCount(2);
+            p3!.Itens.Should().HaveCount(1);
+
+            var vistos = p1.Itens.Concat(p2!.Itens).Concat(p3.Itens).Select(p => p.Id).ToList();
+            vistos.Should().OnlyHaveUniqueItems("nenhuma PI pode aparecer em duas paginas");
+            vistos.Should().HaveCount(5, "nenhuma PI pode ser pulada");
+        }
+
+        [Fact]
+        public async Task PageSize_e_limitado_pelo_teto_do_servidor()
+        {
+            var (factory, client, _) = await PrepararAsync("teto");
+            using var _f = factory;
+            using var _c = client;
+
+            var pagina = await client.GetFromJsonAsync<PaginaDto<PiListDto>>(
+                "/api/wl/pedidos-insercao?pageSize=999999");
+
+            pagina!.PageSize.Should().Be(100);
+        }
+
+        [Fact]
+        public async Task Ordenacao_por_codigo_e_aceita_e_valor_arbitrario_cai_no_padrao()
+        {
+            var (factory, client, _) = await PrepararAsync("sort");
+            using var _f = factory;
+            using var _c = client;
+
+            (await client.GetAsync("/api/wl/pedidos-insercao?sort=codigo&desc=false"))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+
+            (await client.GetAsync("/api/wl/pedidos-insercao?sort=' OR 1=1--"))
+                .StatusCode.Should().Be(HttpStatusCode.OK,
+                    "campo fora da whitelist cai no padrao; nunca alcanca a query");
+        }
+
+        private sealed record PiListDto(int Id, string Codigo, string Status);
+
         /// <summary>A rota herda a policy do controller, como as demais do modulo.</summary>
         [Fact]
         public async Task Pdf_exige_a_permissao_de_pedido_de_insercao()

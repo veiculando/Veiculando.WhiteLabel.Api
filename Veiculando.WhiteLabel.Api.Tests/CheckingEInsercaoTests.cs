@@ -193,10 +193,10 @@ namespace Veiculando.WhiteLabel.Api.Tests
             using var _ = factory;
             using var __ = client;
 
-            var pis = await client.GetFromJsonAsync<PiDetalheDto[]>("/api/wl/pedidos-insercao");
+            var pagina = await client.GetFromJsonAsync<PaginaDto<PiDetalheDto>>("/api/wl/pedidos-insercao");
 
-            pis.Should().NotBeNull();
-            pis!.Should().ContainSingle(p => p.Codigo == codigo)
+            pagina.Should().NotBeNull();
+            pagina!.Itens.Should().ContainSingle(p => p.Codigo == codigo)
                 .Which.Anunciante.Should().Be("Cliente Teste");
         }
 
