@@ -226,8 +226,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .Include(l => l.Publico.Segmentos)
                 .Include(l => l.Publico.PoiCategorias)
                 .FirstOrDefaultAsync(l => l.Id == id
-                                       && (l.StatusExibicao == StatusExibicaoEnum.Ativo
-                                        || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
+                                       && l.StatusExibicao != StatusExibicaoEnum.Deletado);
 
             if (local == null)
                 return NotFound(new { message = "Local não encontrado." });
@@ -267,8 +266,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 return BadRequest(new { message = "Dados demográficos são obrigatórios." });
 
             var localExiste = await _tenant.Locais.AnyAsync(l => l.Id == id
-                && (l.StatusExibicao == StatusExibicaoEnum.Ativo
-                 || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
+                && l.StatusExibicao != StatusExibicaoEnum.Deletado);
 
             if (!localExiste)
                 return NotFound(new { message = "Local não encontrado." });
