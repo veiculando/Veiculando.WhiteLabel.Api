@@ -1,0 +1,55 @@
+name: Docker
+
+# Publica no ACR uma imagem por commit da master.
+#
+# Este era o unico dos tres repositorios WhiteLabel sem build de imagem. O
+# efeito pratico aparecia no preview: os fronts (exibidora e app) passaram a ter
+# imagem rastreavel ao commit, e o BFF continuava rodando um artefato de
+# 27/08/2026 publicado a mao, ja 13 commits e 21 arquivos atras da master.
+#
+# Atualizar so os fronts colocaria codigo novo conversando com um BFF velho -
+# logo depois de uma sprint que mexeu em multi-tenant e refatorou WlUsuario.
+# Quebraria parecendo defeito da sprint, e nao da montagem do ambiente.
+#
+# Este workflow NAO faz deploy: ele so garante que exista um artefato capaz de
+# responder "de qual commit eu vim?".
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - Dockerfile
+      - Dockerfile.dockerignore
+      - '**.csproj'
+      - '**.cs'
+      - appsettings.json
+      - core.ref
+      - '.github/workflows/docker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  image:
+    if: github.ref == 'refs/heads/master'
+    uses: veiculando/.github/.github/workflows/_docker-build-push.yml@main
+    with:
+      image-name: veiculando-whitelabel-api
+      source-dir: Veiculando.WhiteLabel.Api
+      dockerfile: Dockerfile
+      # O Dockerfile faz COPY de `Veiculando/` como diretorio IRMAO: os cinco
+      # ProjectReference deste csproj apontam para la. Sem o core ao lado, o
+      # build morre no COPY com "file not found".
+      needs-core: true
+      core-dir: Veiculando
+      acr-login-server: ${{ vars.ACR_LOGIN_SERVER }}
+    secrets:
+      # Le a ref fixada em core.ref. O pin e o que torna o build reproduzivel:
+      # sem ele, o mesmo commit deste repo produz binarios diferentes conforme
+      # o dia em que o core foi compilado.
+      core-repo-token: ${{ secrets.CORE_REPO_TOKEN }}
+      azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
