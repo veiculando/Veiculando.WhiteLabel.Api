@@ -14,16 +14,34 @@
 # com o core novo, o bump esta validado.
 #
 # ---------------------------------------------------------------------------
-# SHA atual: ponta da sprint-9.0 apos o merge do PR #112 do Core.
+# SHA atual: cebe2b85 — HEAD do `main` do Core e o MESMO commit que roda em
+# producao (veiculando-api@sha256:6e00e9be, veiculando-fs@sha256:45c48d69).
 #
-# c1d702ae traz a barreira de tenant do PedidoReservaRespostaHandler: a
-# titularidade do pedido (que estava comentada com um //TODO) e a validacao da
-# afiliada da peca sugerida. Sao as duas guardas que este BFF ja aplicava antes
-# de delegar; agora elas valem tambem para os outros chamadores do handler,
-# incluindo o painel Afiliada.
+# Por que subir agora: o pin estava em c1d702ae, 28 commits atras de producao.
+# O preview existe para validar o WhiteLabel antes de haver infra de WL em
+# producao, e o Core ali e dependencia - o BFF precisa de uma API e de um
+# FileServer com quem falar. Com o pin atrasado, o WL era validado contra um
+# Core diferente do que vai encontrar, e a distancia crescia sozinha, porque
+# mudancas de Core vao direto para producao.
 #
-# Continua contendo tudo do pin anterior (4dc98315): WlDominio, WL_Configuracao,
-# as migrations AddWlDominioConfiguracao e PrimeiroAcessoWlUsuario, e os fixes de
-# ciclo de vida de Local e projecao de identidade pos-commit.
+# Dos 35 arquivos entre c1d702ae e cebe2b85, seis tocam projetos que este BFF
+# linka, e sao todos do VEI-SUP-25 (upload seguro):
+#
+#   Veiculando.Shared/Helpers/FileHelper.cs          +163/-0  (aditivo)
+#   Veiculando.Domain/.../AfiliadaHandler.cs          +11/-2
+#   Veiculando.Domain/.../AgenciaHandler.cs           +22/-4
+#   Veiculando.Domain/.../ArteFinalHandler.cs         +11/-2
+#   Veiculando.Domain/.../CheckingHandler.cs          +16/-1
+#   Veiculando.Domain/.../ClienteHandler.cs           +11/-2
+#
+# A mudanca de comportamento e deliberada e o BFF herda: quando o upload falha,
+# o handler passa a registrar notificacao e devolver null, em vez de salvar o
+# objeto sem a imagem. Antes disso, arquivo grande demais falhava no upload e a
+# peca era gravada assim mesmo.
+#
+# Continua contendo tudo do pin anterior: a barreira de tenant do
+# PedidoReservaRespostaHandler, WlDominio, WL_Configuracao, as migrations
+# AddWlDominioConfiguracao e PrimeiroAcessoWlUsuario, e os fixes de ciclo de
+# vida de Local e projecao de identidade pos-commit.
 # ---------------------------------------------------------------------------
-c1d702ae13a723e475541ef600433363b9c08e33
+cebe2b85fbf32290978029889136026ed8f70b50
