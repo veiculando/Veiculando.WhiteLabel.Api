@@ -1,0 +1,580 @@
+﻿using System;
+using System.Data.Entity;
+using System.Data.Entity.Infrastructure;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using Veiculando.Data.Contexts;
+using Veiculando.Domain.Commands.Inputs;
+using Veiculando.Domain.Entities;
+using Veiculando.Domain.Enums;
+using Veiculando.WhiteLabel.Api.Configurations;
+using Veiculando.WhiteLabel.Api.Middleware;
+using Veiculando.WhiteLabel.Api.Services;
+
+namespace Veiculando.WhiteLabel.Api.Controllers
+{
+    [ApiController]
+    [Route("api/wl/[controller]")]
+    [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+    public class LocaisController : WlCoreProxyControllerBase
+    {
+        private readonly VeiculandoDataContext _db;
+        private readonly ITenantQueries _tenant;
+        private readonly ICoreCadastroService _coreCadastro;
+
+        public LocaisController(
+            VeiculandoDataContext db,
+            ITenantQueries tenant,
+            ICoreCadastroService coreCadastro)
+        {
+            _db = db;
+            _tenant = tenant;
+            _coreCadastro = coreCadastro;
+        }
+
+        /// <summary>
+        /// Cadastra um local pela Exibidora.
+        /// </summary>
+        /// <remarks>
+        /// O local nasce em <c>AprovacaoPendente</c> e a liberação acontece no
+        /// Admin — mas isso não é decidido aqui: o core aplica a transição
+        /// sozinho ao identificar que quem cadastrou é um <c>UsuarioAfiliada</c>
+        /// (a conta de serviço da instância). Ver ADR-WL-004.
+        ///
+        /// <para><c>IdAfiliada</c> e a trilha de origem são preenchidos pelo
+        /// <see cref="ICoreCadastroService"/> a partir do tenant e do JWT; o que
+        /// vier no payload para esses campos é ignorado.</para>
+        /// </remarks>
+        [HttpPost]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public async Task<IActionResult> Create([FromBody] LocalCadastroCommand command)
+        {
+            if (command == null)
+                return BadRequest(new { message = "Dados do local são obrigatórios." });
+
+            // Id > 0 seria uma edição disfarçada de criação, escapando da
+            // verificação de propriedade que o Update faz.
+            command.Id = 0;
+
+            var validacao = ValidarDadosLocal(command);
+            if (validacao != null) return validacao;
+
+            var resposta = await _coreCadastro.SalvarLocalAsync(command, WlUsuarioId);
+            return RepassarResposta(resposta);
+        }
+
+        /// <summary>
+        /// Atualiza um local da própria exibidora.
+        /// </summary>
+        /// <remarks>
+        /// A verificação de propriedade abaixo não é redundante com a do core.
+        /// O <c>LocalCadastroHandler</c>, no ramo de edição, chama
+        /// <c>local.SetAfiliada(afiliada)</c> — ou seja, editar um local de outra
+        /// exibidora não seria recusado: ele seria <b>transferido</b> para a
+        /// afiliada de quem chamou. Como todas as instâncias WhiteLabel usam
+        /// contas de serviço equivalentes, sem esta checagem um operador poderia
+        /// sequestrar o inventário alheio informando um id qualquer.
+        /// </remarks>
+        [HttpPut("{id}")]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public async Task<IActionResult> Update(int id, [FromBody] LocalCadastroCommand command)
+        {
+            if (command == null)
+                return BadRequest(new { message = "Dados do local são obrigatórios." });
+
+            var afiliadaId = _tenant.AfiliadaId;
+
+            var local = await _tenant.Locais
+                .FirstOrDefaultAsync(l => l.Id == id
+                                      
+                                       && l.StatusExibicao != StatusExibicaoEnum.Deletado);
+
+            if (local == null)
+                return NotFound(new { message = "Local não encontrado." });
+
+
+            command.Id = id;
+
+            var validacao = ValidarDadosLocal(command);
+            if (validacao != null) return validacao;
+
+            var resposta = await _coreCadastro.SalvarLocalAsync(command, WlUsuarioId);
+            return RepassarResposta(resposta);
+        }
+
+        /// <summary>
+        /// Lista os locais da afiliada ativa, incluindo os que aguardam aprovação.
+        /// </summary>
+        /// <remarks>
+        /// O filtro original era <c>StatusExibicao == Ativo</c>, o que escondia
+        /// justamente os locais criados pela Exibidora: eles nascem em
+        /// <c>AprovacaoPendente</c> e só passam a Ativo quando o Admin aprova
+        /// (ADR-WL-004). O operador cadastrava e o registro não aparecia em
+        /// lugar nenhum — indistinguível de uma falha no cadastro.
+        ///
+        /// Somente deletados ficam fora. Inativos precisam aparecer para reativação. O <c>StatusExibicao</c>
+        /// passou a ser projetado para o frontend poder rotular a situação em vez
+        /// de assumir que tudo que veio está ativo.
+        /// </remarks>
+        [HttpGet]
+        public async Task<IActionResult> GetAll()
+        {
+            var afiliadaId = _tenant.AfiliadaId;
+
+            var locais = await _tenant.Locais
+                .AsNoTracking()
+                .Where(l => l.StatusExibicao != StatusExibicaoEnum.Deletado)
+                .Select(l => new
+                {
+                    l.Id,
+                    l.Codigo,
+                    l.Descricao,
+                    Cidade = l.Cidade.Nome,
+                    UF = l.Cidade.Estado.Sigla,
+                    l.FonteOrigem,
+                    l.FonteTimestamp,
+                    l.StatusExibicao,
+                    l.TimeStamp
+                })
+                .ToListAsync();
+
+            return Ok(locais);
+        }
+
+        /// <summary>
+        /// Detalhe do local, com todos os campos editáveis.
+        /// </summary>
+        /// <remarks>
+        /// A projeção precisa devolver endereço, geolocalização, código interno e
+        /// palavras-chave — e não apenas o resumo da listagem. O ramo de edição do
+        /// <c>LocalCadastroHandler</c> aplica <c>SetEndereco</c>,
+        /// <c>SetGeolocalizacao</c>, <c>SetCodigoInterno</c> e
+        /// <c>SetPalavrasChave</c> com o que vier no command, sem mesclar com o
+        /// que já existe: um formulário preenchido a partir de um payload
+        /// incompleto <b>apagaria</b> esses dados ao salvar.
+        ///
+        /// O filtro também aceita <c>AprovacaoPendente</c>, senão um local
+        /// recém-cadastrado apareceria na lista mas não abriria para edição.
+        /// </remarks>
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetById(int id)
+        {
+            var afiliadaId = _tenant.AfiliadaId;
+
+            // Cidade e Estado são navegações: com lazy loading desligado no contexto
+            // do core, sem Include os campos Cidade/UF do detalhe voltavam sempre
+            // null. O `?.` na projeção escondia isso — o formulário de edição abria
+            // com a cidade em branco e salvava por cima.
+            var local = await _tenant.Locais
+                .AsNoTracking()
+                .Include(l => l.Cidade.Estado)
+                .FirstOrDefaultAsync(l => l.Id == id
+                                      
+                                       && l.StatusExibicao != StatusExibicaoEnum.Deletado);
+
+            if (local == null)
+                return NotFound(new { message = "Local não encontrado." });
+
+
+            return Ok(new
+            {
+                local.Id,
+                local.Codigo,
+                local.Descricao,
+                local.IdCidade,
+                Cidade = local.Cidade?.Nome,
+                UF = local.Cidade?.Estado?.Sigla,
+                local.CodigoInterno,
+                local.PalavrasChave,
+                local.StatusExibicao,
+                local.TimeStamp,
+                Endereco = new
+                {
+                    local.Endereco?.Logradouro,
+                    local.Endereco?.Numero,
+                    local.Endereco?.Bairro,
+                    local.Endereco?.Complemento,
+                    local.Endereco?.Referencia,
+                    Cep = new { Numero = local.Endereco?.Cep?.Numero }
+                },
+                Geolocalizacao = new
+                {
+                    Latitude = local.GeoLocalizacao != null ? local.GeoLocalizacao.Latitude : 0,
+                    Longitude = local.GeoLocalizacao != null ? local.GeoLocalizacao.Longitude : 0
+                },
+                local.FonteOrigem,
+                local.FonteUsuarioId,
+                local.FonteTimestamp
+            });
+        }
+
+        [HttpGet("{id}/publico")]
+        public async Task<IActionResult> GetPublico(int id)
+        {
+            var local = await _tenant.Locais
+                .AsNoTracking()
+                .Include(l => l.Publico.DistribuicaoGenero)
+                .Include(l => l.Publico.DistribuicaoEtaria)
+                .Include(l => l.Publico.DistribuicaoRenda)
+                .Include(l => l.Publico.PerfisPsicograficos)
+                .Include(l => l.Publico.Segmentos)
+                .Include(l => l.Publico.PoiCategorias)
+                .FirstOrDefaultAsync(l => l.Id == id
+                                       && l.StatusExibicao != StatusExibicaoEnum.Deletado);
+
+            if (local == null)
+                return NotFound(new { message = "Local não encontrado." });
+
+            var publico = local.Publico;
+            var generoPredominante = publico?.DistribuicaoGenero
+                .OrderByDescending(g => g.Porcentegem)
+                .FirstOrDefault();
+
+            return Ok(new
+            {
+                Audiencia = publico == null ? (int?)null : publico.Audiencia,
+                TipoMedicao = publico == null ? (int?)null : publico.TipoMedicao,
+                Fonte = publico?.Fonte,
+                Genero = generoPredominante != null && generoPredominante.Porcentegem > 50
+                    ? (int)generoPredominante.Genero
+                    : 0,
+                FaixaEtaria = publico?.DistribuicaoEtaria.Select(x => x.IdFaixaEtaria).ToArray()
+                    ?? Array.Empty<int>(),
+                FaixaRenda = publico?.DistribuicaoRenda.Select(x => x.IdFaixaRenda).ToArray()
+                    ?? Array.Empty<int>(),
+                PerfisPsicograficos = publico?.PerfisPsicograficos.Select(x => x.IdPerfilPsicografico).ToArray()
+                    ?? Array.Empty<int>(),
+                Segmentos = publico?.Segmentos.Select(x => x.IdSegmento).ToArray()
+                    ?? Array.Empty<int>(),
+                PoiCategorias = publico?.PoiCategorias.Select(x => x.IdPoiCategoria).ToArray()
+                    ?? Array.Empty<int>()
+            });
+        }
+
+        [HttpPut("{id}/publico")]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public async Task<IActionResult> PutPublico(int id, [FromBody] LocalPublicoRequest request)
+        {
+            if (request == null)
+                return BadRequest(new { message = "Dados demográficos são obrigatórios." });
+
+            var localExiste = await _tenant.Locais.AnyAsync(l => l.Id == id
+                && l.StatusExibicao != StatusExibicaoEnum.Deletado);
+
+            if (!localExiste)
+                return NotFound(new { message = "Local não encontrado." });
+
+            var command = new LocalPublicoCadastroCommand
+            {
+                IdLocal = id,
+                Audiencia = request.Audiencia ?? 0,
+                TipoMedicao = request.TipoMedicao ?? 0,
+                Fonte = request.Fonte,
+                Genero = request.Genero,
+                FaixaEtaria = request.FaixaEtaria ?? Array.Empty<int>(),
+                FaixaRenda = request.FaixaRenda ?? Array.Empty<int>(),
+                PerfisPsicograficos = request.PerfisPsicograficos ?? Array.Empty<int>(),
+                Segmentos = request.Segmentos ?? Array.Empty<int>(),
+                PoiCategorias = request.PoiCategorias ?? Array.Empty<int>()
+            };
+
+            var resposta = await _coreCadastro.SalvarPublicoAsync(command);
+            return RepassarResposta(resposta);
+        }
+
+        private IActionResult ValidarDadosLocal(LocalCadastroCommand command)
+        {
+            if (command.IdCidade <= 0 || string.IsNullOrWhiteSpace(command.Endereco?.Logradouro)
+                || command.Geolocalizacao == null || !command.Geolocalizacao.IsValid())
+                return BadRequest(new { message = "Informe cidade, logradouro e coordenadas válidas." });
+            return null;
+        }
+
+        [HttpPost("{id}/cancelar")]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public Task<IActionResult> Cancelar(int id, [FromBody] LocalStatusRequest request) =>
+            AlterarStatus(id, request, StatusExibicaoEnum.Deletado);
+
+        [HttpPost("{id}/inativar")]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public Task<IActionResult> Inativar(int id, [FromBody] LocalStatusRequest request) =>
+            AlterarStatus(id, request, StatusExibicaoEnum.Inativo);
+
+        [HttpPost("{id}/reativar")]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public Task<IActionResult> Reativar(int id, [FromBody] LocalStatusRequest request) =>
+            AlterarStatus(id, request, StatusExibicaoEnum.AprovacaoPendente);
+
+        private async Task<IActionResult> AlterarStatus(int id, LocalStatusRequest request, StatusExibicaoEnum destino)
+        {
+            var local = await _tenant.Locais.SingleOrDefaultAsync(l => l.Id == id && l.StatusExibicao != StatusExibicaoEnum.Deletado);
+            if (local == null) return NotFound(new { message = "Local não encontrado." });
+            if (request?.TimeStamp == null || request.TimeStamp.Length != 8)
+                return BadRequest(new { message = "Recarregue o local antes de alterar sua situação." });
+            if (!request.TimeStamp.SequenceEqual(local.TimeStamp) || !local.TentarAlterarStatusWhiteLabel(destino))
+                return Conflict(new { message = "A situação do local mudou ou esta transição não é permitida. Recarregue a listagem." });
+            local.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, null, WlUsuarioId);
+            try { await _db.SaveChangesAsync(); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "O local foi alterado por outra operação. Recarregue a listagem." });
+            }
+            return Ok(new { local.Id, local.StatusExibicao, local.TimeStamp });
+        }
+
+        [HttpDelete("{id}")]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public async Task<IActionResult> Delete(int id)
+        {
+            var afiliadaId = _tenant.AfiliadaId;
+
+            var local = await _tenant.Locais
+                .FirstOrDefaultAsync(l => l.Id == id
+                    && (l.StatusExibicao == StatusExibicaoEnum.Ativo
+                     || l.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
+
+            if (local == null)
+                return NotFound(new { message = "Local não encontrado." });
+
+
+            local.Delete();
+            try { await _db.SaveChangesAsync(); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "O local foi alterado por outra operação. Recarregue a listagem." });
+            }
+
+            return NoContent();
+        }
+    }
+
+    public sealed class LocalPublicoRequest
+    {
+        public int? Audiencia { get; set; }
+        public int? TipoMedicao { get; set; }
+        public string Fonte { get; set; }
+        public int Genero { get; set; }
+        public int[] FaixaEtaria { get; set; }
+        public int[] FaixaRenda { get; set; }
+        public int[] PerfisPsicograficos { get; set; }
+        public int[] Segmentos { get; set; }
+        public int[] PoiCategorias { get; set; }
+    }
+
+    public sealed class LocalStatusRequest
+    {
+        public byte[] TimeStamp { get; set; }
+    }
+
+    [ApiController]
+    [Route("api/wl/[controller]")]
+    [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+    public class PecasController : WlCoreProxyControllerBase
+    {
+        private readonly VeiculandoDataContext _db;
+        private readonly ITenantQueries _tenant;
+        private readonly IFileValidationService _fileValidation;
+        private readonly ICoreCadastroService _coreCadastro;
+
+        public PecasController(
+            VeiculandoDataContext db,
+            ITenantQueries tenant,
+            IFileValidationService fileValidation,
+            ICoreCadastroService coreCadastro)
+        {
+            _db = db;
+            _tenant = tenant;
+            _fileValidation = fileValidation;
+            _coreCadastro = coreCadastro;
+        }
+
+        /// <summary>
+        /// Cadastra uma peça em um local da própria exibidora.
+        /// </summary>
+        /// <remarks>
+        /// A peça também nasce aguardando aprovação, pela mesma razão do local: o
+        /// <c>PecaCadastroHandler</c> chama <c>EnviarParaAprovacao()</c> quando
+        /// quem cadastra é um <c>UsuarioAfiliada</c>.
+        /// </remarks>
+        [HttpPost]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public async Task<IActionResult> Create([FromBody] PecaCadastroCommand command)
+        {
+            if (command == null)
+                return BadRequest(new { message = "Dados da peça são obrigatórios." });
+
+            command.Id = 0;
+
+            var erro = await ValidarLocalDaAfiliadaAsync(command.IdLocal);
+            if (erro != null) return erro;
+
+            var resposta = await _coreCadastro.SalvarPecaAsync(command, WlUsuarioId);
+            return RepassarResposta(resposta);
+        }
+
+        /// <summary>
+        /// Atualiza uma peça da própria exibidora.
+        /// </summary>
+        [HttpPut("{id}")]
+        [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public async Task<IActionResult> Update(int id, [FromBody] PecaCadastroCommand command)
+        {
+            if (command == null)
+                return BadRequest(new { message = "Dados da peça são obrigatórios." });
+
+            var afiliadaId = _tenant.AfiliadaId;
+
+            // Include necessário pelo mesmo motivo do GetById: sem ele `peca.Local`
+            // vem null e a asserção de tenant abaixo vira no-op silencioso.
+            var peca = await _tenant.Pecas
+                .Include(p => p.Local)
+                .FirstOrDefaultAsync(p => p.Id == id
+                                      
+                                       && p.StatusExibicao != StatusExibicaoEnum.Deletado);
+
+            if (peca == null)
+                return NotFound(new { message = "Peça não encontrada." });
+
+
+            // O local de destino também precisa ser da exibidora: sem isso uma
+            // edição poderia mover a peça para o inventário de outra afiliada.
+            var erro = await ValidarLocalDaAfiliadaAsync(command.IdLocal);
+            if (erro != null) return erro;
+
+            command.Id = id;
+
+            var resposta = await _coreCadastro.SalvarPecaAsync(command, WlUsuarioId);
+            return RepassarResposta(resposta);
+        }
+
+        private async Task<IActionResult> ValidarLocalDaAfiliadaAsync(int idLocal)
+        {
+            var afiliadaId = _tenant.AfiliadaId;
+
+            var local = await _tenant.Locais
+                .FirstOrDefaultAsync(l => l.Id == idLocal
+                                      
+                                       && l.StatusExibicao != StatusExibicaoEnum.Deletado);
+
+            if (local == null)
+                return NotFound(new { message = "Local não encontrado." });
+
+            return null;
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetAll()
+        {
+            var afiliadaId = _tenant.AfiliadaId;
+
+            // Formato e um complex type do EF6. Comparar `p.Formato != null`
+            // dentro do Select SQL lanca NotSupportedException; materializamos
+            // primeiro e so entao montamos a projecao enxuta da listagem.
+            var entidades = await _tenant.Pecas
+                .AsNoTracking()
+                .Include(p => p.Local)
+                .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo
+                         || p.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente)
+                .ToListAsync();
+
+            var pecas = entidades
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Codigo,
+                    p.IdLocal,
+                    LocalCodigo = p.Local.Codigo,
+                    FormatoDimensao = p.Formato != null ? p.Formato.ToString() : null,
+                    p.ValorPadrao,
+                    p.FonteOrigem,
+                    p.StatusExibicao
+                })
+                .ToList();
+
+            return Ok(pecas);
+        }
+
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetById(int id)
+        {
+            var afiliadaId = _tenant.AfiliadaId;
+
+            // O Include é obrigatório: o contexto do core tem LazyLoadingEnabled =
+            // false, e o `p.Local.IdAfiliada` do WHERE vira JOIN no SQL sem popular
+            // a navegação. Sem ele `peca.Local` vem null e o acesso a
+            // `peca.Local.Codigo` logo abaixo estoura NullReferenceException — 500
+            // em todo GET de detalhe de peça.
+            var peca = await _tenant.Pecas
+                .AsNoTracking()
+                .Include(p => p.Local)
+                .Include(p => p.Suporte)
+                .Include(p => p.Substratos.Select(s => s.SubstratoTipo))
+                .FirstOrDefaultAsync(p => p.Id == id
+                                       && (p.StatusExibicao == StatusExibicaoEnum.Ativo
+                                        || p.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente));
+
+            if (peca == null)
+                return NotFound(new { message = "Peça não encontrada." });
+
+
+            return Ok(new
+            {
+                peca.Id,
+                peca.Codigo,
+                peca.CodigoInterno,
+                peca.IdLocal,
+                LocalCodigo = peca.Local.Codigo,
+                peca.IdTipoSuporte,
+                TipoSuporte = peca.Suporte?.Nome,
+                IdFormato = peca.IdFormatoArteFinal,
+                FormatoDimensao = peca.Formato != null ? peca.Formato.ToString() : null,
+                Formato = peca.Formato == null ? null : new
+                {
+                    peca.Formato.Largura,
+                    peca.Formato.Altura,
+                    peca.Formato.Juncao
+                },
+                EspecificacaoProducao = peca.EspecificacaoProducao == null ? null : new
+                {
+                    peca.EspecificacaoProducao.Largura,
+                    peca.EspecificacaoProducao.Altura,
+                    peca.EspecificacaoProducao.Material,
+                    peca.EspecificacaoProducao.Especificacao
+                },
+                PeriodicidadePadrao = peca.PeriodicidadePadrao == null
+                    ? 0
+                    : (int)peca.PeriodicidadePadrao.Tipo,
+                peca.ValorPadrao,
+                IdsSubstratoTipo = peca.Substratos.Select(s => s.IdSubstratoTipo).ToArray(),
+                peca.Iluminacao,
+                peca.Semaforo,
+                peca.AnguloDeVisao,
+                Via = peca.Via == null ? null : new
+                {
+                    peca.Via.ViaTipo,
+                    peca.Via.Faixas,
+                    peca.Via.Velociade,
+                    peca.Via.Pedestre
+                },
+                peca.RoteiroComercial,
+                peca.Alvara,
+                StreetView = peca.StreetView?.Url,
+                peca.Descricao,
+                peca.Restricao,
+                peca.StatusExibicao,
+                peca.FonteOrigem
+            });
+        }
+
+    }
+}

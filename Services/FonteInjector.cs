@@ -1,5 +1,5 @@
-using Veiculando.Domain.Enums;
 using Veiculando.Domain.Entities.Interfaces;
+using Veiculando.Domain.Enums;
 using Veiculando.WhiteLabel.Api.Middleware;
 
 namespace Veiculando.WhiteLabel.Api.Services
@@ -22,10 +22,7 @@ namespace Veiculando.WhiteLabel.Api.Services
         {
             if (entity == null) return;
 
-            // O middleware resolveu o AfiliadaId da instância e guardou no contexto
-            // Como este proxy é WhiteLabel, a fonte da agência equivale ao ID da Afiliada do WL
             var agenciaId = _tenantContext.AfiliadaId;
-
             entity.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, agenciaId, null);
         }
     }

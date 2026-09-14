@@ -1,0 +1,29 @@
+# Ref fixada do repositorio veiculando/Veiculando (core) usada para compilar
+# este BFF.
+#
+# Por que existe: o csproj deste repositorio referencia cinco projetos do core
+# por caminho relativo. Sem um pin, o CI compilaria contra o que estivesse na
+# ponta de um branch movel e o mesmo commit deste repo produziria binarios
+# diferentes conforme o dia. O pin torna o build reproduzivel e transforma
+# "subir a versao do core" numa mudanca revisavel em PR.
+#
+# Formato: um SHA completo de 40 caracteres hex na primeira linha nao comentada.
+# SHA abreviado ou nome de branch e rejeitado pelo workflow de proposito.
+#
+# Para atualizar: troque o SHA, rode o CI e abra PR. Se a suite do BFF passar
+# com o core novo, o bump esta validado.
+#
+# ---------------------------------------------------------------------------
+# SHA atual: ponta da sprint-9.0 apos o merge do PR #112 do Core.
+#
+# c1d702ae traz a barreira de tenant do PedidoReservaRespostaHandler: a
+# titularidade do pedido (que estava comentada com um //TODO) e a validacao da
+# afiliada da peca sugerida. Sao as duas guardas que este BFF ja aplicava antes
+# de delegar; agora elas valem tambem para os outros chamadores do handler,
+# incluindo o painel Afiliada.
+#
+# Continua contendo tudo do pin anterior (4dc98315): WlDominio, WL_Configuracao,
+# as migrations AddWlDominioConfiguracao e PrimeiroAcessoWlUsuario, e os fixes de
+# ciclo de vida de Local e projecao de identidade pos-commit.
+# ---------------------------------------------------------------------------
+c1d702ae13a723e475541ef600433363b9c08e33

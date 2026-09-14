@@ -3,20 +3,26 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <UserSecretsId>aspnet-Veiculando.WhiteLabel.Api-A90B666C-DE1C-4688-ADB2-144C4529C5A2</UserSecretsId>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+    <!-- O csproj vive na raiz do repositorio, entao o glob padrao do SDK
+         alcancaria tambem o projeto de testes que fica em subpasta. Sem esta
+         exclusao os arquivos de teste seriam compilados DENTRO da API, que
+         passaria a depender de xUnit e Testcontainers em runtime. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj\**;Veiculando.WhiteLabel.Api.Tests\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.0" />
+    <PackageReference Include="SendGrid" Version="9.29.3" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Veiculando\Veiculando.Data\Veiculando.Data.csproj" />
-    <ProjectReference Include="..\Veiculando\Veiculando.Infra.IoC\Veiculando.Infra.IoC.csproj" />
     <ProjectReference Include="..\Veiculando\Veiculando.Infra.Security\Veiculando.Infra.Security.csproj" />
     <ProjectReference Include="..\Veiculando\Veiculando.Infra\Veiculando.Infra.csproj" />
-    <ProjectReference Include="..\Veiculando\Veiculando.WhiteLabel.Domain\Veiculando.WhiteLabel.Domain.csproj" />
   </ItemGroup>
 
 </Project>
