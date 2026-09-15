@@ -11,10 +11,19 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
     /// recuperação de senha: captura o que seria enviado, sem tocar rede nem
     /// exigir uma API key de verdade.
     /// </summary>
-    public sealed class FakeWlPasswordEmailSender : IWlPasswordEmailSender
+    public sealed class FakeWlPasswordEmailSender : IWlPasswordEmailSender, IWlAppEmailSender
     {
         private readonly ConcurrentQueue<EnvioCapturado> _envios = new();
         private readonly ConcurrentQueue<ConviteCapturado> _convites = new();
+        private readonly ConcurrentQueue<CodigoCapturado> _codigos = new();
+        public IReadOnlyCollection<CodigoCapturado> Codigos => _codigos.ToArray();
+        public Task ConfirmacaoAsync(string email, string marca, string codigo, CancellationToken ct)
+        {
+            if (FalharProximoEnvio) { FalharProximoEnvio = false; throw new WlPasswordEmailException("Falha simulada de envio."); }
+            _codigos.Enqueue(new CodigoCapturado(email, codigo)); return Task.CompletedTask;
+        }
+        public Task RecuperacaoAsync(string email, string marca, string link, CancellationToken ct) => EnviarRecuperacaoAsync(email, marca, link, ct);
+        public sealed record CodigoCapturado(string Email, string Codigo);
 
         /// <summary>
         /// Quando <c>true</c>, o próximo envio lança <see cref="WlPasswordEmailException"/> —

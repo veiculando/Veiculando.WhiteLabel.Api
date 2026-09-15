@@ -115,6 +115,7 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                 // testes de recuperação de senha não devem depender de rede nem
                 // de uma API key de verdade.
                 services.AddSingleton<IWlPasswordEmailSender>(EmailSender);
+                services.AddSingleton<IWlAppEmailSender>(EmailSender);
                 services.AddSingleton<IWlUploadStorage>(Uploads);
 
                 // Intercepta o cliente tipado do FileServer, pelo mesmo mecanismo

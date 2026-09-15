@@ -40,6 +40,9 @@ namespace Veiculando.WhiteLabel.Api.Middleware
         /// <summary>Operadores da exibidora (hierarquia concreta).</summary>
         IQueryable<WlUsuarioAfiliada> UsuariosAfiliada { get; }
 
+        /// <summary>Anunciantes do App, sempre limitados à afiliada resolvida pelo Host.</summary>
+        IQueryable<WlUsuarioAnunciante> UsuariosAnunciante { get; }
+
         /// <summary>Base da hierarquia — usada na checagem de e-mail duplicado.</summary>
         IQueryable<WlUsuario> Usuarios { get; }
 
@@ -76,6 +79,9 @@ namespace Veiculando.WhiteLabel.Api.Middleware
 
         public IQueryable<WlUsuarioAfiliada> UsuariosAfiliada =>
             _db.WlUsuariosAfiliada.Where(u => u.AfiliadaId == AfiliadaId);
+
+        public IQueryable<WlUsuarioAnunciante> UsuariosAnunciante =>
+            _db.WlUsuariosAnunciante.Where(u => u.AfiliadaId == AfiliadaId);
 
         public IQueryable<WlUsuario> Usuarios =>
             _db.WlUsuarios.Where(u => u.AfiliadaId == AfiliadaId);
