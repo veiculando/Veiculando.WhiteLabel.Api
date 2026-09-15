@@ -19,6 +19,8 @@ public sealed class WlUploadReferences
     {
         var resource = WlUploadKey.Parse(key);
         using var db = new VeiculandoDataContext();
+        if (resource.Kind == "kyc")
+            return await db.WlAppDocumentos.AnyAsync(d => d.StorageKey == key && d.Onboarding.AfiliadaId == resource.TenantId && d.Onboarding.UsuarioId == resource.ResourceId, ct);
         if (resource.Kind == "pecas")
             return await db.Pecas.AnyAsync(p => p.Id == resource.ResourceId && p.Local.IdAfiliada == resource.TenantId
                 && p.Foto.ArquivoNome == resource.FileName, ct);

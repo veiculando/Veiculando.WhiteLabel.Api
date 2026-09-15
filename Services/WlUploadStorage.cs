@@ -113,9 +113,11 @@ public sealed record WlUploadKey(int TenantId, string Kind, int ResourceId, stri
     public static WlUploadKey Parse(string key)
     {
         var match = System.Text.RegularExpressions.Regex.Match(key ?? "",
-            @"^tenant-([1-9][0-9]*)/(pecas|checking)/([1-9][0-9]*)/(wl-[a-f0-9]{32}\.(?:jpg|png))$");
+            @"^tenant-([1-9][0-9]*)/(pecas|checking|kyc)/([1-9][0-9]*)/(wl-[a-f0-9]{32}\.(?:jpg|png|pdf))$");
         if (!match.Success || !int.TryParse(match.Groups[1].Value, out var tenant) || !int.TryParse(match.Groups[3].Value, out var resource))
             throw new ArgumentException("Referência de upload inválida.");
+        if (match.Groups[2].Value != "kyc" && match.Groups[4].Value.EndsWith(".pdf", StringComparison.Ordinal))
+            throw new ArgumentException("Documento PDF pertence exclusivamente ao KYC.");
         return new(tenant, match.Groups[2].Value, resource, match.Groups[4].Value);
     }
 }

@@ -157,6 +157,7 @@ namespace Veiculando.WhiteLabel.Api
 
             app.UseAuthentication();
             app.UseMiddleware<Veiculando.WhiteLabel.Api.Middleware.TenantBindingMiddleware>();
+            app.UseMiddleware<Veiculando.WhiteLabel.Api.Middleware.AppSessionMiddleware>();
             app.UseAuthorization();
 
             app.UseEndpoints(endpoints =>

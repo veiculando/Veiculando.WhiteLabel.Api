@@ -83,6 +83,9 @@ namespace Veiculando.WhiteLabel.Api.Configurations
                     "ConviteValidadeHoras deve estar entre 1 e 168.")
                 .ValidateOnStart();
             services.AddScoped<Services.IWlPasswordEmailSender, Services.SendGridWlPasswordEmailSender>();
+            services.AddScoped<IWlAppEmailSender, SendGridWlAppEmailSender>();
+            services.AddHttpClient<IWlCompanyRegistry, BrasilApiCompanyRegistry>(client =>
+            { client.BaseAddress = new Uri("https://brasilapi.com.br/api/cnpj/v1/"); client.Timeout = TimeSpan.FromSeconds(10); });
             services.AddScoped<WlPublicLinks>();
 
             // Segunda camada de limite do esqueci-senha, por hash do e-mail e
@@ -118,6 +121,7 @@ namespace Veiculando.WhiteLabel.Api.Configurations
 
             // Validação de arquivos (magic bytes + tamanho).
             services.AddSingleton<IFileValidationService, FileValidationService>();
+            services.AddSingleton<AppLoginAttemptGuard>();
             services.AddSingleton<IWlUploadStorage, AzureWlUploadStorage>();
             services.AddScoped<WlUploadPipeline>();
             services.AddScoped<WlUploadReferences>();

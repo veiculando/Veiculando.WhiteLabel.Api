@@ -84,6 +84,19 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
             return operador.Id;
         }
 
+        public static async Task<int> AnuncianteAsync(int afiliadaId, string email, string cnpj = null)
+        {
+            using var ctx = new VeiculandoDataContext();
+            var anunciante = new WlUsuarioAnunciante(
+                email: email,
+                senhaHash: BC.HashPassword(SenhaPadrao),
+                afiliadaId: afiliadaId,
+                cnpj: cnpj);
+            ctx.WlUsuariosAnunciante.Add(anunciante);
+            await ctx.SaveChangesAsync();
+            return anunciante.Id;
+        }
+
         /// <summary>
         /// Cria a afiliada e sua cidade/estado, se ainda nao existirem.
         /// </summary>
