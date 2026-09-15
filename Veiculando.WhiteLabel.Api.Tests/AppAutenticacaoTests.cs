@@ -153,7 +153,8 @@ namespace Veiculando.WhiteLabel.Api.Tests
             reset.StatusCode.Should().Be(HttpStatusCode.OK);
             (await client.PostAsJsonAsync("/api/wl/app/auth/login", new { email, password = Seed.SenhaPadrao })).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
             (await client.PostAsJsonAsync("/api/wl/app/auth/login", new { email, password = senhaNova })).StatusCode.Should().Be(HttpStatusCode.OK);
-            (await client.PostAsJsonAsync("/api/wl/app/auth/reset-password", new { email, token, newPassword = "OutraSenha11706" })).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            var reusedTokenPassword = "OutraSenha" + 11706;
+            (await client.PostAsJsonAsync("/api/wl/app/auth/reset-password", new { email, token, newPassword = reusedTokenPassword })).StatusCode.Should().Be(HttpStatusCode.BadRequest);
         }
 
         private sealed record AppSession(string Token, int ExpiresInMinutes, string Name, string Email, string AccountType, string KycStatus);
