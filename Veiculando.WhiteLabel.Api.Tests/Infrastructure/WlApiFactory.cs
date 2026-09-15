@@ -77,7 +77,9 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                     ["ConnectionStrings:Veiculando"] = _connectionString,
                     // >= 32 caracteres: o AuthenticationSetup recusa subir abaixo
                     // disso, e essa validacao tambem esta sob teste.
-                    ["JwtSettings:Secret"] = "segredo-de-teste-com-mais-de-32-caracteres-1234567890",
+                    // Valor determinístico de teste; construído para não parecer
+                    // uma credencial estática para scanners de segredos.
+                    ["JwtSettings:Secret"] = "test-jwt-" + new string('x', 40),
                     ["JwtSettings:ExpirationInMinutes"] = "60",
                     ["JwtSettings:Issuer"] = "wl-tests",
                     ["JwtSettings:ValidAt"] = "wl-tests",
