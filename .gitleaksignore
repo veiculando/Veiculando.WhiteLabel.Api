@@ -1,0 +1,3 @@
+# False positive historical: test password fixture, already replaced in a9265ea.
+# Scope is the exact Gitleaks fingerprint, not the current source file.
+ea99ce49d54789f7c0c4516fc099fdeef6bb468e:Veiculando.WhiteLabel.Api.Tests/AppAutenticacaoTests.cs:generic-api-key:156
