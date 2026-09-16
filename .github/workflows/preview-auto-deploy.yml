@@ -15,17 +15,60 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'master'
-    uses: veiculando/Veiculando/.github/workflows/preview-auto-deploy.yml@main
-    with:
-      image-name: veiculando-whitelabel-api
-      image-sha: ${{ github.event.workflow_run.head_sha }}
-      compose-service: bff
-      image-ref-var: BFF_IMAGE
-      smoke-host: ${{ vars.PREVIEW_APP_HOST }}
-      acr-login-server: ${{ vars.ACR_LOGIN_SERVER }}
-      azure-resource-group: ${{ vars.AZURE_RESOURCE_GROUP }}
-      azure-vm-name: ${{ vars.AZURE_VM_NAME }}
-    secrets:
-      azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-      azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-      azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: veiculando-preview
+      cancel-in-progress: false
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - id: image
+        name: Resolve immutable BFF image
+        env:
+          ACR: ${{ vars.ACR_LOGIN_SERVER }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          : "${ACR:?Configure ACR_LOGIN_SERVER in repository variables}"
+          [[ "$SHA" =~ ^[a-f0-9]{40}$ ]]
+          digest="$(az acr manifest show-metadata --registry "${ACR%%.*}" --name "veiculando-whitelabel-api:sha-$SHA" --query digest --output tsv)"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "ref=$ACR/veiculando-whitelabel-api@$digest" >> "$GITHUB_OUTPUT"
+      - name: Update preview BFF and verify the public host
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          VM_NAME: ${{ vars.AZURE_VM_NAME }}
+          HOST: ${{ vars.PREVIEW_APP_HOST }}
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: |
+          set -euo pipefail
+          : "${RESOURCE_GROUP:?Configure AZURE_RESOURCE_GROUP in repository variables}"
+          : "${VM_NAME:?Configure AZURE_VM_NAME in repository variables}"
+          : "${HOST:?Configure PREVIEW_APP_HOST in repository variables}"
+          remote_script=$(cat <<'SCRIPT'
+          set -euo pipefail
+          image_ref="${1#IMAGE_REF=}"
+          host="${2#HOST=}"
+          stack=/opt/veiculando/preview
+          env_file="$stack/stack.env"
+          compose=(docker compose --project-name veiculando-preview --env-file "$env_file" -f "$stack/docker-compose.yml")
+          [[ "$image_ref" =~ ^.+@sha256:[a-f0-9]{64}$ && "$host" =~ ^[A-Za-z0-9.-]+$ ]] || exit 64
+          backup=$(mktemp); cp -a "$env_file" "$backup"; deployed=0
+          rollback() { if [[ "$deployed" != 1 ]]; then cp -a "$backup" "$env_file"; "${compose[@]}" up -d --pull never --no-deps --force-recreate bff edge || true; echo PREVIEW_ROLLBACK=executed >&2; fi; rm -f "$backup"; }
+          trap rollback EXIT
+          awk -v value="$image_ref" 'index($0,"BFF_IMAGE=")==1 { print "BFF_IMAGE=" value; found=1; next } { print } END { if (!found) print "BFF_IMAGE=" value }' "$env_file" > "$env_file.new"
+          chmod --reference="$env_file" "$env_file.new"; chown --reference="$env_file" "$env_file.new"; mv "$env_file.new" "$env_file"
+          "${compose[@]}" config --quiet
+          "${compose[@]}" pull bff
+          "${compose[@]}" up -d --pull never --no-deps --force-recreate bff edge
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error -H "Host: $host" http://127.0.0.1:9080/ | grep -q '<app-root'; then deployed=1; echo PREVIEW_SMOKE=success; exit 0; fi
+            sleep 2
+          done
+          exit 1
+          SCRIPT
+          )
+          az vm run-command invoke --resource-group "$RESOURCE_GROUP" --name "$VM_NAME" --command-id RunShellScript --parameters "IMAGE_REF=$IMAGE_REF" "HOST=$HOST" --scripts "$remote_script" --query 'value[0].message' --output tsv
