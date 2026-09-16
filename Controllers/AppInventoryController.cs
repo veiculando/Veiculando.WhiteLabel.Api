@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Data.Entity;
 using System.Linq;
-using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -19,7 +18,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     /// </summary>
     [ApiController]
     [Route("api/wl/app/inventory")]
-    [Authorize]
+    [AllowAnonymous]
     public sealed class AppInventoryController : ControllerBase
     {
         private readonly ITenantQueries _tenant;
@@ -32,8 +31,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet]
         public async Task<IActionResult> Search([FromQuery] InventorySearchQuery query)
         {
-            if (!EhAnunciante()) return Unauthorized();
-
             var pecas = await PecasAtivasAsync();
             var resultado = AplicarFiltros(pecas, query)
                 .Select(Mapear)
@@ -44,7 +41,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet("{code}")]
         public async Task<IActionResult> GetByCode(string code)
         {
-            if (!EhAnunciante()) return Unauthorized();
             if (string.IsNullOrWhiteSpace(code)) return NotFound(new { message = "Peça não encontrada." });
 
             var peca = (await PecasAtivasAsync())
@@ -53,9 +49,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             return Ok(Mapear(peca));
         }
-
-        private bool EhAnunciante() => User.FindFirstValue("WlPerfil") == "Anunciante" &&
-                                         int.TryParse(User.FindFirstValue("WlAnuncianteId"), out _);
 
         private Task<List<Peca>> PecasAtivasAsync() => _tenant.Pecas
             .AsNoTracking()
