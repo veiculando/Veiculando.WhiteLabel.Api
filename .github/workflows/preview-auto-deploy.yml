@@ -56,8 +56,19 @@ jobs:
           set -euo pipefail
           image_ref="${1#IMAGE_REF=}"
           host="${2#HOST=}"
+          registry="${image_ref%%/*}"
+          metadata='http://169.254.169.254/metadata/identity/oauth2/token?api-version=2019-08-01&resource=https%3A%2F%2Fmanagement.azure.com%2F'
+          identity_response=$(curl --fail --silent --show-error --retry 3 -H Metadata:true "$metadata")
+          identity_token=$(printf '%s' "$identity_response" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+          exchange_response=$(curl --fail --silent --show-error --retry 3 --data-urlencode "access_token=$identity_token" --data 'grant_type=access_token' --data "service=$registry" "https://$registry/oauth2/exchange")
+          refresh_token=$(printf '%s' "$exchange_response" | sed -n 's/.*"refresh_token":"\([^"]*\)".*/\1/p')
+          [[ -n "$refresh_token" ]]
+          printf '%s' "$refresh_token" | docker login "$registry" --username 00000000-0000-0000-0000-000000000000 --password-stdin >/dev/null
           stack=/opt/veiculando/preview
-          env_file="$stack/stack.env"
+          # The provisioned preview stack stores its runtime configuration in
+          # .env. Do not create a parallel file: it would leave Compose using
+          # stale image references.
+          env_file="$stack/.env"
           compose=(docker compose --project-name veiculando-preview --env-file "$env_file" -f "$stack/docker-compose.yml")
           [[ "$image_ref" =~ ^.+@sha256:[a-f0-9]{64}$ && "$host" =~ ^[A-Za-z0-9.-]+$ ]] || exit 64
           backup=$(mktemp); cp -a "$env_file" "$backup"; deployed=0
