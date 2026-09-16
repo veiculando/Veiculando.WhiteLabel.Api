@@ -25,6 +25,7 @@ on:
       - appsettings.json
       - core.ref
       - '.github/workflows/docker.yml'
+      - '.github/workflows/preview-auto-deploy.yml'
   workflow_dispatch:
 
 permissions:
