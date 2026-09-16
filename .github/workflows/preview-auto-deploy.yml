@@ -49,6 +49,10 @@ jobs:
           : "${VM_NAME:?Configure AZURE_VM_NAME in repository variables}"
           : "${HOST:?Configure PREVIEW_APP_HOST in repository variables}"
           remote_script=$(cat <<'SCRIPT'
+          # Azure Run Command invokes RunShellScript with /bin/sh, which does
+          # not support the Bash-only constructs below (pipefail, arrays,
+          # [[ ... ]]). Re-exec ourselves before doing any deployment work.
+          if [ -z "${BASH_VERSION:-}" ]; then exec /usr/bin/env bash "$0" "$@"; fi
           set -euo pipefail
           image_ref="${1#IMAGE_REF=}"
           host="${2#HOST=}"
@@ -65,10 +69,15 @@ jobs:
           "${compose[@]}" pull bff
           "${compose[@]}" up -d --pull never --no-deps --force-recreate bff edge
           for _ in $(seq 1 30); do
-            if curl --fail --silent --show-error -H "Host: $host" http://127.0.0.1:9080/ | grep -q '<app-root'; then deployed=1; echo PREVIEW_SMOKE=success; exit 0; fi
+            if docker inspect --format '{{.State.Running}}' veiculando-preview-bff-1 | grep -qx true && docker exec veiculando-preview-bff-1 curl --fail --silent --show-error http://localhost:8080/health >/dev/null && curl --fail --silent --show-error -H "Host: $host" http://127.0.0.1:9080/ | grep -q '<app-root'; then deployed=1; echo PREVIEW_SMOKE=success; exit 0; fi
             sleep 2
           done
           exit 1
           SCRIPT
           )
-          az vm run-command invoke --resource-group "$RESOURCE_GROUP" --name "$VM_NAME" --command-id RunShellScript --parameters "IMAGE_REF=$IMAGE_REF" "HOST=$HOST" --scripts "$remote_script" --query 'value[0].message' --output tsv
+          result="$(az vm run-command invoke --resource-group "$RESOURCE_GROUP" --name "$VM_NAME" --command-id RunShellScript --parameters "IMAGE_REF=$IMAGE_REF" "HOST=$HOST" --scripts "$remote_script" --output json)"
+          printf '%s\n' "$result"
+          # The Run Command control plane can report its invocation as enabled
+          # even when the guest script emitted an error. Require the marker
+          # printed only after the new container passes the host smoke test.
+          grep -Fq 'PREVIEW_SMOKE=success' <<< "$result"
