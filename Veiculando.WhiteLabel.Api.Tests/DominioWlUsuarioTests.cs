@@ -32,9 +32,9 @@ namespace Veiculando.WhiteLabel.Api.Tests
         [Fact]
         public void Permissoes_duplicadas_sao_deduplicadas()
         {
-            var operador = Operador(new[] { "Checking", "Checking", "PecaGerenciar" });
+            var operador = Operador(new[] { "CheckingGerenciar", "CheckingGerenciar", "PecaGerenciar" });
 
-            operador.ObterPermissoes().Should().BeEquivalentTo(new[] { "Checking", "PecaGerenciar" });
+            operador.ObterPermissoes().Should().BeEquivalentTo(new[] { "CheckingGerenciar", "PecaGerenciar" });
         }
 
         [Fact]
@@ -132,22 +132,37 @@ namespace Veiculando.WhiteLabel.Api.Tests
 
         [Theory]
         [InlineData("PecaGerenciar")]
-        [InlineData("Checking")]
+        [InlineData("CheckingGerenciar")]
         [InlineData("PedidoReservaGerenciar")]
         [InlineData("PedidoInsercaoGerenciar")]
         [InlineData("UsuarioAfiliadaGerenciar")]
-        public void As_cinco_permissoes_da_whitelist_sao_aceitas(string permissao)
+        [InlineData("ClienteGerenciar")]
+        [InlineData("PedidoCriar")]
+        [InlineData("ProgramacaoVisualizar")]
+        [InlineData("FinanceiroVisualizar")]
+        [InlineData("RelatorioExportar")]
+        public void As_dez_permissoes_da_whitelist_canonica_sao_aceitas(string permissao)
         {
             WlPermissoesValidas.ValidarPermissoes(new[] { permissao }, out _).Should().BeTrue();
         }
 
         [Fact]
-        public void Whitelist_do_dominio_tem_exatamente_cinco_permissoes()
+        public void Checking_nao_e_mais_aceito_foi_reconciliado_para_checkinggerenciar()
         {
-            // Se alguem adicionar uma sexta, o AuthorizationSetup do BFF e o
-            // PERMISSOES_WL do frontend precisam acompanhar. Este teste forca a
+            // VEI-RD-93: unico nome sem verbo no repo, reconciliado com a convencao
+            // <Entidade><Verbo>. Claims antigas sao migradas por
+            // RenomearCheckingEGrantProgramacaoVisualizar, nao aceitas de novo aqui.
+            WlPermissoesValidas.ValidarPermissoes(new[] { "Checking" }, out var invalidas).Should().BeFalse();
+            invalidas.Should().Contain("Checking");
+        }
+
+        [Fact]
+        public void Whitelist_do_dominio_tem_exatamente_dez_permissoes()
+        {
+            // Se alguem adicionar uma decima primeira, o AuthorizationSetup do BFF e
+            // o PERMISSOES_WL do frontend precisam acompanhar. Este teste forca a
             // conversa em vez de deixar os tres divergirem em silencio.
-            WlPermissoesValidas.Lista.Should().HaveCount(5);
+            WlPermissoesValidas.Lista.Should().HaveCount(10);
         }
     }
 }

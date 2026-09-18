@@ -48,7 +48,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
                     email: email,
                     senhaHash: BC.HashPassword("SenhaDeTeste123"),
                     afiliadaId: afiliadaId,
-                    permissoes: new[] { "PecaGerenciar", "Checking" });
+                    permissoes: new[] { "PecaGerenciar", "CheckingGerenciar" });
 
                 operador.IsValid().Should().BeTrue(
                     "o construtor nao deveria gerar notificacao: {0}",
@@ -67,7 +67,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
                 lido.Should().NotBeNull();
                 lido!.Nome.Should().Be("Operador Smoke");
                 lido.StatusExibicao.Should().Be(StatusExibicaoEnum.Ativo);
-                lido.ObterPermissoes().Should().BeEquivalentTo("PecaGerenciar", "Checking");
+                lido.ObterPermissoes().Should().BeEquivalentTo("PecaGerenciar", "CheckingGerenciar");
             }
         }
 

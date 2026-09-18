@@ -17,7 +17,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 {
     [ApiController]
     [Route("api/wl/[controller]")]
-    [Authorize(Policy = AuthorizationSetup.Checking)]
+    [Authorize(Policy = AuthorizationSetup.CheckingGerenciar)]
     public class CheckingController : ControllerBase
     {
         private readonly VeiculandoDataContext _db;

@@ -44,4 +44,30 @@
 # AddWlDominioConfiguracao e PrimeiroAcessoWlUsuario, e os fixes de ciclo de
 # vida de Local e projecao de identidade pos-commit.
 # ---------------------------------------------------------------------------
-d2c3547f65e2a47b8f5462379e5bd97e33af4b81
+#
+# ---------------------------------------------------------------------------
+# Sprint 10.0 — pin TEMPORARIO em defcfa50 (HEAD da PR #179 do core).
+#
+# Por que subiu: este BFF passou a referenciar AfiliadaCliente em
+# Middleware/ITenantQueries.cs. A entidade nasce na PR #179 do core, que ainda
+# esta aberta. Com o pin em d2c3547f o build quebrava em CS0246 — nao por erro
+# de codigo aqui, mas porque o core fixado e anterior ao tipo referenciado.
+#
+# Por que um commit nao mergeado: sem isso nao ha ordem possivel. O core so
+# mergeia depois de validado, e quem valida o contrato entre os dois e
+# justamente a suite deste repo. Fixar o commit da feature quebra o ciclo e faz
+# o CI responder a pergunta real: "o BFF compila e passa contra o core novo?".
+#
+# ⚠️ ESTE PIN TEM PRAZO. A #179 mergeia por squash com delete da branch; nesse
+# instante 4f90a073 deixa de ser alcancavel por qualquer ref e este arquivo
+# passa a apontar para um commit pendurado. RE-PIN OBRIGATORIO no commit de
+# merge assim que a #179 entrar em sprint-10.0, antes do fechamento da sprint.
+#
+# Historico deste pin dentro da sprint:
+#   4f90a073  destravou CS0246 (AfiliadaCliente nao existia no core fixado)
+#   defcfa50  destravou CS1061 (o tipo existia, faltava o metodo Ativar())
+#
+# Contem tudo de d2c3547f mais as entidades e migrations de tenant/KYC da
+# Sprint 10.0 (AfiliadaCliente, AfiliadaAgencia, OrganizacaoOnboarding e afins).
+# ---------------------------------------------------------------------------
+defcfa504e50551b60d9db355aa3ac3068990d0c
