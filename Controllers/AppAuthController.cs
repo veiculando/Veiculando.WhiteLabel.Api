@@ -39,6 +39,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         private readonly ILogger<AppAuthController> _logger;
         private readonly IWlAppEmailSender _appEmailSender;
         private readonly IConfiguration _configuration;
+        private readonly IWlPoliticaEmailCorporativo _politicaEmail;
         private readonly AppLoginAttemptGuard _loginAttemptGuard;
         private static readonly string DummyPasswordHash = BC.HashPassword("Senha-ficticia-sem-conta-registrada");
 
@@ -56,6 +57,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             ILogger<AppAuthController> logger,
             IWlAppEmailSender appEmailSender,
             IConfiguration configuration,
+            IWlPoliticaEmailCorporativo politicaEmail,
             AppLoginAttemptGuard loginAttemptGuard)
         {
             _db = db;
@@ -68,6 +70,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             _logger = logger;
             _appEmailSender = appEmailSender;
             _configuration = configuration;
+            _politicaEmail = politicaEmail;
             _loginAttemptGuard = loginAttemptGuard;
         }
 

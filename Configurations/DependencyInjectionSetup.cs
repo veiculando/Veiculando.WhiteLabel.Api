@@ -67,6 +67,14 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // escrevê-lo. Ver ITenantQueries.
             services.AddScoped<ITenantQueries, TenantQueries>();
 
+            // Assinador de referencias de curta duracao: URL temporaria de documento
+            // de KYC (VEI-RD-81) e session token de prospeccao (VEI-RD-83).
+            services.AddSingleton<IWlLinkTemporario, WlLinkTemporario>();
+
+            // Politica de e-mail corporativo do cadastro publico (VEI-RD-82). Scoped
+            // porque le AfiliadaConfiguracao pelo contexto da requisicao.
+            services.AddScoped<IWlPoliticaEmailCorporativo, WlPoliticaEmailCorporativo>();
+
             // Conta de servico resolvida por tenant. IConfiguration pode ser
             // abastecida pelo Azure Key Vault; nenhum segredo e mantido no banco.
             services.AddScoped<ISeedAccountResolver, SeedAccountResolver>();

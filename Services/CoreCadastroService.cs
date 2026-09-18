@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Veiculando.Domain.Commands.Inputs;
+using Veiculando.Domain.Commands.Inputs.Agencias;
 using Veiculando.Domain.Commands.Inputs.Clientes;
 using Veiculando.Domain.Commands.Inputs.Pedidos;
 using Veiculando.Domain.Enums;
@@ -19,6 +20,8 @@ namespace Veiculando.WhiteLabel.Api.Services
         Task<CoreRespostaCadastro> ResponderReservaAsync(PedidoReservaRespostaCommand command);
         Task<CoreRespostaCadastro> SalvarAnuncianteAsync(ClienteCadastroCommand command, int? wlUsuarioId);
         Task<CoreRespostaCadastro> VincularAnuncianteAsync(int idCliente, int? wlUsuarioId);
+        Task<CoreRespostaCadastro> SalvarAgenciaAsync(AgenciaCadastroCommand command, int? wlUsuarioId);
+        Task<CoreRespostaCadastro> VincularAgenciaAsync(int idAgencia, int? wlUsuarioId);
     }
 
     /// <summary>
@@ -175,6 +178,49 @@ namespace Veiculando.WhiteLabel.Api.Services
             };
 
             return EnviarAsync($"api/cliente/{idCliente}/vincular-afiliada", command);
+        }
+
+        /// <summary>
+        /// Cria ou edita a agência pelo handler do core, que grava Agencia e
+        /// AfiliadaAgencia na mesma transação (VEI-RD-79). O AgenciaHandler distingue
+        /// criação de edição por <c>command.Id</c>, igual ao ClienteHandler.
+        /// </summary>
+        /// <remarks>
+        /// <c>AgenciaCadastroCommand</c> não tem os campos <c>Fonte*</c> nem
+        /// <c>IdAfiliada</c> que <c>ClienteCadastroCommand</c> tem — a trilha de origem
+        /// da agência é gravada no VÍNCULO (<c>AfiliadaAgencia</c> implementa
+        /// <c>IOrigemRastreavel</c>), que é onde a procedência WhiteLabel de fato
+        /// pertence: a Agencia em si é compartilhada entre exibidoras e não é "de"
+        /// nenhuma delas.
+        /// </remarks>
+        public Task<CoreRespostaCadastro> SalvarAgenciaAsync(AgenciaCadastroCommand command, int? wlUsuarioId)
+        {
+            if (command == null) throw new ArgumentNullException(nameof(command));
+
+            command.IdUsuarioCadastro = 0;
+
+            return EnviarAsync("api/agencia", command);
+        }
+
+        /// <summary>
+        /// Vincula uma Agencia já existente (achada via por-cnpj) ao tenant desta
+        /// instância. Nunca cria uma segunda Agencia — PRD §8.14.
+        /// </summary>
+        public Task<CoreRespostaCadastro> VincularAgenciaAsync(int idAgencia, int? wlUsuarioId)
+        {
+            var afiliadaId = _tenantContext.AfiliadaId;
+
+            var command = new AfiliadaAgenciaVinculoCommand
+            {
+                IdAgencia = idAgencia,
+                IdAfiliada = afiliadaId,
+                FonteOrigem = FonteOrigemEnum.WhiteLabel,
+                FonteAgenciaId = afiliadaId,
+                FonteUsuarioId = wlUsuarioId,
+                IdUsuarioCadastro = 0
+            };
+
+            return EnviarAsync($"api/agencia/{idAgencia}/vincular-afiliada", command);
         }
 
         public Task<CoreRespostaCadastro> ResponderReservaAsync(PedidoReservaRespostaCommand command)
