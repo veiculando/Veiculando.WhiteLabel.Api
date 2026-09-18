@@ -23,7 +23,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
         private async Task<(WlApiFactory, HttpClient, string)> PrepararAsync(string sufixo, int afiliadaId = Afiliada)
         {
             var email = $"pi-{sufixo}@exemplo.com";
-            await Seed.OperadorAsync(afiliadaId, email, new[] { "Checking", "PedidoInsercaoGerenciar" });
+            await Seed.OperadorAsync(afiliadaId, email, new[] { "CheckingGerenciar", "PedidoInsercaoGerenciar" });
 
             var localId = await Seed.LocalAsync(afiliadaId, $"L{sufixo}");
             var pecaId = await Seed.PecaAsync(localId, $"P{sufixo}");
@@ -143,7 +143,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
             const int outra = 8800;
 
             var email = "pi-iso@exemplo.com";
-            await Seed.OperadorAsync(Afiliada, email, new[] { "Checking" });
+            await Seed.OperadorAsync(Afiliada, email, new[] { "CheckingGerenciar" });
 
             var localDeB = await Seed.LocalAsync(outra, "Liso");
             var pecaDeB = await Seed.PecaAsync(localDeB, "Piso");

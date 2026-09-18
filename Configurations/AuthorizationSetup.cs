@@ -27,19 +27,32 @@ namespace Veiculando.WhiteLabel.Api.Configurations
         public const string ClaimPermissao = "permission";
 
         public const string PecaGerenciar = "PecaGerenciar";
-        public const string Checking = "Checking";
+        // "Checking" foi reconciliado para "CheckingGerenciar" (VEI-RD-93, único nome
+        // sem verbo no repo). Usuários com a claim antiga são migrados via
+        // RenomearCheckingEGrantProgramacaoVisualizar no domínio.
+        public const string CheckingGerenciar = "CheckingGerenciar";
         public const string PedidoReservaGerenciar = "PedidoReservaGerenciar";
         public const string PedidoInsercaoGerenciar = "PedidoInsercaoGerenciar";
         public const string UsuarioAfiliadaGerenciar = "UsuarioAfiliadaGerenciar";
+        public const string ClienteGerenciar = "ClienteGerenciar";
+        public const string PedidoCriar = "PedidoCriar";
+        public const string ProgramacaoVisualizar = "ProgramacaoVisualizar";
+        public const string FinanceiroVisualizar = "FinanceiroVisualizar";
+        public const string RelatorioExportar = "RelatorioExportar";
 
-        /// <summary>As 5 permissões da whitelist do domínio.</summary>
+        /// <summary>Lista canônica de permissões (VEI-RD-93) — espelha WlPermissoesValidas do domínio.</summary>
         public static readonly string[] Todas =
         {
             PecaGerenciar,
-            Checking,
+            CheckingGerenciar,
             PedidoReservaGerenciar,
             PedidoInsercaoGerenciar,
-            UsuarioAfiliadaGerenciar
+            UsuarioAfiliadaGerenciar,
+            ClienteGerenciar,
+            PedidoCriar,
+            ProgramacaoVisualizar,
+            FinanceiroVisualizar,
+            RelatorioExportar
         };
 
         public static IServiceCollection AddWlAuthorization(this IServiceCollection services)
