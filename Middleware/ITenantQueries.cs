@@ -3,6 +3,7 @@ using Veiculando.Data.Contexts;
 using Veiculando.Domain.Entities;
 using Veiculando.Domain.Entities.Pedidos;
 using Veiculando.Domain.Entities.WhiteLabel;
+using Veiculando.Domain.Enums;
 
 namespace Veiculando.WhiteLabel.Api.Middleware
 {
@@ -49,6 +50,20 @@ namespace Veiculando.WhiteLabel.Api.Middleware
         /// <summary>Locais da exibidora, em qualquer status.</summary>
         IQueryable<Local> Locais { get; }
 
+        /// <summary>
+        /// Anunciantes (Clientes) vinculados à afiliada via AfiliadaCliente
+        /// (PRD §6.3) — tabela associativa, não IdAfiliada em Cliente. Em
+        /// qualquer status de vínculo (Ativo/Inativo); o filtro por aba
+        /// Todos/Ativo/Inativo é do controller, igual ao padrão de Locais.
+        /// </summary>
+        IQueryable<Cliente> Clientes { get; }
+
+        /// <summary>
+        /// As linhas de vínculo em si (não os Clientes) — para inativar/reativar
+        /// e para checar Status sem carregar o Cliente inteiro.
+        /// </summary>
+        IQueryable<AfiliadaCliente> AfiliadaClientes { get; }
+
         /// <summary>Peças cujo local pertence à exibidora.</summary>
         IQueryable<Peca> Pecas { get; }
 
@@ -88,6 +103,12 @@ namespace Veiculando.WhiteLabel.Api.Middleware
 
         public IQueryable<Local> Locais =>
             _db.Locais.Where(l => l.IdAfiliada == AfiliadaId);
+
+        public IQueryable<Cliente> Clientes =>
+            _db.Clientes.Where(c => c.AfiliadasVinculadas.Any(v => v.IdAfiliada == AfiliadaId));
+
+        public IQueryable<AfiliadaCliente> AfiliadaClientes =>
+            _db.AfiliadaClientes.Where(v => v.IdAfiliada == AfiliadaId);
 
         // A peça não carrega IdAfiliada: ela pertence a um Local, e é por ele que
         // o recorte acontece. Repetir esse caminho em cada endpoint era uma das
