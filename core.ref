@@ -46,7 +46,7 @@
 # ---------------------------------------------------------------------------
 #
 # ---------------------------------------------------------------------------
-# Sprint 10.0 — pin TEMPORARIO em 4f90a073 (HEAD da PR #179 do core).
+# Sprint 10.0 — pin TEMPORARIO em defcfa50 (HEAD da PR #179 do core).
 #
 # Por que subiu: este BFF passou a referenciar AfiliadaCliente em
 # Middleware/ITenantQueries.cs. A entidade nasce na PR #179 do core, que ainda
@@ -63,7 +63,11 @@
 # passa a apontar para um commit pendurado. RE-PIN OBRIGATORIO no commit de
 # merge assim que a #179 entrar em sprint-10.0, antes do fechamento da sprint.
 #
+# Historico deste pin dentro da sprint:
+#   4f90a073  destravou CS0246 (AfiliadaCliente nao existia no core fixado)
+#   defcfa50  destravou CS1061 (o tipo existia, faltava o metodo Ativar())
+#
 # Contem tudo de d2c3547f mais as entidades e migrations de tenant/KYC da
 # Sprint 10.0 (AfiliadaCliente, AfiliadaAgencia, OrganizacaoOnboarding e afins).
 # ---------------------------------------------------------------------------
-4f90a073a4471dbb5bb6f4e65a27c53353c711c1
+defcfa504e50551b60d9db355aa3ac3068990d0c
