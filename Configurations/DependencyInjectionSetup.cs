@@ -103,6 +103,10 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // Cadastro de Local/Peça delegado ao core (ver CoreCadastroService)
             services.AddScoped<ICoreCadastroService, CoreCadastroService>();
 
+            // Fonte única de receita, compartilhada entre Dashboard e Relatórios
+            // (VEI-RD-85/92) — ver ReceitaService.
+            services.AddScoped<IReceitaService, ReceitaService>();
+
             // PDF de PI. O FileServer é alcançado SOMENTE por aqui: ele não tem
             // [Authorize] e busca a PI só pelo código, sem AfiliadaId, então a
             // URL dele nunca pode chegar ao browser (ver IWlPiPdfSource).

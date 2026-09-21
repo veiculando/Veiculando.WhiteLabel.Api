@@ -122,29 +122,68 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// passou a ser projetado para o frontend poder rotular a situação em vez
         /// de assumir que tudo que veio está ativo.
         /// </remarks>
+        /// <remarks>
+        /// <b>Colunas consolidadas (VEI-RD-87, Figma 226:7569 / 154:2549).</b> O
+        /// Figma trocou a coluna "Nº de Peças" do PRD §5.2 por Suporte/Formato/
+        /// Valor Padrão — de uma peça só, não de todas. Como um Local pode ter
+        /// várias, a "primeira peça ativa" (menor Id, não deletada) é a
+        /// representante — na prática a maioria dos Locais desta exibidora tem
+        /// exatamente uma. Local sem nenhuma peça cadastrada mostra essas colunas
+        /// vazias, nunca um erro.
+        ///
+        /// <para><c>Formato</c> é complex type do EF6 — <c>ToString()</c> dentro de
+        /// um <c>Select</c> traduzido para SQL lança <c>NotSupportedException</c>
+        /// (mesma classe de defeito documentada em <c>PecasController.GetAll</c>).
+        /// Por isso as entidades são materializadas primeiro; num inventário
+        /// WhiteLabel de uma única afiliada o volume não justifica a complexidade
+        /// de uma projeção SQL parcial.</para>
+        /// </remarks>
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
-            var afiliadaId = _tenant.AfiliadaId;
-
             var locais = await _tenant.Locais
                 .AsNoTracking()
+                .Include(l => l.Cidade.Estado)
+                .Include(l => l.Pecas.Select(p => p.Suporte))
                 .Where(l => l.StatusExibicao != StatusExibicaoEnum.Deletado)
-                .Select(l => new
+                .ToListAsync();
+
+            var resultado = locais.Select(l =>
+            {
+                var peca = l.Pecas
+                    .Where(p => p.StatusExibicao != StatusExibicaoEnum.Deletado)
+                    .OrderBy(p => p.Id)
+                    .FirstOrDefault();
+
+                return new
                 {
                     l.Id,
                     l.Codigo,
                     l.Descricao,
-                    Cidade = l.Cidade.Nome,
-                    UF = l.Cidade.Estado.Sigla,
+                    Cidade = l.Cidade?.Nome,
+                    UF = l.Cidade?.Estado?.Sigla,
+                    Endereco = l.Endereco != null
+                        ? $"{l.Endereco.Logradouro}, {l.Endereco.Numero}"
+                        : null,
                     l.FonteOrigem,
                     l.FonteTimestamp,
                     l.StatusExibicao,
-                    l.TimeStamp
-                })
-                .ToListAsync();
+                    l.TimeStamp,
+                    Suporte = peca?.Suporte?.Nome,
+                    // Nome do campo alinhado ao domínio (Peca.Formato = dimensão
+                    // física, ex. "9.00 x 3.00"). O Figma rotula esta coluna
+                    // "Formato" com um exemplo de texto ("Painel LED Outdoor") que
+                    // se parece mais com um subtipo de suporte do que com uma
+                    // dimensão — não existe campo de domínio para isso hoje.
+                    // Divergência a registrar na revisão v2.3 do PRD, não a
+                    // resolver aqui por suposição.
+                    FormatoDimensao = peca?.Formato != null ? peca.Formato.ToString() : null,
+                    ValorPadrao = peca?.ValorPadrao,
+                    Periodicidade = peca?.PeriodicidadePadrao != null ? (int?)peca.PeriodicidadePadrao.Tipo : null
+                };
+            }).ToList();
 
-            return Ok(locais);
+            return Ok(resultado);
         }
 
         /// <summary>

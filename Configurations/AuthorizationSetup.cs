@@ -32,14 +32,24 @@ namespace Veiculando.WhiteLabel.Api.Configurations
         public const string PedidoInsercaoGerenciar = "PedidoInsercaoGerenciar";
         public const string UsuarioAfiliadaGerenciar = "UsuarioAfiliadaGerenciar";
 
-        /// <summary>As 5 permissões da whitelist do domínio.</summary>
+        /// <summary>
+        /// Visualizar Dashboard e KPIs financeiros (VEI-RD-85/92, Plano 2 — VEI-RD-93).
+        /// </summary>
+        public const string FinanceiroVisualizar = "FinanceiroVisualizar";
+
+        /// <summary>Exportar relatórios financeiros (VEI-RD-92, Plano 2 — VEI-RD-93).</summary>
+        public const string RelatorioExportar = "RelatorioExportar";
+
+        /// <summary>As permissões da whitelist do domínio.</summary>
         public static readonly string[] Todas =
         {
             PecaGerenciar,
             Checking,
             PedidoReservaGerenciar,
             PedidoInsercaoGerenciar,
-            UsuarioAfiliadaGerenciar
+            UsuarioAfiliadaGerenciar,
+            FinanceiroVisualizar,
+            RelatorioExportar
         };
 
         public static IServiceCollection AddWlAuthorization(this IServiceCollection services)
