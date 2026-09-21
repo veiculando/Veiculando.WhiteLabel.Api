@@ -422,6 +422,30 @@ VALUES ({pedidoId}, {afiliadaId}, '{codigo}', 0, 0,
             return insercaoId;
         }
 
+        /// <summary>
+        /// Cria um período ativo com o Id e Codigo informados, se ainda não existir.
+        /// </summary>
+        /// <remarks>
+        /// Id explícito (não auto-incremento) porque os testes de
+        /// <c>PecasValoresController</c> precisam referenciar o mesmo período por
+        /// Id em requisições diferentes — inclusive período "de outra afiliada" não
+        /// existe como conceito (período é global), então o cenário de período
+        /// desconhecido usa um Id que nunca foi semeado.
+        /// </remarks>
+        public static async Task PeriodoAsync(int id, string codigo)
+        {
+            using var ctx = new VeiculandoDataContext();
+
+            await ctx.Database.ExecuteSqlCommandAsync($@"
+IF NOT EXISTS (SELECT 1 FROM Periodo WHERE Id = {id})
+BEGIN
+    SET IDENTITY_INSERT Periodo ON;
+    INSERT INTO Periodo (Id, Codigo, Periodicidade, DataInicio, DataFim, StatusExibicao)
+    VALUES ({id}, '{codigo}', 1, GETDATE(), DATEADD(day, 14, GETDATE()), 1);
+    SET IDENTITY_INSERT Periodo OFF;
+END");
+        }
+
         public static async Task ServicoCoreAsync(int afiliadaId)
         {
             using var ctx = new VeiculandoDataContext();
