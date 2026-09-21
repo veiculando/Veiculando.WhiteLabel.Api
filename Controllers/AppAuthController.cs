@@ -313,7 +313,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             public string NewPassword { get; set; }
         }
 
-        private sealed class AppUsuarioJwtResult : IUsuarioResult
+        internal sealed class AppUsuarioJwtResult : IUsuarioResult
         {
             public AppUsuarioJwtResult(int id, string email)
             {
