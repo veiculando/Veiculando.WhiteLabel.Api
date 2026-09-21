@@ -66,8 +66,16 @@
 # Historico deste pin dentro da sprint:
 #   4f90a073  destravou CS0246 (AfiliadaCliente nao existia no core fixado)
 #   defcfa50  destravou CS1061 (o tipo existia, faltava o metodo Ativar())
+#   8775a1cc  destrava a suite do BFF: SqlServerFixture gera o schema de teste
+#             via ObjectContext.CreateDatabaseScript(), e seis colunas string
+#             novas (Justificativa, CamposPendentesJson, ValorAnterior,
+#             ValorNovo, MotivoPendencia, DeclaracaoPoderes) estavam sem
+#             HasMaxLength — o EF6 as tratava como Unbounded e
+#             GetMaxLength() lancava InvalidCastException ao tentar converter
+#             'Unbounded' para Int32. Corrigido nos maps, com a migration
+#             regerada via MigrationGenerator (tooling EF6 do repo).
 #
 # Contem tudo de d2c3547f mais as entidades e migrations de tenant/KYC da
 # Sprint 10.0 (AfiliadaCliente, AfiliadaAgencia, OrganizacaoOnboarding e afins).
 # ---------------------------------------------------------------------------
-defcfa504e50551b60d9db355aa3ac3068990d0c
+8775a1ccde4c9c2f057c50b7d96e10c7ec243fc7
