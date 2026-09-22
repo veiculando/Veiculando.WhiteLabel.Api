@@ -124,5 +124,10 @@
 # inexistente por causa disso.
 #
 # Contem tudo de f9102b10a1 com a FK de OrdemServicoHistorico corrigida.
+#
+# RE-PIN FINAL (fecha os pins temporarios da Sprint 10.0): 0e75aa43 e o commit
+# de merge da PR #186 em sprint-10.0, nao mais o topo da branch de feature
+# (703d2ad0), que foi deletada no merge. O pin agora vive na linha de
+# integracao, que e o que torna o build reproduzivel depois que a sprint fecha.
 # ---------------------------------------------------------------------------
-703d2ad060ddc7b73d6feac4b521f557752ca690
+0e75aa43914b12b33959f3d7094ff13ca65ed86b
