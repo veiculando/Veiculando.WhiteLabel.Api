@@ -143,11 +143,18 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 if (dataInicio.HasValue && dataFim.HasValue && dataInicio.Value > dataFim.Value)
                     return BadRequest(new { message = MsgPeriodoInvertido });
 
-                if (dataInicio.HasValue)
-                    query = query.Where(pi => pi.Itens.Any(i => i.PedidoItem.Periodo.DataInicio >= dataInicio.Value));
-
-                if (dataFim.HasValue)
-                    query = query.Where(pi => pi.Itens.Any(i => i.PedidoItem.Periodo.DataInicio <= dataFim.Value));
+                // UM UNICO item precisa satisfazer os dois limites ao mesmo
+                // tempo. Dois `.Where(...Any(...))` encadeados checariam "algum
+                // item >= inicio" E "algum item <= fim" separadamente — uma PI
+                // com um item de Marco e outro de Janeiro passaria num filtro
+                // "Fevereiro a Fevereiro" porque cada limite acha um item
+                // diferente. Por isso os dois bounds entram no MESMO Any.
+                if (dataInicio.HasValue || dataFim.HasValue)
+                {
+                    query = query.Where(pi => pi.Itens.Any(i =>
+                        (!dataInicio.HasValue || i.PedidoItem.Periodo.DataInicio >= dataInicio.Value) &&
+                        (!dataFim.HasValue || i.PedidoItem.Periodo.DataInicio <= dataFim.Value)));
+                }
             }
 
             var total = await query.CountAsync();
