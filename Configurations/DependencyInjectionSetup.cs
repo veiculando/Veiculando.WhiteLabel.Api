@@ -57,6 +57,12 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // ILocalRepository.CountAprovacaoPendente em vez de repetir o COUNT.
             services.AddScoped<ILocalRepository, LocalRepository>();
 
+            // Ordem de Serviço (VEI-RD-88): ProximoNumero/Save/Update e o
+            // RetornaPorId com os Includes prontos para o detalhe. A listagem
+            // paginada e filtrada continua via ITenantQueries.OrdensServico —
+            // este repositório não pagina nem filtra, só resolve por id/afiliada.
+            services.AddScoped<IOrdemServicoRepository, OrdemServicoRepository>();
+
             // Tenant
             services.AddScoped<ITenantContext, TenantContext>();
             services.AddScoped<IWlTenantResolver, WlTenantResolver>();

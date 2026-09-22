@@ -84,4 +84,50 @@
 # Contem tudo de d2c3547f mais as entidades e migrations de tenant/KYC da
 # Sprint 10.0 (AfiliadaCliente, AfiliadaAgencia, OrganizacaoOnboarding e afins).
 # ---------------------------------------------------------------------------
-bbe929c85ad834eef3ebd94dc80092677807f149
+#
+# ---------------------------------------------------------------------------
+# f9102b10a1 — traz a entidade Core de Ordem de Servico (VEI-RD-88a), commit
+# "feat(ordem-servico): adiciona entidade OrdemServico no Core (VEI-RD-88a)"
+# na MESMA branch deste BFF (feature/feature-feature-sprint-10.0-te/feature-b3870406).
+#
+# Por que: VEI-RD-88b (OrdensServicoController, neste repo) referencia
+# Veiculando.Domain.Entities.OrdensServico.OrdemServico (+ OrdemServicoPeca,
+# OrdemServicoCidade, OrdemServicoHistorico), Veiculando.Domain.Enums.StatusOrdemServicoEnum
+# e Veiculando.Domain.Repositories.IOrdemServicoRepository — nenhum existia no
+# pin anterior (bbe929c8). Sem o bump, CS0246 em todo o controller novo.
+#
+# Confirmado por fora deste agente (git fetch + rev-parse, HEAD local e origin
+# batem) antes do bump: SHA completo f9102b10a17c8595693e24a56c9a4091488428a0.
+#
+# Contem tudo de bbe929c8 mais o modulo de dominio de Ordem de Servico
+# (entidades, enum de status, mappings EF6, repository e a migration que cria
+# as tabelas). Nao ha Command/Handler/Result nem controller no Core para este
+# modulo — isso e responsabilidade deste BFF (VEI-RD-88b).
+# ---------------------------------------------------------------------------
+#
+# ---------------------------------------------------------------------------
+# 703d2ad060 — corrige a migration de OrdemServicoHistorico (VEI-RD-88a),
+# commit "fix(migrations): remove cascadeDelete da FK de OrdemServicoHistorico
+# (VEI-RD-88a)" na MESMA branch deste BFF.
+#
+# Por que: o job preview-schema da PR #186 do core falhava — a migration
+# criava OrdemServicoHistorico com trigger INSTEAD OF (append-only, padrao
+# AfiliadaConfiguracaoHistorico) E com FK em cascata para OrdemServico; SQL
+# Server proibe as duas coisas juntas. cascadeDelete passou a false e a
+# migration foi regerada via MigrationGenerator (nao editada a mao). Sem o
+# bump, este BFF continuaria referenciando um Core cuja migration mais
+# recente nunca chega a aplicar num banco real.
+#
+# SHA completo obtido de `gh pr view 186 --repo veiculando/Veiculando --json
+# headRefOid` apos o push do fix, nunca abreviado nem reconstruido de
+# memoria — o pin anterior desta sprint ja apontou uma vez para um commit
+# inexistente por causa disso.
+#
+# Contem tudo de f9102b10a1 com a FK de OrdemServicoHistorico corrigida.
+#
+# RE-PIN FINAL (fecha os pins temporarios da Sprint 10.0): 0e75aa43 e o commit
+# de merge da PR #186 em sprint-10.0, nao mais o topo da branch de feature
+# (703d2ad0), que foi deletada no merge. O pin agora vive na linha de
+# integracao, que e o que torna o build reproduzivel depois que a sprint fecha.
+# ---------------------------------------------------------------------------
+0e75aa43914b12b33959f3d7094ff13ca65ed86b

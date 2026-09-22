@@ -80,7 +80,10 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         }
 
         /// <summary>
-        /// Bi-semanas ativas, mais recentes primeiro.
+        /// Bi-semanas/meses ativos, mais recentes primeiro. Filtro opcional por
+        /// periodicidade — VEI-RD-86: trocar a Periodicidade na tela de Programação
+        /// precisa recarregar as opções de Período Inicial/Final para não deixar o
+        /// operador escolher um período de tipo diferente do que selecionou.
         /// </summary>
         /// <remarks>
         /// <c>Periodo.Nome</c> NAO e coluna: e propriedade calculada
@@ -94,12 +97,20 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// operadores: expressao que so existe em C# usada onde o EF precisa gerar
         /// SQL. A projecao materializa as colunas reais primeiro e o <c>Nome</c> e
         /// calculado depois, ja em memoria.</para>
+        ///
+        /// <para><c>Periodicidade.Tipo</c> é coluna real (<c>PeriodicidadeMap</c>),
+        /// então o filtro entra no <c>Where</c> traduzido — não em memória.</para>
         /// </remarks>
         [HttpGet("periodos")]
-        public async Task<IActionResult> GetPeriodos()
+        public async Task<IActionResult> GetPeriodos([FromQuery] PeriodicidadeEnum? periodicidade)
         {
-            var brutos = await _db.Periodos
-                .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo)
+            var query = _db.Periodos
+                .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo);
+
+            if (periodicidade.HasValue)
+                query = query.Where(p => p.Periodicidade.Tipo == periodicidade.Value);
+
+            var brutos = await query
                 .OrderByDescending(p => p.DataInicio)
                 .ToListAsync();
 
