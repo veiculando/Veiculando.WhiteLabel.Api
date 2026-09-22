@@ -138,11 +138,27 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // distintas por checking, que e demais para um Select traduzido.
             var pagina_ = await ordenada
                 .Include(c => c.PedidoInsercao.Pedido.Campanha.Cliente)
+                .Include(c => c.PedidoInsercao.Itens)
                 .Include(c => c.Itens.Select(i => i.Peca.Local.Cidade))
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .ToListAsync();
 
+            // Quatro colunas numericas (Figma, card VEI-RD-91): "Itens PI" /
+            // "Check." / "Aprov." / "Receb.". StatusCheckingItemEnum so tem
+            // Recusado/ErroGeolocalizacao/Recebido/Aprovado — nao existe um
+            // terceiro estado "em checking" distinto para mapear "Check.".
+            //
+            // Leitura adotada: "Itens PI" e o total de itens do PEDIDO DE
+            // INSERCAO (quantas pecas foram compradas nessa PI, tenham ou nao
+            // entrado em checking ainda). "Check." e quantos desses itens JA
+            // entraram no fluxo de checking — isto e, ja tem CheckingItem
+            // (pelo menos uma foto enviada), que e exatamente c.Itens.Count.
+            // Aprov./Receb. sao o recorte por Status dentro desse subconjunto.
+            // Essa leitura evita duplicar o mesmo numero em duas colunas (o
+            // que a leitura alternativa - "Check." = total, igual a "Itens
+            // PI" - faria sempre que TODOS os itens do PI ja estivessem em
+            // checking, o caso mais comum na tela).
             var itens = pagina_
                 .Select(c => new
                 {
@@ -153,7 +169,10 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     PiCodigo = c.PedidoInsercao?.Codigo,
                     Campanha = c.PedidoInsercao?.Pedido?.Campanha?.Nome,
                     Anunciante = c.PedidoInsercao?.Pedido?.Campanha?.Cliente?.Nome,
-                    ItensCount = c.Itens.Count,
+                    ItensPi = c.PedidoInsercao != null ? c.PedidoInsercao.Itens.Count : c.Itens.Count,
+                    ItensChecados = c.Itens.Count,
+                    ItensAprovados = c.Itens.Count(i => i.Status == StatusCheckingItemEnum.Aprovado),
+                    ItensRecebidos = c.Itens.Count(i => i.Status == StatusCheckingItemEnum.Recebido),
                     Cidades = c.Itens
                         .Select(i => i.Peca?.Local?.Cidade?.Nome)
                         .Where(nome => nome != null)
