@@ -104,4 +104,25 @@
 # as tabelas). Nao ha Command/Handler/Result nem controller no Core para este
 # modulo — isso e responsabilidade deste BFF (VEI-RD-88b).
 # ---------------------------------------------------------------------------
-f9102b10a17c8595693e24a56c9a4091488428a0
+#
+# ---------------------------------------------------------------------------
+# 703d2ad060 — corrige a migration de OrdemServicoHistorico (VEI-RD-88a),
+# commit "fix(migrations): remove cascadeDelete da FK de OrdemServicoHistorico
+# (VEI-RD-88a)" na MESMA branch deste BFF.
+#
+# Por que: o job preview-schema da PR #186 do core falhava — a migration
+# criava OrdemServicoHistorico com trigger INSTEAD OF (append-only, padrao
+# AfiliadaConfiguracaoHistorico) E com FK em cascata para OrdemServico; SQL
+# Server proibe as duas coisas juntas. cascadeDelete passou a false e a
+# migration foi regerada via MigrationGenerator (nao editada a mao). Sem o
+# bump, este BFF continuaria referenciando um Core cuja migration mais
+# recente nunca chega a aplicar num banco real.
+#
+# SHA completo obtido de `gh pr view 186 --repo veiculando/Veiculando --json
+# headRefOid` apos o push do fix, nunca abreviado nem reconstruido de
+# memoria — o pin anterior desta sprint ja apontou uma vez para um commit
+# inexistente por causa disso.
+#
+# Contem tudo de f9102b10a1 com a FK de OrdemServicoHistorico corrigida.
+# ---------------------------------------------------------------------------
+703d2ad060ddc7b73d6feac4b521f557752ca690
