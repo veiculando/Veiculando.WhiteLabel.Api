@@ -117,6 +117,13 @@ namespace Veiculando.WhiteLabel.Api.Middleware
 
         /// <summary>Grade de disponibilidade, recortada pela afiliada do local da peça.</summary>
         IQueryable<PecaPeriodoStatus> PecaPeriodoStatus { get; }
+
+        /// <summary>
+        /// Checkings de veiculação, recortados pela afiliada do PI pai (VEI-RD-91).
+        /// Mesmo caminho de recorte de <see cref="PedidoInsercaoItens"/>: Checking
+        /// não carrega IdAfiliada — pertence a um PedidoInsercao, que carrega.
+        /// </summary>
+        IQueryable<Checking> Checkings { get; }
     }
 
     /// <inheritdoc />
@@ -198,5 +205,8 @@ namespace Veiculando.WhiteLabel.Api.Middleware
 
         public IQueryable<PecaPeriodoStatus> PecaPeriodoStatus =>
             _db.PecaPeriodoStatus.Where(pps => pps.Peca.Local.IdAfiliada == AfiliadaId);
+
+        public IQueryable<Checking> Checkings =>
+            _db.Checkings.Where(c => c.PedidoInsercao.IdAfiliada == AfiliadaId);
     }
 }
