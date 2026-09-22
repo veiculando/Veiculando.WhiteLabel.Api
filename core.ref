@@ -44,4 +44,90 @@
 # AddWlDominioConfiguracao e PrimeiroAcessoWlUsuario, e os fixes de ciclo de
 # vida de Local e projecao de identidade pos-commit.
 # ---------------------------------------------------------------------------
-d2c3547f65e2a47b8f5462379e5bd97e33af4b81
+#
+# ---------------------------------------------------------------------------
+# Sprint 10.0 — pin TEMPORARIO em defcfa50 (HEAD da PR #179 do core).
+#
+# Por que subiu: este BFF passou a referenciar AfiliadaCliente em
+# Middleware/ITenantQueries.cs. A entidade nasce na PR #179 do core, que ainda
+# esta aberta. Com o pin em d2c3547f o build quebrava em CS0246 — nao por erro
+# de codigo aqui, mas porque o core fixado e anterior ao tipo referenciado.
+#
+# Por que um commit nao mergeado: sem isso nao ha ordem possivel. O core so
+# mergeia depois de validado, e quem valida o contrato entre os dois e
+# justamente a suite deste repo. Fixar o commit da feature quebra o ciclo e faz
+# o CI responder a pergunta real: "o BFF compila e passa contra o core novo?".
+#
+# ⚠️ ESTE PIN TEM PRAZO. A #179 mergeia por squash com delete da branch; nesse
+# instante 4f90a073 deixa de ser alcancavel por qualquer ref e este arquivo
+# passa a apontar para um commit pendurado. RE-PIN OBRIGATORIO no commit de
+# merge assim que a #179 entrar em sprint-10.0, antes do fechamento da sprint.
+#
+# Historico deste pin dentro da sprint:
+#   4f90a073  destravou CS0246 (AfiliadaCliente nao existia no core fixado)
+#   defcfa50  destravou CS1061 (o tipo existia, faltava o metodo Ativar())
+#   8775a1cc  destrava a suite do BFF: SqlServerFixture gera o schema de teste
+#             via ObjectContext.CreateDatabaseScript(), e seis colunas string
+#             novas (Justificativa, CamposPendentesJson, ValorAnterior,
+#             ValorNovo, MotivoPendencia, DeclaracaoPoderes) estavam sem
+#             HasMaxLength — o EF6 as tratava como Unbounded e
+#             GetMaxLength() lancava InvalidCastException ao tentar converter
+#             'Unbounded' para Int32. Corrigido nos maps, com a migration
+#             regerada via MigrationGenerator (tooling EF6 do repo).
+#   bbe929c8  traz o Core do PLANO 3 (PR #180), que o pin anterior nao tinha:
+#             AfiliadaAgenciaVinculoCommand, AgenciaVendaDiretaProvisionamento
+#             e AfiliadaAgencia.Ativar(). Sem eles este BFF nao compila —
+#             CS0246/CS0103/CS1061 em CoreCadastroService, AgenciasController
+#             e KycController. Contem 8775a1cc inteiro: a #180 foi atualizada
+#             com a branch do plano 2 antes deste pin.
+#
+# Contem tudo de d2c3547f mais as entidades e migrations de tenant/KYC da
+# Sprint 10.0 (AfiliadaCliente, AfiliadaAgencia, OrganizacaoOnboarding e afins).
+# ---------------------------------------------------------------------------
+#
+# ---------------------------------------------------------------------------
+# f9102b10a1 — traz a entidade Core de Ordem de Servico (VEI-RD-88a), commit
+# "feat(ordem-servico): adiciona entidade OrdemServico no Core (VEI-RD-88a)"
+# na MESMA branch deste BFF (feature/feature-feature-sprint-10.0-te/feature-b3870406).
+#
+# Por que: VEI-RD-88b (OrdensServicoController, neste repo) referencia
+# Veiculando.Domain.Entities.OrdensServico.OrdemServico (+ OrdemServicoPeca,
+# OrdemServicoCidade, OrdemServicoHistorico), Veiculando.Domain.Enums.StatusOrdemServicoEnum
+# e Veiculando.Domain.Repositories.IOrdemServicoRepository — nenhum existia no
+# pin anterior (bbe929c8). Sem o bump, CS0246 em todo o controller novo.
+#
+# Confirmado por fora deste agente (git fetch + rev-parse, HEAD local e origin
+# batem) antes do bump: SHA completo f9102b10a17c8595693e24a56c9a4091488428a0.
+#
+# Contem tudo de bbe929c8 mais o modulo de dominio de Ordem de Servico
+# (entidades, enum de status, mappings EF6, repository e a migration que cria
+# as tabelas). Nao ha Command/Handler/Result nem controller no Core para este
+# modulo — isso e responsabilidade deste BFF (VEI-RD-88b).
+# ---------------------------------------------------------------------------
+#
+# ---------------------------------------------------------------------------
+# 703d2ad060 — corrige a migration de OrdemServicoHistorico (VEI-RD-88a),
+# commit "fix(migrations): remove cascadeDelete da FK de OrdemServicoHistorico
+# (VEI-RD-88a)" na MESMA branch deste BFF.
+#
+# Por que: o job preview-schema da PR #186 do core falhava — a migration
+# criava OrdemServicoHistorico com trigger INSTEAD OF (append-only, padrao
+# AfiliadaConfiguracaoHistorico) E com FK em cascata para OrdemServico; SQL
+# Server proibe as duas coisas juntas. cascadeDelete passou a false e a
+# migration foi regerada via MigrationGenerator (nao editada a mao). Sem o
+# bump, este BFF continuaria referenciando um Core cuja migration mais
+# recente nunca chega a aplicar num banco real.
+#
+# SHA completo obtido de `gh pr view 186 --repo veiculando/Veiculando --json
+# headRefOid` apos o push do fix, nunca abreviado nem reconstruido de
+# memoria — o pin anterior desta sprint ja apontou uma vez para um commit
+# inexistente por causa disso.
+#
+# Contem tudo de f9102b10a1 com a FK de OrdemServicoHistorico corrigida.
+#
+# RE-PIN FINAL (fecha os pins temporarios da Sprint 10.0): 0e75aa43 e o commit
+# de merge da PR #186 em sprint-10.0, nao mais o topo da branch de feature
+# (703d2ad0), que foi deletada no merge. O pin agora vive na linha de
+# integracao, que e o que torna o build reproduzivel depois que a sprint fecha.
+# ---------------------------------------------------------------------------
+0e75aa43914b12b33959f3d7094ff13ca65ed86b

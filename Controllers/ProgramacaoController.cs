@@ -14,7 +14,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 {
     [ApiController]
     [Route("api/wl/[controller]")]
-    [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+    // VEI-RD-93: estava com PecaGerenciar (provável cópia de LocaisController),
+    // contradizendo o comentário em app.routes.ts de que /programacao exigia só
+    // sessão. A migração de claims concede ProgramacaoVisualizar a todo operador
+    // existente, então ninguém perde acesso com esta correção.
+    [Authorize(Policy = AuthorizationSetup.ProgramacaoVisualizar)]
     public class ProgramacaoController : ControllerBase
     {
         private readonly VeiculandoDataContext _db;
@@ -26,6 +30,13 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             _tenant = tenant;
         }
 
+        /// <summary>
+        /// Mensagem exata exigida pelo card (VEI-RD-86) quando Período Inicial
+        /// vem depois de Período Final. O frontend compara a string, não só o
+        /// status code — mudar o texto aqui quebraria essa checagem.
+        /// </summary>
+        public const string MsgPeriodoInvertido = "Período inicial deve ser anterior ou igual ao período final";
+
         [HttpPost("listar")]
         public async Task<IActionResult> ListarGrade(
             [FromBody] ProgramacaoFiltroDto dto,
@@ -35,14 +46,74 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             var query = _tenant.PecaPeriodoStatus;
 
-            if (dto?.IdPeriodo.HasValue == true && dto.IdPeriodo.Value > 0)
-            {
-                query = query.Where(pps => pps.IdPeriodo == dto.IdPeriodo.Value);
-            }
-
             if (dto?.IdLocal.HasValue == true && dto.IdLocal.Value > 0)
             {
                 query = query.Where(pps => pps.Peca.IdLocal == dto.IdLocal.Value);
+            }
+
+            if (dto?.Periodicidade.HasValue == true)
+            {
+                query = query.Where(pps => pps.Periodo.Periodicidade.Tipo == dto.Periodicidade.Value);
+            }
+
+            // Periodo Inicial/Final e um INTERVALO de bi-semanas/meses, nao um
+            // periodo unico — troca o antigo IdPeriodo. A validacao de ordem
+            // acontece aqui, contra as datas reais (Periodo.Id nao e sequencial
+            // por data), antes de qualquer coisa tocar o SQL da grade.
+            if (dto?.IdPeriodoInicial.HasValue == true || dto?.IdPeriodoFinal.HasValue == true)
+            {
+                DateTime? dataInicio = null;
+                DateTime? dataFim = null;
+
+                if (dto.IdPeriodoInicial.HasValue)
+                {
+                    dataInicio = await _db.Periodos
+                        .Where(p => p.Id == dto.IdPeriodoInicial.Value)
+                        .Select(p => (DateTime?)p.DataInicio)
+                        .FirstOrDefaultAsync();
+
+                    if (dataInicio == null)
+                        return BadRequest(new { message = "Período inicial não encontrado." });
+                }
+
+                if (dto.IdPeriodoFinal.HasValue)
+                {
+                    dataFim = await _db.Periodos
+                        .Where(p => p.Id == dto.IdPeriodoFinal.Value)
+                        .Select(p => (DateTime?)p.DataInicio)
+                        .FirstOrDefaultAsync();
+
+                    if (dataFim == null)
+                        return BadRequest(new { message = "Período final não encontrado." });
+                }
+
+                if (dataInicio.HasValue && dataFim.HasValue && dataInicio.Value > dataFim.Value)
+                    return BadRequest(new { message = MsgPeriodoInvertido });
+
+                if (dataInicio.HasValue)
+                    query = query.Where(pps => pps.Periodo.DataInicio >= dataInicio.Value);
+
+                if (dataFim.HasValue)
+                    query = query.Where(pps => pps.Periodo.DataInicio <= dataFim.Value);
+            }
+
+            if (dto?.Status.HasValue == true)
+            {
+                query = query.Where(pps => pps.Status == dto.Status.Value);
+            }
+
+            if (dto?.IdCidade.HasValue == true && dto.IdCidade.Value > 0)
+            {
+                query = query.Where(pps => pps.Peca.Local.IdCidade == dto.IdCidade.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(dto?.Anunciante))
+            {
+                var termo = dto.Anunciante.Trim();
+                // So cobre celulas ja vinculadas a um Pedido (Solicitada em
+                // diante) — celula "Disponivel" nao tem anunciante, e busca por
+                // anunciante nao deveria trazê-la mesmo.
+                query = query.Where(pps => pps.Pedido != null && pps.Pedido.Campanha.Cliente.Nome.Contains(termo));
             }
 
             // A pagina e de PECAS, nao de celulas.
@@ -120,9 +191,29 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         }
     }
 
+    /// <summary>
+    /// Filtros da grade de programação (VEI-RD-86). Substitui o antigo par
+    /// IdPeriodo/IdLocal por seis filtros aplicados no servidor — nunca em
+    /// memória, sempre como <c>Where</c> traduzido para SQL.
+    /// </summary>
     public class ProgramacaoFiltroDto
     {
-        public int? IdPeriodo { get; set; }
+        /// <summary>Mantido por compatibilidade com quem já filtra por local direto.</summary>
         public int? IdLocal { get; set; }
+
+        public PeriodicidadeEnum? Periodicidade { get; set; }
+
+        /// <summary>Id do Periodo que abre o intervalo.</summary>
+        public int? IdPeriodoInicial { get; set; }
+
+        /// <summary>Id do Periodo que fecha o intervalo.</summary>
+        public int? IdPeriodoFinal { get; set; }
+
+        public StatusPecaPeriodoEnum? Status { get; set; }
+
+        public int? IdCidade { get; set; }
+
+        /// <summary>Busca textual pelo nome do anunciante (Cliente) da campanha vinculada à célula.</summary>
+        public string Anunciante { get; set; }
     }
 }

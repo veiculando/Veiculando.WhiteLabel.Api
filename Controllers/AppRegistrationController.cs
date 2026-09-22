@@ -12,6 +12,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Veiculando.Domain.Entities.WhiteLabel;
 using Veiculando.Domain.Enums;
+using Veiculando.WhiteLabel.Api.Services;
 using BC = BCrypt.Net.BCrypt;
 
 namespace Veiculando.WhiteLabel.Api.Controllers;
@@ -20,12 +21,20 @@ public sealed partial class AppAuthController
 {
     private string TermsVersion => _configuration["WlApp:TermsVersion"] ?? "1.0";
     private string PrivacyVersion => _configuration["WlApp:PrivacyVersion"] ?? "1.0";
-    private bool RequireCorporateEmail => _configuration.GetValue<bool>($"WlApp:Tenants:{_tenant.AfiliadaId}:RequireCorporateEmail");
+    // VEI-RD-82 task b: a exigencia passou a vir de AfiliadaConfiguracao, no banco,
+    // e nao mais de appsettings. Antes era configuracao de deploy: ligar a regra para
+    // uma exibidora exigia editar arquivo e reiniciar o BFF, e a tela de Configuracoes
+    // nao tinha como refletir nem auditar o estado. A lista de dominios tambem saiu
+    // daqui (estava escrita inline logo abaixo) e vive em WlPoliticaEmailCorporativo,
+    // que e a mesma fonte que a tela exibe - duas copias divergiriam em silencio.
+    private Task<bool> RequireCorporateEmailAsync(CancellationToken ct) =>
+        _politicaEmail.ExigeEmailCorporativoAsync(_tenant.AfiliadaId, ct);
     private static readonly object RegistrationResponse = new { message = "Se o cadastro puder prosseguir, enviaremos um código de confirmação para o e-mail informado." };
 
     [AllowAnonymous]
     [HttpGet("policy")]
-    public IActionResult Policy() => Ok(new { termsVersion = TermsVersion, privacyVersion = PrivacyVersion, requireCorporateEmail = RequireCorporateEmail });
+    public async Task<IActionResult> Policy(CancellationToken ct) => Ok(new { termsVersion = TermsVersion, privacyVersion = PrivacyVersion,
+        requireCorporateEmail = await RequireCorporateEmailAsync(ct), blockedDomains = _politicaEmail.DominiosBloqueados });
 
     [AllowAnonymous]
     [EnableRateLimiting(Startup.RateLimitRecuperacaoSenha)]
@@ -39,7 +48,10 @@ public sealed partial class AppAuthController
             !request.Password.Any(char.IsLetter) || !request.Password.Any(char.IsDigit))
             return BadRequest(new { message = "Informe telefone válido e senha de 8 a 72 caracteres, com letras e números." });
         var email = request.Email.Trim().ToLowerInvariant();
-        if (RequireCorporateEmail && new[] { "gmail.com", "hotmail.com", "outlook.com", "yahoo.com", "icloud.com", "live.com" }.Contains(email.Split('@').Last()))
+        // Barreira do SERVIDOR (PRD 6.3 / criterio 8.16): vale mesmo chamando a API
+        // direto, sem passar pelo frontend. A normalizacao do dominio esta dentro
+        // da politica, para "Fulano@GMAIL.COM" nao escapar por uma maiuscula.
+        if (!await _politicaEmail.PermiteAsync(_tenant.AfiliadaId, email, ct))
             return BadRequest(new { message = "Esta marca exige um e-mail corporativo." });
         if (!_attemptGuard.PermitirTentativa(_tenant.AfiliadaId, "register|" + email)) return Ok(RegistrationResponse);
         // O índice único é a última barreira contra dois cadastros simultâneos.
