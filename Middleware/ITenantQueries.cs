@@ -1,6 +1,7 @@
 using System.Linq;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Entities;
+using Veiculando.Domain.Entities.OrdensServico;
 using Veiculando.Domain.Entities.Pedidos;
 using Veiculando.Domain.Entities.WhiteLabel;
 using Veiculando.Domain.Enums;
@@ -124,6 +125,9 @@ namespace Veiculando.WhiteLabel.Api.Middleware
         /// não carrega IdAfiliada — pertence a um PedidoInsercao, que carrega.
         /// </summary>
         IQueryable<Checking> Checkings { get; }
+
+        /// <summary>Ordens de Serviço (VEI-RD-88), recortadas pela afiliada dona da OS.</summary>
+        IQueryable<OrdemServico> OrdensServico { get; }
     }
 
     /// <inheritdoc />
@@ -208,5 +212,8 @@ namespace Veiculando.WhiteLabel.Api.Middleware
 
         public IQueryable<Checking> Checkings =>
             _db.Checkings.Where(c => c.PedidoInsercao.IdAfiliada == AfiliadaId);
+
+        public IQueryable<OrdemServico> OrdensServico =>
+            _db.OrdensServico.Where(o => o.IdAfiliada == AfiliadaId);
     }
 }

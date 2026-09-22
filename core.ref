@@ -84,4 +84,24 @@
 # Contem tudo de d2c3547f mais as entidades e migrations de tenant/KYC da
 # Sprint 10.0 (AfiliadaCliente, AfiliadaAgencia, OrganizacaoOnboarding e afins).
 # ---------------------------------------------------------------------------
-bbe929c85ad834eef3ebd94dc80092677807f149
+#
+# ---------------------------------------------------------------------------
+# f9102b10a1 — traz a entidade Core de Ordem de Servico (VEI-RD-88a), commit
+# "feat(ordem-servico): adiciona entidade OrdemServico no Core (VEI-RD-88a)"
+# na MESMA branch deste BFF (feature/feature-feature-sprint-10.0-te/feature-b3870406).
+#
+# Por que: VEI-RD-88b (OrdensServicoController, neste repo) referencia
+# Veiculando.Domain.Entities.OrdensServico.OrdemServico (+ OrdemServicoPeca,
+# OrdemServicoCidade, OrdemServicoHistorico), Veiculando.Domain.Enums.StatusOrdemServicoEnum
+# e Veiculando.Domain.Repositories.IOrdemServicoRepository — nenhum existia no
+# pin anterior (bbe929c8). Sem o bump, CS0246 em todo o controller novo.
+#
+# Confirmado por fora deste agente (git fetch + rev-parse, HEAD local e origin
+# batem) antes do bump: SHA completo f9102b10a17c8595693e24a56c9a4091488428a0.
+#
+# Contem tudo de bbe929c8 mais o modulo de dominio de Ordem de Servico
+# (entidades, enum de status, mappings EF6, repository e a migration que cria
+# as tabelas). Nao ha Command/Handler/Result nem controller no Core para este
+# modulo — isso e responsabilidade deste BFF (VEI-RD-88b).
+# ---------------------------------------------------------------------------
+f9102b10a17c8595693e24a56c9a4091488428a0
