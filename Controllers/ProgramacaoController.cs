@@ -14,7 +14,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 {
     [ApiController]
     [Route("api/wl/[controller]")]
-    [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
+    // VEI-RD-93: estava com PecaGerenciar (provável cópia de LocaisController),
+    // contradizendo o comentário em app.routes.ts de que /programacao exigia só
+    // sessão. A migração de claims concede ProgramacaoVisualizar a todo operador
+    // existente, então ninguém perde acesso com esta correção.
+    [Authorize(Policy = AuthorizationSetup.ProgramacaoVisualizar)]
     public class ProgramacaoController : ControllerBase
     {
         private readonly VeiculandoDataContext _db;

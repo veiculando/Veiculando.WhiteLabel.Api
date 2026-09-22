@@ -236,7 +236,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
         {
             var afiliadaId = AfiliadaA;
             var email = $"pdf-sem-permissao-{afiliadaId}@exemplo.com";
-            await Seed.OperadorAsync(afiliadaId, email, new[] { "Checking" });
+            await Seed.OperadorAsync(afiliadaId, email, new[] { "CheckingGerenciar" });
 
             var (factory, dono, codigo) = await PrepararAsync("perm");
             using var _ = factory;

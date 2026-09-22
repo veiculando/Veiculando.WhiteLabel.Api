@@ -61,7 +61,7 @@ public sealed class UploadsController : WlCoreProxyControllerBase
     }
 
     [HttpPost("checking/enviar-foto/{idItemPI}")]
-    [Authorize(Policy = AuthorizationSetup.Checking)]
+    [Authorize(Policy = AuthorizationSetup.CheckingGerenciar)]
     [EnableRateLimiting(Startup.RateLimitEscrita)]
     [RequestSizeLimit(16 * 1024 * 1024)]
     public async Task<IActionResult> FotoChecking(int idItemPI, [FromForm] IFormFile foto, CancellationToken ct)
@@ -135,7 +135,7 @@ public sealed class UploadsController : WlCoreProxyControllerBase
     }
 
     [HttpGet("checking/item/{idItemPI}/fotos")]
-    [Authorize(Policy = AuthorizationSetup.Checking)]
+    [Authorize(Policy = AuthorizationSetup.CheckingGerenciar)]
     public async Task<IActionResult> FotosChecking(int idItemPI, CancellationToken ct)
     {
         if (!await _tenant.PedidoInsercaoItens.AnyAsync(i => i.IdPedidoItem == idItemPI && i.PedidoInsercao.StatusExibicao == StatusExibicaoEnum.Ativo, ct))
@@ -170,7 +170,7 @@ public sealed class UploadsController : WlCoreProxyControllerBase
     }
 
     [HttpGet("checking/item/{idItemPI}/fotos/{fotoId}/arquivo")]
-    [Authorize(Policy = AuthorizationSetup.Checking)]
+    [Authorize(Policy = AuthorizationSetup.CheckingGerenciar)]
     public async Task<IActionResult> BaixarChecking(int idItemPI, int fotoId, CancellationToken ct)
     {
         var photo = await _db.CheckingFotos.AsNoTracking().SingleOrDefaultAsync(f => f.Id == fotoId && f.IdPedidoItem == idItemPI

@@ -26,7 +26,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
         public async Task Login_valido_devolve_token_e_permissoes()
         {
             var email = "login-ok@exemplo.com";
-            await Seed.OperadorAsync(Afiliada, email, new[] { "PecaGerenciar", "Checking" });
+            await Seed.OperadorAsync(Afiliada, email, new[] { "PecaGerenciar", "CheckingGerenciar" });
 
             using var factory = new WlApiFactory(_db, Afiliada);
             using var client = factory.ClienteAnonimo();
@@ -39,7 +39,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
             var corpo = await resposta.Content.ReadFromJsonAsync<LoginResposta>();
             corpo.Should().NotBeNull();
             corpo!.Token.Should().NotBeNullOrWhiteSpace();
-            corpo.Permissoes.Should().BeEquivalentTo("PecaGerenciar", "Checking");
+            corpo.Permissoes.Should().BeEquivalentTo("PecaGerenciar", "CheckingGerenciar");
         }
 
         [Fact]
@@ -140,7 +140,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
         public async Task Me_devolve_o_operador_autenticado()
         {
             var email = "me@exemplo.com";
-            await Seed.OperadorAsync(Afiliada + 6, email, new[] { "Checking" }, nome: "Fulano de Tal");
+            await Seed.OperadorAsync(Afiliada + 6, email, new[] { "CheckingGerenciar" }, nome: "Fulano de Tal");
 
             using var factory = new WlApiFactory(_db, Afiliada + 6);
             using var client = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
@@ -152,7 +152,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
             var corpo = await resposta.Content.ReadFromJsonAsync<MeResposta>();
             corpo!.Nome.Should().Be("Fulano de Tal");
             corpo.Email.Should().Be(email);
-            corpo.Permissoes.Should().BeEquivalentTo("Checking");
+            corpo.Permissoes.Should().BeEquivalentTo("CheckingGerenciar");
         }
 
         [Fact]
@@ -169,7 +169,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
             {
                 Nome = "Operador Convidado",
                 Email = convidadoEmail,
-                Permissoes = new[] { "Checking" }
+                Permissoes = new[] { "CheckingGerenciar" }
             });
 
             criacao.StatusCode.Should().Be(HttpStatusCode.Created);

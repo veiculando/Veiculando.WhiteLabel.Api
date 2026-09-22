@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Veiculando.Domain.Commands.Inputs;
+using Veiculando.Domain.Commands.Inputs.Clientes;
 using Veiculando.Domain.Commands.Inputs.Pedidos;
 using Veiculando.Domain.Enums;
 using Veiculando.WhiteLabel.Api.Middleware;
@@ -16,6 +17,8 @@ namespace Veiculando.WhiteLabel.Api.Services
         Task<CoreRespostaCadastro> SalvarPublicoAsync(LocalPublicoCadastroCommand command);
         Task<CoreRespostaCadastro> SalvarPecaAsync(PecaCadastroCommand command, int? wlUsuarioId);
         Task<CoreRespostaCadastro> ResponderReservaAsync(PedidoReservaRespostaCommand command);
+        Task<CoreRespostaCadastro> SalvarAnuncianteAsync(ClienteCadastroCommand command, int? wlUsuarioId);
+        Task<CoreRespostaCadastro> VincularAnuncianteAsync(int idCliente, int? wlUsuarioId);
     }
 
     /// <summary>
@@ -128,6 +131,52 @@ namespace Veiculando.WhiteLabel.Api.Services
         /// token da conta de serviço, igual ao que o <c>LocalController</c> faz com
         /// <c>IdUsuario</c>.</para>
         /// </remarks>
+        /// <summary>
+        /// Cria o anunciante pelo handler do core, que grava Cliente e
+        /// AfiliadaCliente na mesma transação (VEI-RD-46 §3). Também usado para
+        /// PUT (edição): o ClienteHandler já distingue os dois casos por
+        /// <c>command.Id</c>, igual ao que LocalController faz.
+        /// </summary>
+        public Task<CoreRespostaCadastro> SalvarAnuncianteAsync(ClienteCadastroCommand command, int? wlUsuarioId)
+        {
+            if (command == null) throw new ArgumentNullException(nameof(command));
+
+            var afiliadaId = _tenantContext.AfiliadaId;
+
+            // Só na criação: editar um anunciante não deveria conseguir sequestrar
+            // o vínculo de outra afiliada trocando IdAfiliada no payload. O
+            // controller já garantiu que o Cliente pertence ao tenant antes de
+            // chamar isto para uma edição.
+            command.IdAfiliada = command.Id == 0 ? (int?)afiliadaId : null;
+            command.FonteOrigem = FonteOrigemEnum.WhiteLabel;
+            command.FonteAgenciaId = afiliadaId;
+            command.FonteUsuarioId = wlUsuarioId;
+            command.IdUsuarioCadastro = 0;
+
+            return EnviarAsync("api/cliente", command);
+        }
+
+        /// <summary>
+        /// Vincula um Cliente já existente (achado via por-cnpj) ao tenant desta
+        /// instância. Nunca cria um segundo Cliente — PRD §8.14.
+        /// </summary>
+        public Task<CoreRespostaCadastro> VincularAnuncianteAsync(int idCliente, int? wlUsuarioId)
+        {
+            var afiliadaId = _tenantContext.AfiliadaId;
+
+            var command = new AfiliadaClienteVinculoCommand
+            {
+                IdCliente = idCliente,
+                IdAfiliada = afiliadaId,
+                FonteOrigem = FonteOrigemEnum.WhiteLabel,
+                FonteAgenciaId = afiliadaId,
+                FonteUsuarioId = wlUsuarioId,
+                IdUsuarioCadastro = 0
+            };
+
+            return EnviarAsync($"api/cliente/{idCliente}/vincular-afiliada", command);
+        }
+
         public Task<CoreRespostaCadastro> ResponderReservaAsync(PedidoReservaRespostaCommand command)
         {
             if (command == null) throw new ArgumentNullException(nameof(command));
