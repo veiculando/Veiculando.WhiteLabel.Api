@@ -33,6 +33,9 @@ namespace Veiculando.WhiteLabel.Api.Tests
             itens[0].Available.Should().BeTrue();
             itens[0].Price.Should().Be(1500);
 
+            var semCorrespondencia = await client.GetFromJsonAsync<InventoryItem[]>("/api/wl/app/inventory?query=nenhuma-peca-assim");
+            semCorrespondencia.Should().BeEmpty("o termo digitado deve chegar ao filtro do servidor");
+
             (await client.GetAsync("/api/wl/app/inventory/P-APP-822-A")).StatusCode.Should().Be(HttpStatusCode.NotFound);
             (await client.GetAsync("/api/wl/app/inventory/P-APP-821-A")).StatusCode.Should().Be(HttpStatusCode.OK);
         }
