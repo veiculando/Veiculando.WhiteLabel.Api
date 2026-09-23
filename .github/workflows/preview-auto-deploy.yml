@@ -13,7 +13,7 @@ jobs:
   deploy:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
+      contains(fromJSON('["push", "workflow_dispatch"]'), github.event.workflow_run.event) &&
       github.event.workflow_run.head_branch == 'master'
     runs-on: ubuntu-latest
     concurrency:
@@ -65,12 +65,13 @@ jobs:
           [[ -n "$refresh_token" ]]
           printf '%s' "$refresh_token" | docker login "$registry" --username 00000000-0000-0000-0000-000000000000 --password-stdin >/dev/null
           stack=/opt/veiculando/preview
-          # The provisioned preview stack stores its runtime configuration in
-          # .env. Do not create a parallel file: it would leave Compose using
-          # stale image references.
-          env_file="$stack/.env"
+          mkdir -p "$stack"
+          exec 9>"$stack/deploy.lock"
+          flock -w 900 9
+          env_file="$stack/stack.env"
           compose=(docker compose --project-name veiculando-preview --env-file "$env_file" -f "$stack/docker-compose.yml")
           [[ "$image_ref" =~ ^.+@sha256:[a-f0-9]{64}$ && "$host" =~ ^[A-Za-z0-9.-]+$ ]] || exit 64
+          [[ -f "$env_file" ]] || { echo 'preview stack.env ausente' >&2; exit 66; }
           backup=$(mktemp); cp -a "$env_file" "$backup"; deployed=0
           rollback() { if [[ "$deployed" != 1 ]]; then cp -a "$backup" "$env_file"; "${compose[@]}" up -d --pull never --no-deps --force-recreate bff edge || true; echo PREVIEW_ROLLBACK=executed >&2; fi; rm -f "$backup"; }
           trap rollback EXIT
