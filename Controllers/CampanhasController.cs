@@ -117,7 +117,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     Pecas = c.Pedidos
                         .Where(p => p.PedidosReserva.Any(r => r.IdAfiliada == afiliadaId)
                                  || p.PedidosInsercao.Any(i => i.IdAfiliada == afiliadaId))
-                        .SelectMany(p => p.Itens).Count(),
+                        // Pedido é por cidade/período e junta peças de VÁRIAS exibidoras
+                        // (um PedidoReserva/PedidoInsercao por afiliada). Sem o recorte por
+                        // Peca.Local, a contagem e o valor somavam o inventário alheio.
+                        .SelectMany(p => p.Itens)
+                        .Count(i => i.Peca.Local.IdAfiliada == afiliadaId),
                     // ValorBruto: valor de mídia da campanha antes de descontos e comissões.
                     // PENDÊNCIA a confirmar com o Humano/design: o Figma diz só "Valor Total"
                     // (R$ 44.000) e o domínio tem seis valores possíveis por item (Tabela,
@@ -127,7 +131,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     ValorTotal = (decimal?)c.Pedidos
                         .Where(p => p.PedidosReserva.Any(r => r.IdAfiliada == afiliadaId)
                                  || p.PedidosInsercao.Any(i => i.IdAfiliada == afiliadaId))
-                        .SelectMany(p => p.Itens).Sum(i => (decimal?)i.ValorBruto) ?? 0m
+                        .SelectMany(p => p.Itens)
+                        .Where(i => i.Peca.Local.IdAfiliada == afiliadaId)
+                        .Sum(i => (decimal?)i.ValorBruto) ?? 0m
                 })
                 .ToListAsync();
 
@@ -175,8 +181,37 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                                 p.Periodo.DataInicio,
                                 p.Periodo.DataFim
                             },
-                            Pecas = p.Itens.Count(),
-                            Valor = (decimal?)p.Itens.Sum(i => (decimal?)i.ValorBruto) ?? 0m
+                            Pecas = p.Itens.Count(i => i.Peca.Local.IdAfiliada == afiliadaId),
+                            Valor = (decimal?)p.Itens
+                                .Where(i => i.Peca.Local.IdAfiliada == afiliadaId)
+                                .Sum(i => (decimal?)i.ValorBruto) ?? 0m,
+                            // Peças alocadas com valor (Sprint 10.5 BE-4, modal de detalhe do
+                            // Figma). Só as desta exibidora; somente leitura (PRD §6.4).
+                            Itens = p.Itens
+                                .Where(i => i.Peca.Local.IdAfiliada == afiliadaId)
+                                .OrderBy(i => i.Peca.Codigo)
+                                .Select(i => new
+                                {
+                                    i.Id,
+                                    i.Status,
+                                    Peca = new
+                                    {
+                                        i.Peca.Id,
+                                        i.Peca.Codigo,
+                                        i.Peca.CodigoInterno,
+                                        TipoSuporte = i.Peca.Suporte.Nome
+                                    },
+                                    Local = new
+                                    {
+                                        i.Peca.Local.Id,
+                                        i.Peca.Local.Codigo,
+                                        Cidade = i.Peca.Local.Cidade.Nome
+                                    },
+                                    i.IdPeriodo,
+                                    i.ValorTabela,
+                                    i.ValorBruto,
+                                    i.ValorLiquidoVeiculacao
+                                })
                         })
                         .ToList()
                 })

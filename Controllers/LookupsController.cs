@@ -62,8 +62,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpGet("segmentos")]
         public async Task<IActionResult> GetSegmentos()
         {
+            // IdSegmentoPai: o catálogo é uma árvore (o Core tem listar-treeview).
+            // Sprint 10.5 BE-1 — o segmento do anunciante usa este lookup.
             var segmentos = await _db.Segmento
-                .Select(s => new { s.Id, s.Nome })
+                .OrderBy(s => s.Nome)
+                .Select(s => new { s.Id, s.Nome, s.IdSegmentoPai })
                 .ToListAsync();
 
             return Ok(segmentos);

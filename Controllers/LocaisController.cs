@@ -417,6 +417,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var erro = await ValidarLocalDaAfiliadaAsync(command.IdLocal);
             if (erro != null) return erro;
 
+            erro = await ValidarTipoEFormatoAsync(command.IdTipoSuporte, command.IdFormato, pecaAtual: null);
+            if (erro != null) return erro;
+
             var resposta = await _coreCadastro.SalvarPecaAsync(command, WlUsuarioId);
             return RepassarResposta(resposta);
         }
@@ -451,10 +454,55 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var erro = await ValidarLocalDaAfiliadaAsync(command.IdLocal);
             if (erro != null) return erro;
 
+            erro = await ValidarTipoEFormatoAsync(command.IdTipoSuporte, command.IdFormato, peca);
+            if (erro != null) return erro;
+
             command.Id = id;
 
             var resposta = await _coreCadastro.SalvarPecaAsync(command, WlUsuarioId);
             return RepassarResposta(resposta);
+        }
+
+        /// <summary>
+        /// Tipo de suporte e formato inativos nesta exibidora não entram em peça
+        /// nova (PRD §5.3 / critério 5), mas a peça que já os usa continua
+        /// editável sem trocar — por isso a comparação com <paramref name="pecaAtual"/>.
+        /// </summary>
+        /// <remarks>
+        /// Transição (Sprint 10.5): tipo SEM habilitação nesta exibidora segue o
+        /// fluxo legado, que usa o catálogo inteiro — até o front trocar o
+        /// cadastro de peça para <c>/tipos-suporte/habilitados</c>, exigir
+        /// habilitação aqui quebraria o cadastro de quem ainda não habilitou nada.
+        /// Tipo habilitado passa a valer a regra completa: habilitação ativa e,
+        /// se houver formato, formato associado e ativo.
+        /// </remarks>
+        private async Task<IActionResult> ValidarTipoEFormatoAsync(int idTipoSuporte, int idFormato, Peca pecaAtual)
+        {
+            var mantemTipo = pecaAtual != null && pecaAtual.IdTipoSuporte == idTipoSuporte;
+            var mantemFormato = mantemTipo && idFormato > 0 && pecaAtual.IdFormatoArteFinal == idFormato;
+
+            var habilitacao = await _tenant.AfiliadaTiposSuporte.AsNoTracking()
+                .Where(h => h.IdTipoSuporte == idTipoSuporte)
+                .Select(h => new { h.Id, h.Status })
+                .FirstOrDefaultAsync();
+
+            if (habilitacao == null || mantemFormato)
+                return null;
+
+            if (habilitacao.Status != StatusVinculoEnum.Ativo && !mantemTipo)
+                return BadRequest(new { message = "Tipo de suporte inativo nesta exibidora." });
+
+            if (idFormato <= 0)
+                return null;
+
+            var formatoAtivo = await _tenant.AfiliadaTipoSuporteFormatos.AnyAsync(f =>
+                f.IdAfiliadaTipoSuporte == habilitacao.Id
+                && f.IdFormato == idFormato
+                && f.Status == StatusVinculoEnum.Ativo);
+
+            return formatoAtivo
+                ? null
+                : BadRequest(new { message = "Formato inativo ou não cadastrado para este tipo de suporte." });
         }
 
         private async Task<IActionResult> ValidarLocalDaAfiliadaAsync(int idLocal)

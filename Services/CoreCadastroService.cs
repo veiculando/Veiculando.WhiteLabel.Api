@@ -22,6 +22,7 @@ namespace Veiculando.WhiteLabel.Api.Services
         Task<CoreRespostaCadastro> VincularAnuncianteAsync(int idCliente, int? wlUsuarioId);
         Task<CoreRespostaCadastro> SalvarAgenciaAsync(AgenciaCadastroCommand command, int? wlUsuarioId);
         Task<CoreRespostaCadastro> VincularAgenciaAsync(int idAgencia, int? wlUsuarioId);
+        Task<CoreRespostaCadastro> SalvarFormatoAsync(FormatoCadastroCommand command);
     }
 
     /// <summary>
@@ -221,6 +222,23 @@ namespace Veiculando.WhiteLabel.Api.Services
             };
 
             return EnviarAsync($"api/agencia/{idAgencia}/vincular-afiliada", command);
+        }
+
+        /// <summary>
+        /// Cria ou edita um Formato do catálogo global pelo FormatoHandler do core
+        /// (Sprint 10.5 BE-2): validação de mídia digital/estática, permissão
+        /// PecaGerenciar e a deduplicação por dimensão ficam onde já estão. O
+        /// vínculo com o tipo/afiliada é gravado pelo BFF depois.
+        /// </summary>
+        public Task<CoreRespostaCadastro> SalvarFormatoAsync(FormatoCadastroCommand command)
+        {
+            if (command == null) throw new ArgumentNullException(nameof(command));
+
+            // Sobrescrito pelo core com o usuário da conta de serviço
+            // (FormatoController faz `command.IdUsuario = UserId`).
+            command.IdUsuario = 0;
+
+            return EnviarAsync("api/formato", command);
         }
 
         public Task<CoreRespostaCadastro> ResponderReservaAsync(PedidoReservaRespostaCommand command)

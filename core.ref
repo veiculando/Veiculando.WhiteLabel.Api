@@ -130,4 +130,24 @@
 # (703d2ad0), que foi deletada no merge. O pin agora vive na linha de
 # integracao, que e o que torna o build reproduzivel depois que a sprint fecha.
 # ---------------------------------------------------------------------------
-0e75aa43914b12b33959f3d7094ff13ca65ed86b
+#
+# ---------------------------------------------------------------------------
+# Sprint 10.5 — pin TEMPORARIO em 1ab5385bab (HEAD da PR #197 do core,
+# branch feature/sprint-10.5/be-anunciantes-tipos-suporte -> sprint-10.5).
+#
+# Por que: os endpoints de Anunciantes (BE-1) e Tipos de Suporte/Formatos
+# (BE-2) usam simbolos que nascem na #197 — AfiliadaTipoSuporte,
+# AfiliadaTipoSuporteFormato, AfiliadaCliente.AtualizarDadosComerciais/
+# IdSegmento/Contato/Email e os DbSets AfiliadaTiposSuporte/
+# AfiliadaTipoSuporteFormatos. Com o pin em 0e75aa43 o build quebra em CS1061.
+#
+# Contem tudo de 0e75aa43 (main e0c5450 inclui a sprint-10.0 inteira) mais a
+# migration 202609231745092_AddAfiliadaTipoSuporteEDadosComerciaisCliente.
+#
+# ⚠️ ESTE PIN TEM PRAZO. RE-PIN OBRIGATORIO no commit de merge da #197 em
+# sprint-10.5. Se a #197 entrar por squash com delete da branch, este SHA deixa
+# de ser alcancavel e o CI deste repo quebra no checkout do core.
+# SHA completo obtido de `git rev-parse HEAD` na branch apos o push e conferido
+# com `git ls-remote`, nunca reconstruido de memoria.
+# ---------------------------------------------------------------------------
+1ab5385babb80b7eb2170d7247787d7b1416315d

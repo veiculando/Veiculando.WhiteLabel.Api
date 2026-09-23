@@ -76,6 +76,18 @@ namespace Veiculando.WhiteLabel.Api.Middleware
         IQueryable<AfiliadaAgencia> AfiliadaAgencias { get; }
 
         /// <summary>
+        /// Tipos de suporte do catálogo central habilitados para a afiliada
+        /// (Sprint 10.5 BE-2, PRD §6.2), em qualquer status de vínculo.
+        /// </summary>
+        IQueryable<AfiliadaTipoSuporte> AfiliadaTiposSuporte { get; }
+
+        /// <summary>
+        /// Formatos associados aos tipos habilitados, recortados pela afiliada da
+        /// habilitação pai — Formato em si é global e não carrega tenant.
+        /// </summary>
+        IQueryable<AfiliadaTipoSuporteFormato> AfiliadaTipoSuporteFormatos { get; }
+
+        /// <summary>
         /// Onboardings de organização (KYC) da afiliada — VEI-RD-80/81. Inclui todos
         /// os estados; tirar Rascunho da FILA é decisão do controller, porque o
         /// detalhe e o histórico precisam enxergar o estado inteiro.
@@ -167,6 +179,12 @@ namespace Veiculando.WhiteLabel.Api.Middleware
 
         public IQueryable<AfiliadaAgencia> AfiliadaAgencias =>
             _db.AfiliadaAgencias.Where(v => v.IdAfiliada == AfiliadaId);
+
+        public IQueryable<AfiliadaTipoSuporte> AfiliadaTiposSuporte =>
+            _db.AfiliadaTiposSuporte.Where(v => v.IdAfiliada == AfiliadaId);
+
+        public IQueryable<AfiliadaTipoSuporteFormato> AfiliadaTipoSuporteFormatos =>
+            _db.AfiliadaTipoSuporteFormatos.Where(v => v.AfiliadaTipoSuporte.IdAfiliada == AfiliadaId);
 
         public IQueryable<OrganizacaoOnboarding> Onboardings =>
             _db.OrganizacaoOnboardings.Where(o => o.IdAfiliada == AfiliadaId);
