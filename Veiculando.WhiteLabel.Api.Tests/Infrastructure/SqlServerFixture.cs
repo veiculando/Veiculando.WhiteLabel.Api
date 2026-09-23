@@ -114,7 +114,13 @@ CREATE UNIQUE INDEX [UK_WlUsuario_Email_Afiliada]
 CREATE UNIQUE INDEX [UK_WlDominio_Host]
     ON [dbo].[WlDominio] ([Host]);
 CREATE UNIQUE INDEX [UK_WlConfiguracao_AfiliadaId]
-    ON [dbo].[WL_Configuracao] ([AfiliadaId]);";
+    ON [dbo].[WL_Configuracao] ([AfiliadaId]);
+CREATE UNIQUE INDEX [UK_AfiliadaCliente_Afiliada_Cliente]
+    ON [dbo].[AfiliadaCliente] ([IdAfiliada], [IdCliente]);
+CREATE UNIQUE INDEX [UK_AfiliadaTipoSuporte_Afiliada_Tipo]
+    ON [dbo].[AfiliadaTipoSuporte] ([IdAfiliada], [IdTipoSuporte]);
+CREATE UNIQUE INDEX [UK_AfiliadaTipoSuporteFormato_Tipo_Formato]
+    ON [dbo].[AfiliadaTipoSuporteFormato] ([IdAfiliadaTipoSuporte], [IdFormato]);";
 
             await ExecutarAsync(ConnectionString, indices);
         }
