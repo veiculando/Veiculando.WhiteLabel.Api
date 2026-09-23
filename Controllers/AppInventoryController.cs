@@ -29,10 +29,22 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> Search([FromQuery] InventorySearchQuery query)
+        public async Task<IActionResult> Search(
+            [FromQuery(Name = "query")] string term,
+            [FromQuery] string city,
+            [FromQuery] string mediaType,
+            [FromQuery] decimal? minPrice,
+            [FromQuery] decimal? maxPrice)
         {
             var pecas = await PecasAtivasAsync();
-            var resultado = AplicarFiltros(pecas, query)
+            // A propriedade Query de um DTO chamado `query` colide com o prefixo
+            // do model binder: ?query=Paulista chegava como filtro vazio.
+            var filtros = new InventorySearchQuery
+            {
+                Query = term, City = city, MediaType = mediaType,
+                MinPrice = minPrice, MaxPrice = maxPrice
+            };
+            var resultado = AplicarFiltros(pecas, filtros)
                 .Select(Mapear)
                 .ToList();
             return Ok(resultado);
