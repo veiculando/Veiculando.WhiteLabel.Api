@@ -1,7 +1,10 @@
+using System;
 using System.Net;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Veiculando.Data.Contexts;
+using Veiculando.WhiteLabel.Api.Services;
 using Veiculando.WhiteLabel.Api.Tests.Infrastructure;
 using Xunit;
 
@@ -49,6 +52,36 @@ namespace Veiculando.WhiteLabel.Api.Tests
             (await client.GetAsync("/api/wl/app/inventory")).StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
-        private sealed record InventoryItem(string Code, decimal Price, bool Available);
+        [Fact]
+        public async Task Foto_publicada_e_entregue_pelo_BFF_sem_expor_storage_privado()
+        {
+            const int afiliada = 824;
+            var localId = await Seed.LocalAsync(afiliada, "LOC824A");
+            var pecaId = await Seed.PecaAsync(localId, "P-APP-824-A");
+            var name = $"wl-{new string('a', 32)}.jpg";
+            using (var ctx = new VeiculandoDataContext())
+                await ctx.Database.ExecuteSqlCommandAsync("UPDATE Peca SET Foto = @p0 WHERE Id = @p1", name, pecaId);
+
+            using var factory = new WlApiFactory(_db, afiliada);
+            var key = $"tenant-{afiliada}/pecas/{pecaId}/{name}";
+            var bytes = new byte[] { 0xff, 0xd8, 0xff, 0xd9 };
+            factory.Uploads.Files[key] = (new WlStoredFile(key, name, "image/jpeg", bytes.Length, "test", DateTimeOffset.UtcNow), bytes, false);
+            using var client = factory.ClienteAnonimo();
+            var item = await client.GetFromJsonAsync<InventoryItem>("/api/wl/app/inventory/P-APP-824-A");
+            item.ImageUrl.Should().Be("/api/wl/app/inventory/P-APP-824-A/photo");
+            item.TablePrice.Should().BeGreaterThan(item.Price);
+            item.Road.Should().NotBeNull();
+
+            var photo = await client.GetAsync(item.ImageUrl);
+            photo.StatusCode.Should().Be(HttpStatusCode.OK);
+            photo.Content.Headers.ContentType.MediaType.Should().Be("image/jpeg");
+            (await photo.Content.ReadAsByteArrayAsync()).Should().Equal(bytes);
+
+            using var otherFactory = new WlApiFactory(_db, 825);
+            using var otherClient = otherFactory.ClienteAnonimo();
+            (await otherClient.GetAsync("/api/wl/app/inventory/P-APP-824-A/photo")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        }
+
+        private sealed record InventoryItem(string Code, decimal Price, bool Available, string ImageUrl, decimal TablePrice, object Road);
     }
 }
