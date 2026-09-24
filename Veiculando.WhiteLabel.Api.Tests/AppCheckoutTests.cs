@@ -8,8 +8,11 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Entities.WhiteLabel;
+using Veiculando.Infra.Security;
 using Veiculando.WhiteLabel.Api.Tests.Infrastructure;
 using Xunit;
 
@@ -66,10 +69,13 @@ public sealed class AppCheckoutTests
         {
             var stored = await inspection.WlAppCheckoutQuotes.SingleAsync(q => q.Id == quote.QuoteId);
             stored.ExpiraEm.Ticks.Should().Be(quote.ExpiresAt.Ticks, "a expiração assinada deve sobreviver ao SQL datetime");
+            stored.ValorTotal.Should().Be(quote.Total, "o valor assinado deve sobreviver ao decimal(18,2)");
             var value = string.Join("|", stored.UsuarioId, stored.AfiliadaId, stored.CampanhaId,
                 stored.CodigoPeriodo, stored.PecasJson, stored.ValorTotal.ToString("0.00", CultureInfo.InvariantCulture),
                 stored.ExpiraEm.Ticks);
-            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes("test-jwt-" + new string('x', 40)));
+            var jwtSecret = factory.Services.GetRequiredService<IOptions<JwtSettings>>().Value.Secret;
+            jwtSecret.Should().Be("test-jwt-" + new string('x', 40));
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(jwtSecret));
             var expected = Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
             stored.Integridade.Should().Be(expected, "a assinatura precisa ser estável após persistência");
         }
