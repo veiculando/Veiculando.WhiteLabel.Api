@@ -49,7 +49,7 @@ public sealed class AppCheckoutTests
         crossTenant.StatusCode.Should().Be(HttpStatusCode.BadRequest);
 
         using (var ctx = new VeiculandoDataContext())
-            await ctx.Database.ExecuteSqlCommandAsync("UPDATE dbo.AfiliadaCliente SET Status = 1 WHERE IdAfiliada = @p0 AND IdCliente = 1", tenant);
+            await ctx.Database.ExecuteSqlCommandAsync("UPDATE dbo.AfiliadaCliente SET Status = 0 WHERE IdAfiliada = @p0 AND IdCliente = 1", tenant);
         var afterUnlink = await client.GetAsync("/api/wl/app/checkout/context");
         (await afterUnlink.Content.ReadAsStringAsync()).Should().NotContain("CAMP1");
         var denied = await client.PostAsJsonAsync("/api/wl/app/checkout/quote",
@@ -123,7 +123,7 @@ UPDATE dbo.UsuarioAnunciante SET IdAgencia = 1 WHERE Id = 1;
 IF NOT EXISTS (SELECT 1 FROM dbo.AfiliadaCliente WHERE IdAfiliada = @p0 AND IdCliente = 1)
     INSERT dbo.AfiliadaCliente (IdAfiliada, IdCliente, FonteOrigem, Status, DataVinculo,
         DataCadastro, DataAtualizacao, StatusExibicao)
-    VALUES (@p0, 1, 1, 0, GETUTCDATE(), GETUTCDATE(), GETUTCDATE(), 1);
+    VALUES (@p0, 1, 1, 1, GETUTCDATE(), GETUTCDATE(), GETUTCDATE(), 1);
 SET IDENTITY_INSERT dbo.Periodo ON;
 INSERT dbo.Periodo (Id, Codigo, Periodicidade, DataInicio, DataFim, StatusExibicao)
 VALUES (@p1, @p2, 0, DATEADD(day, 1, GETUTCDATE()), DATEADD(day, 8, GETUTCDATE()), 1);
