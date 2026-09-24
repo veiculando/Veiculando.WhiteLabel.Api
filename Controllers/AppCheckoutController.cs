@@ -87,7 +87,10 @@ public sealed class AppCheckoutController : ControllerBase
         var items = pieces.OrderBy(p => p.Id).Select(p => new QuoteItem(p.Id, p.Codigo,
             orders.SelectMany(o => o.Itens).Single(i => i.IdPeca == p.Id).ValorBruto)).ToArray();
         var json = JsonSerializer.Serialize(items);
-        var expiresAt = DateTime.UtcNow.AddMinutes(15);
+        // SQL Server datetime arredonda frações de segundo; persistir um instante
+        // exato evita que a assinatura mude após ler a cotação do banco.
+        var nowTicks = DateTime.UtcNow.Ticks;
+        var expiresAt = new DateTime(nowTicks - nowTicks % TimeSpan.TicksPerSecond, DateTimeKind.Utc).AddMinutes(15);
         var integrity = Sign(userId, _tenant.AfiliadaId, campaign.Id, period.Codigo, json, total, expiresAt);
         var quote = new WlAppCheckoutQuote(buyer, campaign.Id, period.Codigo, json, total, integrity, expiresAt);
         _db.WlAppCheckoutQuotes.Add(quote);

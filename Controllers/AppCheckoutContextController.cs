@@ -55,7 +55,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var periodos = await _db.Periodos.AsNoTracking()
                 .Where(x => x.StatusExibicao == StatusExibicaoEnum.Ativo && x.DataFim >= now)
                 .OrderBy(x => x.DataInicio)
-                .Select(x => new { x.Codigo, x.Nome, x.DataInicio, x.DataFim })
                 .ToListAsync(ct);
 
             return Ok(new
@@ -66,6 +65,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     code = c.Codigo,
                     name = c.Nome,
                     periods = periodos.Where(p => p.DataInicio <= c.DataFimPrevisto && p.DataFim >= c.DataInicioPrevisto)
+                        .Select(p => new { p.Codigo, p.Nome, p.DataInicio, p.DataFim })
                 })
             });
         }
