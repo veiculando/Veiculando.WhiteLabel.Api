@@ -1,8 +1,11 @@
 using System;
 using System.Data.Entity;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Veiculando.Data.Contexts;
@@ -59,6 +62,17 @@ public sealed class AppCheckoutTests
             await quoteResponse.Content.ReadAsStringAsync());
         var quote = await quoteResponse.Content.ReadFromJsonAsync<QuoteResponse>();
         quote.Total.Should().BeGreaterThan(0);
+        using (var inspection = new VeiculandoDataContext())
+        {
+            var stored = await inspection.WlAppCheckoutQuotes.SingleAsync(q => q.Id == quote.QuoteId);
+            stored.ExpiraEm.Ticks.Should().Be(quote.ExpiresAt.Ticks, "a expiração assinada deve sobreviver ao SQL datetime");
+            var value = string.Join("|", stored.UsuarioId, stored.AfiliadaId, stored.CampanhaId,
+                stored.CodigoPeriodo, stored.PecasJson, stored.ValorTotal.ToString("0.00", CultureInfo.InvariantCulture),
+                stored.ExpiraEm.Ticks);
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes("test-jwt-" + new string('x', 40)));
+            var expected = Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+            stored.Integridade.Should().Be(expected, "a assinatura precisa ser estável após persistência");
+        }
 
         var withoutTerms = await client.PostAsJsonAsync("/api/wl/app/checkout/orders",
             new { quoteId = quote.QuoteId, termsAccepted = false, termsVersion = "aurum-v1" });
@@ -128,5 +142,5 @@ SET IDENTITY_INSERT dbo.Periodo OFF;", tenant, periodId, $"APP{periodId}");
     }
 
     private sealed record LoginResponse(string Token);
-    private sealed record QuoteResponse(Guid QuoteId, decimal Total);
+    private sealed record QuoteResponse(Guid QuoteId, decimal Total, DateTime ExpiresAt);
 }
