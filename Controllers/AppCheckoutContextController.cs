@@ -46,7 +46,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .Include(x => x.Cliente)
                 .Where(x => x.StatusExibicao == StatusExibicaoEnum.Ativo &&
                             x.Cliente.Cnpj.Numero == onboarding.Documento &&
-                            x.Cliente.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId) &&
+                            x.Cliente.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId &&
+                                v.Status == StatusVinculoEnum.Ativo) &&
                             x.Status != StatusCampanhaEnum.Cancelada && x.Status != StatusCampanhaEnum.Aprovada)
                 .OrderByDescending(x => x.DataAtualizacao)
                 .Select(x => new { x.Id, x.Codigo, x.Nome, x.DataInicioPrevisto, x.DataFimPrevisto })

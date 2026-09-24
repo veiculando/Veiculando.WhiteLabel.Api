@@ -47,6 +47,14 @@ public sealed class AppCheckoutTests
         var crossTenant = await client.PostAsJsonAsync("/api/wl/app/checkout/quote",
             new { pieceIds = new[] { otherPiece }, campaignId = 1, periodCode = "APP891" });
         crossTenant.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        using (var ctx = new VeiculandoDataContext())
+            await ctx.Database.ExecuteSqlCommandAsync("UPDATE dbo.AfiliadaCliente SET Status = 1 WHERE IdAfiliada = @p0 AND IdCliente = 1", tenant);
+        var afterUnlink = await client.GetAsync("/api/wl/app/checkout/context");
+        (await afterUnlink.Content.ReadAsStringAsync()).Should().NotContain("CAMP1");
+        var denied = await client.PostAsJsonAsync("/api/wl/app/checkout/quote",
+            new { pieceIds = new[] { piece }, campaignId = 1, periodCode = "APP891" });
+        denied.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]

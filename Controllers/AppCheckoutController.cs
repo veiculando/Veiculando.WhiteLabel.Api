@@ -217,7 +217,8 @@ public sealed class AppCheckoutController : ControllerBase
         .Where(c => c.Id == campaignId && c.StatusExibicao == StatusExibicaoEnum.Ativo &&
             c.Status != StatusCampanhaEnum.Cancelada && c.Status != StatusCampanhaEnum.Aprovada &&
             c.Cliente.Cnpj.Numero == document &&
-            c.Cliente.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId));
+            c.Cliente.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId &&
+                v.Status == StatusVinculoEnum.Ativo));
 
     internal IQueryable<Peca> ActivePieces(int[] ids) => _tenant.Pecas
         .Include(p => p.Local.Cidade)
