@@ -81,11 +81,11 @@ public sealed class AppCheckoutController : ControllerBase
 
         var orders = BuildOrders(campaign, period, pieces, simulation: true);
         if (orders == null) return Conflict(new { message = "Não foi possível calcular a cotação com os dados comerciais atuais." });
-        var total = orders.Sum(order => order.ValorTotalBruto);
+        var total = Money(orders.Sum(order => order.ValorTotalBruto));
         if (total <= 0) return Conflict(new { message = "A cotação não possui valor válido." });
 
         var items = pieces.OrderBy(p => p.Id).Select(p => new QuoteItem(p.Id, p.Codigo,
-            orders.SelectMany(o => o.Itens).Single(i => i.IdPeca == p.Id).ValorBruto)).ToArray();
+            Money(orders.SelectMany(o => o.Itens).Single(i => i.IdPeca == p.Id).ValorBruto))).ToArray();
         var json = JsonSerializer.Serialize(items);
         // SQL Server datetime arredonda frações de segundo; persistir um instante
         // exato evita que a assinatura mude após ler a cotação do banco.
@@ -161,9 +161,9 @@ public sealed class AppCheckoutController : ControllerBase
             return Conflict(new { message = "Uma ou mais peças ficaram indisponíveis; solicite nova cotação." });
 
         var orders = BuildOrders(campaign, period, pieces, simulation: false);
-        if (orders == null || orders.Sum(o => o.ValorTotalBruto) != quote.ValorTotal ||
+        if (orders == null || Money(orders.Sum(o => o.ValorTotalBruto)) != quote.ValorTotal ||
             quotedItems.Any(i => !pieces.Any(p => p.Id == i.Id && p.Codigo == i.Code) ||
-                orders.SelectMany(o => o.Itens).Single(item => item.IdPeca == i.Id).ValorBruto != i.ServerPrice))
+                Money(orders.SelectMany(o => o.Itens).Single(item => item.IdPeca == i.Id).ValorBruto) != i.ServerPrice))
             return Conflict(new { message = "Preço ou disponibilidade alterados; solicite nova cotação." });
 
         var cityIds = pieces.Select(p => p.Local.IdCidade).Distinct().ToArray();
@@ -255,6 +255,10 @@ public sealed class AppCheckoutController : ControllerBase
         var input = Encoding.UTF8.GetBytes($"{tenantId}|{userId}|{key}");
         return Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
     }
+
+    // Os valores do Pedido no Core são gravados em decimal(18,2) pelo EF6.
+    // Alinhar a cotação à mesma escala evita assinar um total que muda ao persistir.
+    private static decimal Money(decimal value) => decimal.Truncate(value * 100m) / 100m;
 
     private static bool FixedEquals(string actual, string expected)
     {
