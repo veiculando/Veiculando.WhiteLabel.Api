@@ -133,10 +133,11 @@ public sealed class AppCheckoutController : ControllerBase
         try { quotedItems = JsonSerializer.Deserialize<QuoteItem[]>(quote.PecasJson); }
         catch (JsonException) { return Conflict(new { message = "Cotação inválida; solicite uma nova." }); }
         if (quotedItems == null || quotedItems.Length == 0 || quotedItems.Length > 100 ||
-            quotedItems.Any(i => i.Id <= 0) || quotedItems.Select(i => i.Id).Distinct().Count() != quotedItems.Length ||
-            !FixedEquals(quote.Integridade, Sign(userId, _tenant.AfiliadaId, quote.CampanhaId,
+            quotedItems.Any(i => i.Id <= 0) || quotedItems.Select(i => i.Id).Distinct().Count() != quotedItems.Length)
+            return Conflict(new { message = "Cotação inválida; solicite uma nova.", code = "invalid_snapshot" });
+        if (!FixedEquals(quote.Integridade, Sign(userId, _tenant.AfiliadaId, quote.CampanhaId,
                 quote.CodigoPeriodo, quote.PecasJson, quote.ValorTotal, quote.ExpiraEm)))
-            return Conflict(new { message = "Cotação inválida; solicite uma nova." });
+            return Conflict(new { message = "Cotação inválida; solicite uma nova.", code = "invalid_integrity" });
 
         var onboarding = await _db.WlAppOnboardings.AsNoTracking().SingleOrDefaultAsync(o =>
             o.UsuarioId == userId && o.AfiliadaId == _tenant.AfiliadaId, ct);

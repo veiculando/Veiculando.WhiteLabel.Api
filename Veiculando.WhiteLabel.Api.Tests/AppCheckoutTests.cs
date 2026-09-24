@@ -36,8 +36,10 @@ public sealed class AppCheckoutTests
         context.StatusCode.Should().Be(HttpStatusCode.OK);
         (await context.Content.ReadAsStringAsync()).Should().Contain("CAMP1");
 
+        var otherLocal = await Seed.LocalAsync(893, "CHK893");
+        var otherPiece = await Seed.PecaAsync(otherLocal, "P-CHK-893");
         var crossTenant = await client.PostAsJsonAsync("/api/wl/app/checkout/quote",
-            new { pieceIds = new[] { piece }, campaignId = 1, periodCode = "APP892" });
+            new { pieceIds = new[] { otherPiece }, campaignId = 1, periodCode = "APP891" });
         crossTenant.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
