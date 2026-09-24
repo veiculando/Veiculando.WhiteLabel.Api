@@ -2,12 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.Data.Entity;
 using System.Linq;
+using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Azure.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Veiculando.Domain.Entities;
 using Veiculando.Domain.Enums;
 using Veiculando.WhiteLabel.Api.Middleware;
+using Veiculando.WhiteLabel.Api.Services;
 
 namespace Veiculando.WhiteLabel.Api.Controllers
 {
@@ -22,10 +26,12 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     public sealed class AppInventoryController : ControllerBase
     {
         private readonly ITenantQueries _tenant;
+        private readonly IWlUploadStorage _storage;
 
-        public AppInventoryController(ITenantQueries tenant)
+        public AppInventoryController(ITenantQueries tenant, IWlUploadStorage storage)
         {
             _tenant = tenant;
+            _storage = storage;
         }
 
         [HttpGet]
@@ -62,11 +68,34 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             return Ok(Mapear(peca));
         }
 
+        [HttpGet("{code}/photo")]
+        public async Task<IActionResult> GetPhoto(string code, CancellationToken ct)
+        {
+            var peca = await _tenant.Pecas.AsNoTracking().FirstOrDefaultAsync(p =>
+                p.Codigo == code && p.StatusExibicao == StatusExibicaoEnum.Ativo &&
+                p.Local.StatusExibicao == StatusExibicaoEnum.Ativo, ct);
+            if (peca == null || !HasWhiteLabelPhoto(peca)) return NotFound();
+
+            var key = $"tenant-{_tenant.AfiliadaId}/pecas/{peca.Id}/{peca.Foto.ArquivoNome}";
+            try
+            {
+                var info = await _storage.InfoAsync(key, ct);
+                if (info.ContentType != "image/jpeg" && info.ContentType != "image/png") return NotFound();
+                var stream = await _storage.ReadAsync(key, ct);
+                Response.Headers.CacheControl = "public, max-age=300";
+                Response.Headers["X-Content-Type-Options"] = "nosniff";
+                return File(stream, info.ContentType);
+            }
+            catch (KeyNotFoundException) { return NotFound(); }
+            catch (StorageException ex) when (ex.RequestInformation?.HttpStatusCode == 404) { return NotFound(); }
+        }
+
         private Task<List<Peca>> PecasAtivasAsync() => _tenant.Pecas
             .AsNoTracking()
             .Include(p => p.Local)
             .Include(p => p.Local.Cidade)
             .Include(p => p.Local.Cidade.Estado)
+            .Include(p => p.Local.Publico)
             .Include(p => p.Suporte)
             .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo &&
                         p.Local.StatusExibicao == StatusExibicaoEnum.Ativo)
@@ -97,6 +126,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             return new
             {
                 id = peca.Id,
+                localId = peca.IdLocal,
                 code = peca.Codigo,
                 name = local?.Descricao ?? local?.Endereco?.ToString() ?? peca.Codigo,
                 address = local?.Endereco?.ToString() ?? local?.Descricao ?? local?.Codigo ?? string.Empty,
@@ -107,12 +137,33 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 mediaType = peca.Suporte?.Nome ?? string.Empty,
                 format = peca.Formato?.ToString() ?? string.Empty,
                 price = peca.ValorPadrao,
+                tablePrice = peca.ValorTabela,
+                periodicity = peca.PeriodicidadePadrao?.Nome,
+                imageUrl = HasWhiteLabelPhoto(peca) ? $"/api/wl/app/inventory/{Uri.EscapeDataString(peca.Codigo)}/photo" : null,
+                audience = local?.Publico?.Audiencia,
+                rating = peca.AvaliacaoQuantidade > 0 ? (decimal?)peca.AvaliacaoMedia : null,
+                ratingCount = peca.AvaliacaoQuantidade,
+                cpm = peca.CPM > 0 ? (decimal?)peca.CPM : null,
                 // "available" aqui significa que o item está publicado no catálogo.
                 // A disponibilidade temporal é revalidada ao cotar/finalizar o pedido.
                 available = true,
-                illuminated = peca.Iluminacao
+                illuminated = peca.Iluminacao,
+                viewAngle = peca.AnguloDeVisao,
+                permit = peca.Alvara,
+                trafficLight = peca.Semaforo,
+                streetViewUrl = peca.StreetView?.Url,
+                road = peca.Via == null ? null : new
+                {
+                    lanes = peca.Via.Faixas,
+                    speed = peca.Via.Velociade,
+                    pedestrians = peca.Via.Pedestre.ToString()
+                }
             };
         }
+
+        private static bool HasWhiteLabelPhoto(Peca peca) =>
+            !string.IsNullOrEmpty(peca.Foto?.ArquivoNome) &&
+            Regex.IsMatch(peca.Foto.ArquivoNome, @"^wl-[a-f0-9]{32}\.(jpg|png)$", RegexOptions.CultureInvariant);
 
         public sealed class InventorySearchQuery
         {

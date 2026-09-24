@@ -46,6 +46,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .Include(x => x.Cliente)
                 .Where(x => x.StatusExibicao == StatusExibicaoEnum.Ativo &&
                             x.Cliente.Cnpj.Numero == onboarding.Documento &&
+                            x.Cliente.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId &&
+                                v.Status == StatusVinculoEnum.Ativo) &&
                             x.Status != StatusCampanhaEnum.Cancelada && x.Status != StatusCampanhaEnum.Aprovada)
                 .OrderByDescending(x => x.DataAtualizacao)
                 .Select(x => new { x.Id, x.Codigo, x.Nome, x.DataInicioPrevisto, x.DataFimPrevisto })
@@ -54,7 +56,6 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var periodos = await _db.Periodos.AsNoTracking()
                 .Where(x => x.StatusExibicao == StatusExibicaoEnum.Ativo && x.DataFim >= now)
                 .OrderBy(x => x.DataInicio)
-                .Select(x => new { x.Codigo, x.Nome, x.DataInicio, x.DataFim })
                 .ToListAsync(ct);
 
             return Ok(new
@@ -65,6 +66,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     code = c.Codigo,
                     name = c.Nome,
                     periods = periodos.Where(p => p.DataInicio <= c.DataFimPrevisto && p.DataFim >= c.DataInicioPrevisto)
+                        .Select(p => new { p.Codigo, p.Nome, p.DataInicio, p.DataFim })
                 })
             });
         }
