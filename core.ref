@@ -130,4 +130,6 @@
 # (703d2ad0), que foi deletada no merge. O pin agora vive na linha de
 # integracao, que e o que torna o build reproduzivel depois que a sprint fecha.
 # ---------------------------------------------------------------------------
-0e75aa43914b12b33959f3d7094ff13ca65ed86b
+# Sprint 11: PR Core #198, identidade comercial apos aprovacao KYC.
+# Pin temporario para testar o BFF antes do merge; trocar pelo SHA de merge.
+35cbdc0da02fc520b0813c3b6924247c7c1e3826
