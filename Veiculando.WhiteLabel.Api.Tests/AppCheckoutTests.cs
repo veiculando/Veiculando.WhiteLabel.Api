@@ -1,6 +1,7 @@
 using System;
 using System.Data.Entity;
 using System.Globalization;
+using System.Linq;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -109,6 +110,51 @@ public sealed class AppCheckoutTests
         (await ctx.Pedidos.CountAsync(p => p.IdCampanha == 1 && p.IdPeriodo == 892)).Should().Be(1);
         (await ctx.PedidosReserva.CountAsync(r => r.Pedido.IdCampanha == 1 && r.Pedido.IdPeriodo == 892)).Should().Be(1);
         (await ctx.WlAppCheckoutSubmissions.CountAsync(s => s.QuoteId == quote.QuoteId)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Campanha_da_compra_exige_KYC_e_identidade_comercial_do_mesmo_anunciante()
+    {
+        const int tenant = 894;
+        const string email = "checkout-894@exemplo.com";
+        await PrepareAsync(tenant, email, "P-CHK-894", 894);
+        using var factory = new WlApiFactory(_db, tenant);
+        using var client = await AppClientAsync(factory, email);
+        var payload = new { name = "Campanha de setembro", product = "Produto A", job = "Lançamento",
+            startDate = DateTime.UtcNow.Date.AddDays(1), endDate = DateTime.UtcNow.Date.AddDays(8), budget = 5000m };
+
+        (await client.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns", payload)).StatusCode
+            .Should().Be(HttpStatusCode.Forbidden);
+        await ApproveAsync(tenant, email);
+        (await client.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns", payload)).StatusCode
+            .Should().Be(HttpStatusCode.Conflict, "a conta WhiteLabel não pode usar outro usuário Core por semelhança de CNPJ");
+
+        using var ctx = new VeiculandoDataContext();
+        var originalEmail = await ctx.UsuariosAnunciantes.Where(u => u.Id == 1)
+            .Select(u => u.Email.Endereco).SingleAsync();
+        try
+        {
+            await ctx.Database.ExecuteSqlCommandAsync(@"
+UPDATE dbo.Usuario SET Email = @p0 WHERE Id = 1;
+IF NOT EXISTS (SELECT 1 FROM dbo.AgenciaCliente WHERE IdAgencia = 1 AND IdCliente = 1)
+    INSERT dbo.AgenciaCliente (IdAgencia, IdCliente, ComissaoAgencia, DataInicioContrato,
+        DataExpiracaoContrato, DataCadastro, DataAtualizacao, StatusExibicao)
+    VALUES (1, 1, 0, DATEADD(day,-1,GETUTCDATE()), DATEADD(year,1,GETUTCDATE()),
+        GETUTCDATE(), GETUTCDATE(), 1);", email);
+
+            var created = await client.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns", payload);
+            created.StatusCode.Should().Be(HttpStatusCode.Created, await created.Content.ReadAsStringAsync());
+            var context = await client.GetStringAsync("/api/wl/app/checkout/context");
+            context.Should().Contain("Campanha de setembro");
+            var stored = await ctx.Campanhas.SingleAsync(c => c.Nome == "Campanha de setembro");
+            stored.IdCliente.Should().Be(1);
+            stored.IdUsuarioAnunciante.Should().Be(1);
+            stored.FonteOrigem.Should().Be(Veiculando.Domain.Enums.FonteOrigemEnum.WhiteLabel);
+        }
+        finally
+        {
+            await ctx.Database.ExecuteSqlCommandAsync("UPDATE dbo.Usuario SET Email = @p0 WHERE Id = 1", originalEmail);
+        }
     }
 
     private static async Task<int> PrepareAsync(int tenant, string email, string pieceCode, int periodId)
