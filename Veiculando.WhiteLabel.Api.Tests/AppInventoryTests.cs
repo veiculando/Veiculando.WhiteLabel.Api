@@ -39,6 +39,9 @@ namespace Veiculando.WhiteLabel.Api.Tests
             var semCorrespondencia = await client.GetFromJsonAsync<InventoryItem[]>("/api/wl/app/inventory?query=nenhuma-peca-assim");
             semCorrespondencia.Should().BeEmpty("o termo digitado deve chegar ao filtro do servidor");
 
+            var filtros = await client.GetFromJsonAsync<InventoryFilters>("/api/wl/app/inventory/filters");
+            filtros.MediaTypes.Should().Contain("Outdoor", "as opções vêm do catálogo completo e não da busca atual");
+
             (await client.GetAsync("/api/wl/app/inventory/P-APP-822-A")).StatusCode.Should().Be(HttpStatusCode.NotFound);
             (await client.GetAsync("/api/wl/app/inventory/P-APP-821-A")).StatusCode.Should().Be(HttpStatusCode.OK);
         }
@@ -50,6 +53,55 @@ namespace Veiculando.WhiteLabel.Api.Tests
             using var factory = new WlApiFactory(_db, afiliada);
             using var client = factory.ClienteAnonimo();
             (await client.GetAsync("/api/wl/app/inventory")).StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        [Fact]
+        public async Task Periodo_real_filtra_periodicidade_sem_exigir_login()
+        {
+            const int afiliada = 826;
+            var localId = await Seed.LocalAsync(afiliada, "LOC826A");
+            var pecaId = await Seed.PecaAsync(localId, "P-APP-826-A");
+            using (var ctx = new VeiculandoDataContext())
+            {
+                await ctx.Database.ExecuteSqlCommandAsync("UPDATE Peca SET Periodicidade = 2 WHERE Id = @p0", pecaId);
+                await ctx.Database.ExecuteSqlCommandAsync(@"
+IF NOT EXISTS (SELECT 1 FROM Periodo WHERE Id = 82601)
+BEGIN
+    SET IDENTITY_INSERT Periodo ON;
+    INSERT INTO Periodo (Id, Codigo, Periodicidade, DataInicio, DataFim, StatusExibicao)
+    VALUES (82601, 'P-826-BI', 2, GETDATE(), DATEADD(day, 14, GETDATE()), 1);
+    SET IDENTITY_INSERT Periodo OFF;
+END");
+            }
+
+            using var factory = new WlApiFactory(_db, afiliada);
+            using var client = factory.ClienteAnonimo();
+            var filtros = await client.GetFromJsonAsync<InventoryFilters>("/api/wl/app/inventory/filters");
+            filtros.Periods.Should().ContainSingle(p => p.Code == "P-826-BI");
+            var itens = await client.GetFromJsonAsync<InventoryItem[]>("/api/wl/app/inventory?periodCode=P-826-BI");
+            itens.Should().ContainSingle(p => p.Code == "P-APP-826-A");
+            (await client.GetAsync("/api/wl/app/inventory?periodCode=INVALIDO")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await client.GetAsync("/api/wl/app/inventory?gender=3")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await client.GetAsync("/api/wl/app/inventory?ageRangeIds=1,abc")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await client.GetAsync("/api/wl/app/inventory?poiCategoryIds=1,abc")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await client.GetAsync("/api/wl/app/inventory?totalBudget=0")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        }
+
+        [Fact]
+        public async Task Verba_total_recomenda_sem_ocultar_o_restante_do_catalogo()
+        {
+            const int afiliada = 827;
+            var localA = await Seed.LocalAsync(afiliada, "LOC827A");
+            var localB = await Seed.LocalAsync(afiliada, "LOC827B");
+            await Seed.PecaAsync(localA, "P-APP-827-A");
+            await Seed.PecaAsync(localB, "P-APP-827-B");
+            using var factory = new WlApiFactory(_db, afiliada);
+            using var client = factory.ClienteAnonimo();
+
+            var itens = await client.GetFromJsonAsync<InventoryItem[]>("/api/wl/app/inventory?totalBudget=1500");
+            itens.Should().HaveCount(2);
+            itens.Should().ContainSingle(i => i.Recommended);
+            itens.Should().OnlyContain(i => i.Available);
         }
 
         [Fact]
@@ -82,6 +134,8 @@ namespace Veiculando.WhiteLabel.Api.Tests
             (await otherClient.GetAsync("/api/wl/app/inventory/P-APP-824-A/photo")).StatusCode.Should().Be(HttpStatusCode.NotFound);
         }
 
-        private sealed record InventoryItem(string Code, decimal Price, bool Available, string ImageUrl, decimal TablePrice, object Road);
+        private sealed record InventoryItem(string Code, decimal Price, bool Available, bool Recommended, string ImageUrl, decimal TablePrice, object Road);
+        private sealed record InventoryFilters(string[] MediaTypes, InventoryPeriod[] Periods);
+        private sealed record InventoryPeriod(string Code);
     }
 }
