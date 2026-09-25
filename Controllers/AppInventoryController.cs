@@ -57,6 +57,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .Select(x => new { id = x.Id, name = x.Nome }).ToListAsync();
             var perfis = await _db.PerfilPsicografico.AsNoTracking().OrderBy(x => x.Nome)
                 .Select(x => new { id = x.Id, name = x.Nome }).ToListAsync();
+            var poiCategorias = await _db.PoiCategoria.AsNoTracking().OrderBy(x => x.Nome)
+                .Select(x => new { id = x.Id, name = x.Nome }).ToListAsync();
             return Ok(new
             {
                 mediaTypes = pecas.Select(p => p.Suporte?.Nome)
@@ -73,7 +75,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 periods = periodos.Where(p => tipos.Contains(p.Periodicidade.Tipo))
                     .Select(p => new { code = p.Codigo, name = p.Nome, periodicity = p.Periodicidade.Nome, startDate = p.DataInicio, endDate = p.DataFim })
                     .ToList(),
-                audience = new { ageRanges = idades, incomeRanges = rendas, psychographicProfiles = perfis }
+                audience = new { ageRanges = idades, incomeRanges = rendas, psychographicProfiles = perfis, poiCategories = poiCategorias }
             });
         }
 
@@ -88,12 +90,16 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             [FromQuery] int? gender,
             [FromQuery] string ageRangeIds,
             [FromQuery] string incomeRangeIds,
-            [FromQuery] string psychographicIds)
+            [FromQuery] string psychographicIds,
+            [FromQuery] string poiCategoryIds,
+            [FromQuery] decimal? totalBudget)
         {
+            if (totalBudget.HasValue && totalBudget.Value <= 0)
+                return BadRequest(new { message = "O investimento total deve ser positivo." });
             if (gender.HasValue && gender.Value != 1 && gender.Value != 2)
                 return BadRequest(new { message = "Gênero inválido." });
             if (!TryIds(ageRangeIds, out var idades) || !TryIds(incomeRangeIds, out var rendas) ||
-                !TryIds(psychographicIds, out var perfis))
+                !TryIds(psychographicIds, out var perfis) || !TryIds(poiCategoryIds, out var categoriasPoi))
                 return BadRequest(new { message = "Filtro de público inválido." });
             Periodo periodo = null;
             if (!string.IsNullOrWhiteSpace(periodCode))
@@ -103,7 +109,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     p.Codigo == periodCode && p.StatusExibicao == StatusExibicaoEnum.Ativo && p.DataFim >= now);
                 if (periodo == null) return BadRequest(new { message = "Período inválido ou encerrado." });
             }
-            var temPublico = gender.HasValue || idades.Length > 0 || rendas.Length > 0 || perfis.Length > 0;
+            var temPublico = gender.HasValue || idades.Length > 0 || rendas.Length > 0 || perfis.Length > 0 || categoriasPoi.Length > 0;
             var pecas = await PecasAtivasAsync(temPublico);
             // A propriedade Query de um DTO chamado `query` colide com o prefixo
             // do model binder: ?query=Paulista chegava como filtro vazio.
@@ -119,9 +125,18 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .Where(s => s.IdPeriodo == periodo.Id && s.Status != StatusPecaPeriodoEnum.Disponivel)
                 .Select(s => s.IdPeca).ToListAsync());
             var pontuacoes = filtradas.ToDictionary(p => p.Id, p => temPublico
-                ? p.Local.IndicePublicoAlvo(gender ?? 0, idades, rendas, perfis, Array.Empty<int>(), Array.Empty<int>()) : 0);
-            var resultado = filtradas.OrderByDescending(p => pontuacoes[p.Id])
-                .Select(p => Mapear(p, !indisponiveis.Contains(p.Id), pontuacoes[p.Id])).ToList();
+                ? p.Local.IndicePublicoAlvo(gender ?? 0, idades, rendas, perfis, Array.Empty<int>(), categoriasPoi) : 0);
+            // Como no Core, a verba seleciona uma recomendação; não esconde do
+            // mapa as outras peças. O valor aqui é referência, não cotação.
+            var ordenadas = filtradas.OrderByDescending(p => pontuacoes[p.Id]).ThenBy(p => p.Id).ToList();
+            var recomendadas = new HashSet<int>();
+            var soma = 0m;
+            if (totalBudget.HasValue)
+                foreach (var peca in ordenadas.Where(p => !indisponiveis.Contains(p.Id)))
+                    if (soma + peca.ValorPadrao <= totalBudget.Value)
+                    { soma += peca.ValorPadrao; recomendadas.Add(peca.Id); }
+            var resultado = ordenadas
+                .Select(p => Mapear(p, !indisponiveis.Contains(p.Id), pontuacoes[p.Id], recomendadas.Contains(p.Id))).ToList();
             return Ok(resultado);
         }
 
@@ -173,7 +188,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 query = query.Include(p => p.Local.Publico.DistribuicaoGenero)
                     .Include(p => p.Local.Publico.DistribuicaoEtaria)
                     .Include(p => p.Local.Publico.DistribuicaoRenda)
-                    .Include(p => p.Local.Publico.PerfisPsicograficos);
+                    .Include(p => p.Local.Publico.PerfisPsicograficos)
+                    .Include(p => p.Local.Publico.PoiCategorias);
             return query.ToListAsync();
         }
 
@@ -196,7 +212,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         private static bool Contem(string valor, string termo) =>
             !string.IsNullOrWhiteSpace(valor) && valor.IndexOf(termo, StringComparison.OrdinalIgnoreCase) >= 0;
 
-        private static object Mapear(Peca peca, bool disponivel = true, int audienciaMatch = 0)
+        private static object Mapear(Peca peca, bool disponivel = true, int audienciaMatch = 0, bool recomendada = false)
         {
             var local = peca.Local;
             return new
@@ -218,6 +234,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 imageUrl = HasWhiteLabelPhoto(peca) ? $"/api/wl/app/inventory/{Uri.EscapeDataString(peca.Codigo)}/photo" : null,
                 audience = local?.Publico?.Audiencia,
                 audienceMatch = audienciaMatch,
+                recommended = recomendada,
                 rating = peca.AvaliacaoQuantidade > 0 ? (decimal?)peca.AvaliacaoMedia : null,
                 ratingCount = peca.AvaliacaoQuantidade,
                 cpm = peca.CPM > 0 ? (decimal?)peca.CPM : null,

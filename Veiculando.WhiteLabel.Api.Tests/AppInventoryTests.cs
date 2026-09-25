@@ -83,6 +83,25 @@ END");
             (await client.GetAsync("/api/wl/app/inventory?periodCode=INVALIDO")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
             (await client.GetAsync("/api/wl/app/inventory?gender=3")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
             (await client.GetAsync("/api/wl/app/inventory?ageRangeIds=1,abc")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await client.GetAsync("/api/wl/app/inventory?poiCategoryIds=1,abc")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await client.GetAsync("/api/wl/app/inventory?totalBudget=0")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        }
+
+        [Fact]
+        public async Task Verba_total_recomenda_sem_ocultar_o_restante_do_catalogo()
+        {
+            const int afiliada = 827;
+            var localA = await Seed.LocalAsync(afiliada, "LOC827A");
+            var localB = await Seed.LocalAsync(afiliada, "LOC827B");
+            await Seed.PecaAsync(localA, "P-APP-827-A");
+            await Seed.PecaAsync(localB, "P-APP-827-B");
+            using var factory = new WlApiFactory(_db, afiliada);
+            using var client = factory.ClienteAnonimo();
+
+            var itens = await client.GetFromJsonAsync<InventoryItem[]>("/api/wl/app/inventory?totalBudget=1500");
+            itens.Should().HaveCount(2);
+            itens.Should().ContainSingle(i => i.Recommended);
+            itens.Should().OnlyContain(i => i.Available);
         }
 
         [Fact]
@@ -115,7 +134,7 @@ END");
             (await otherClient.GetAsync("/api/wl/app/inventory/P-APP-824-A/photo")).StatusCode.Should().Be(HttpStatusCode.NotFound);
         }
 
-        private sealed record InventoryItem(string Code, decimal Price, bool Available, string ImageUrl, decimal TablePrice, object Road);
+        private sealed record InventoryItem(string Code, decimal Price, bool Available, bool Recommended, string ImageUrl, decimal TablePrice, object Road);
         private sealed record InventoryFilters(string[] MediaTypes, InventoryPeriod[] Periods);
         private sealed record InventoryPeriod(string Code);
     }
