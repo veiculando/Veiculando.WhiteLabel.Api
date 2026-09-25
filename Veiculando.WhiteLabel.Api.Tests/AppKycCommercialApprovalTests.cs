@@ -84,6 +84,14 @@ IF NOT EXISTS (SELECT 1 FROM PerfilUsuario WHERE Codigo = 'UsuarioAnunciante')
         account.AgenciaId.Should().Be(1);
         (await verify.UsuariosAnunciantes.CountAsync(u => u.Email.Endereco == email)).Should().Be(1);
         (await verify.AfiliadaClientes.CountAsync(v => v.IdAfiliada == tenant && v.IdCliente == 1)).Should().Be(1);
+
+        var created = await applicant.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns", new
+        {
+            name = "Campanha de venda direta", product = "Produto A",
+            startDate = DateTime.UtcNow.Date.AddDays(1), endDate = DateTime.UtcNow.Date.AddDays(8)
+        });
+        created.StatusCode.Should().Be(HttpStatusCode.Created, await created.Content.ReadAsStringAsync());
+        (await applicant.GetStringAsync("/api/wl/app/checkout/context")).Should().Contain("Campanha de venda direta");
     }
 
     [Fact]
@@ -92,7 +100,9 @@ IF NOT EXISTS (SELECT 1 FROM PerfilUsuario WHERE Codigo = 'UsuarioAnunciante')
         const int tenant = 898;
         const string email = "agencia-kyc-898@exemplo.com";
         const string cnpj = "11222333000181";
-        await Seed.AfiliadaAsync(tenant);
+        var local = await Seed.LocalAsync(tenant, "KY898A");
+        var piece = await Seed.PecaAsync(local, "P-KY-898-A");
+        await Seed.ReservaAsync(tenant, "RES-KY-898", piece);
         await Seed.AnuncianteAsync(tenant, email);
         await Seed.OperadorAsync(tenant, "revisor-898@exemplo.com", new[] { "ClienteGerenciar" });
         using (var setup = new VeiculandoDataContext())
@@ -148,6 +158,30 @@ IF NOT EXISTS (SELECT 1 FROM PerfilUsuario WHERE Codigo = 'UsuarioAnunciante')
         (await verify.Clientes.CountAsync(c => c.Cnpj.Numero == cnpj)).Should().Be(0);
         (await verify.UsuariosAnunciantes.CountAsync(u => u.Email.Endereco == email)).Should().Be(1);
         (await verify.AfiliadaAgencias.CountAsync(v => v.IdAfiliada == tenant && v.IdAgencia == agency.Id)).Should().Be(1);
+
+        var withoutClient = await applicant.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns", new
+        {
+            name = "Campanha da agência", product = "Produto A",
+            startDate = DateTime.UtcNow.Date.AddDays(1), endDate = DateTime.UtcNow.Date.AddDays(8)
+        });
+        withoutClient.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        await verify.Database.ExecuteSqlCommandAsync(@"
+IF NOT EXISTS (SELECT 1 FROM AfiliadaCliente WHERE IdAfiliada = @p0 AND IdCliente = 1)
+    INSERT AfiliadaCliente (IdAfiliada, IdCliente, FonteOrigem, Status, DataVinculo,
+        DataCadastro, DataAtualizacao, StatusExibicao)
+    VALUES (@p0, 1, 1, 1, GETUTCDATE(), GETUTCDATE(), GETUTCDATE(), 1);
+INSERT AgenciaCliente (IdAgencia, IdCliente, ComissaoAgencia, DataInicioContrato,
+    DataExpiracaoContrato, DataCadastro, DataAtualizacao, StatusExibicao)
+VALUES (@p1, 1, 0, DATEADD(day,-1,GETUTCDATE()), DATEADD(year,1,GETUTCDATE()),
+    GETUTCDATE(), GETUTCDATE(), 1);", tenant, agency.Id);
+        var context = await applicant.GetStringAsync("/api/wl/app/checkout/context");
+        context.Should().Contain("Cliente Teste");
+        var campaign = await applicant.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns", new
+        {
+            clientId = 1, name = "Campanha da agência", product = "Produto A",
+            startDate = DateTime.UtcNow.Date.AddDays(1), endDate = DateTime.UtcNow.Date.AddDays(8)
+        });
+        campaign.StatusCode.Should().Be(HttpStatusCode.Created, await campaign.Content.ReadAsStringAsync());
     }
 
     private sealed record TokenResponse(string Token);

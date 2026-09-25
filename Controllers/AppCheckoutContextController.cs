@@ -17,8 +17,7 @@ using Veiculando.WhiteLabel.Api.Middleware;
 namespace Veiculando.WhiteLabel.Api.Controllers
 {
     /// <summary>
-    /// Contexto comercial mínimo para o checkout. Isto não é a superfície de
-    /// "Minhas Campanhas": não cria, edita, lista histórico nem expõe pedidos.
+    /// Contexto comercial mínimo para a compra; não expõe gestão de campanhas.
     /// </summary>
     [ApiController]
     [Route("api/wl/app/checkout/context")]
@@ -43,18 +42,45 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .SingleOrDefaultAsync(x => x.UsuarioId == userId && x.AfiliadaId == _tenant.AfiliadaId, ct);
             if (onboarding == null || onboarding.Status != WlAppKycStatus.Aprovado || string.IsNullOrWhiteSpace(onboarding.Documento))
                 return StatusCode(403, new { message = "A aprovação do cadastro é necessária para escolher o contexto da compra." });
+            var buyer = await _tenant.UsuariosAnunciante.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId, ct);
+            if (buyer == null) return Unauthorized();
+            if ((onboarding.TipoConta == "ad" || onboarding.TipoConta == "ag") &&
+                (!buyer.AgenciaId.HasValue || !await _db.AfiliadaAgencias.AsNoTracking().AnyAsync(link =>
+                    link.IdAfiliada == _tenant.AfiliadaId && link.IdAgencia == buyer.AgenciaId.Value &&
+                    link.Status == StatusVinculoEnum.Ativo, ct)))
+                return StatusCode(403, new { message = "O vínculo da agência com a exibidora está inativo." });
 
             var now = DateTime.UtcNow;
-            var campanhas = await _db.Campanhas.AsNoTracking()
+            var query = _db.Campanhas.AsNoTracking()
                 .Include(x => x.Cliente)
                 .Where(x => x.StatusExibicao == StatusExibicaoEnum.Ativo &&
-                            x.Cliente.Cnpj.Numero == onboarding.Documento &&
                             x.Cliente.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId &&
                                 v.Status == StatusVinculoEnum.Ativo) &&
-                            x.Status != StatusCampanhaEnum.Cancelada && x.Status != StatusCampanhaEnum.Aprovada)
+                            x.Status != StatusCampanhaEnum.Cancelada && x.Status != StatusCampanhaEnum.Aprovada);
+            if (onboarding.TipoConta == "ag" && buyer.AgenciaId.HasValue)
+                query = query.Where(x => x.IdAgencia == buyer.AgenciaId.Value &&
+                    x.AnuncianteResponsavel.Email.Endereco == buyer.Email.Endereco);
+            else if (onboarding.TipoConta == "ad" && buyer.ClienteId.HasValue && buyer.AgenciaId.HasValue)
+                query = query.Where(x => x.IdCliente == buyer.ClienteId.Value && x.IdAgencia == buyer.AgenciaId.Value &&
+                    x.AnuncianteResponsavel.Email.Endereco == buyer.Email.Endereco);
+            else if (onboarding.TipoConta == "pj")
+                query = query.Where(x => x.Cliente.Cnpj.Numero == onboarding.Documento);
+            else return StatusCode(403, new { message = "Identidade comercial ainda não provisionada." });
+            var campanhas = await query
                 .OrderByDescending(x => x.DataAtualizacao)
                 .Select(x => new { x.Id, x.Codigo, x.Nome, x.DataInicioPrevisto, x.DataFimPrevisto })
                 .ToListAsync(ct);
+
+            var clients = onboarding.TipoConta == "ag" && buyer.AgenciaId.HasValue
+                ? await _db.AgenciaClientes.AsNoTracking()
+                    .Where(link => link.IdAgencia == buyer.AgenciaId.Value &&
+                        link.StatusExibicao == StatusExibicaoEnum.Ativo &&
+                        link.DataInicioContrato <= now && link.DataExpiracaoContrato >= now &&
+                        link.Cliente.StatusExibicao == StatusExibicaoEnum.Ativo &&
+                        link.Cliente.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId &&
+                            v.Status == StatusVinculoEnum.Ativo))
+                    .Select(link => new { id = link.IdCliente, name = link.Cliente.Nome }).ToListAsync(ct)
+                : null;
 
             var periodos = await _db.Periodos.AsNoTracking()
                 .Where(x => x.StatusExibicao == StatusExibicaoEnum.Ativo && x.DataFim >= now)
@@ -63,6 +89,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             return Ok(new
             {
+                clients,
                 campaigns = campanhas.Select(c => new
                 {
                     id = c.Id,
@@ -77,8 +104,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// <summary>
         /// Cria uma campanha no contexto da compra, sem abrir a superfície de
         /// gestão de Minhas Campanhas. A identidade comercial vem do KYC aprovado
-        /// e do usuário Core correspondente; nunca do cliente ou agência enviados
-        /// pelo navegador.
+        /// e do usuário Core correspondente. Agências podem escolher somente
+        /// clientes com representação contratual ativa na mesma exibidora.
         /// </summary>
         [HttpPost("campaigns")]
         [EnableRateLimiting(Startup.RateLimitEscrita)]
@@ -93,16 +120,23 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             var onboarding = await _db.WlAppOnboardings.AsNoTracking()
                 .SingleOrDefaultAsync(x => x.UsuarioId == userId && x.AfiliadaId == _tenant.AfiliadaId, ct);
-            if (onboarding?.Status != WlAppKycStatus.Aprovado || onboarding.TipoConta != "pj" ||
+            if (onboarding?.Status != WlAppKycStatus.Aprovado ||
+                (onboarding.TipoConta != "ad" && onboarding.TipoConta != "ag" && onboarding.TipoConta != "pj") ||
                 string.IsNullOrWhiteSpace(onboarding.Documento))
                 return StatusCode(403, new { message = "A aprovação do cadastro empresarial é necessária para criar a campanha." });
 
             var buyer = await _tenant.UsuariosAnunciante.AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == userId, ct);
             if (buyer == null) return Unauthorized();
+            if (onboarding.TipoConta == "ag" && (!buyer.AgenciaId.HasValue || !request.ClientId.HasValue))
+                return BadRequest(new { message = "Selecione um anunciante representado por esta agência." });
+            if (onboarding.TipoConta == "ad" && (!buyer.ClienteId.HasValue || !buyer.AgenciaId.HasValue))
+                return Conflict(new { message = "Identidade de venda direta ainda não provisionada." });
 
+            var desiredClientId = onboarding.TipoConta == "ag" ? request.ClientId : buyer.ClienteId;
             var client = await _db.Clientes.Include(x => x.AgenciasContratadas)
-                .SingleOrDefaultAsync(x => x.Cnpj.Numero == onboarding.Documento &&
+                .SingleOrDefaultAsync(x =>
+                    (onboarding.TipoConta == "pj" ? x.Cnpj.Numero == onboarding.Documento : x.Id == desiredClientId) &&
                     x.StatusExibicao == StatusExibicaoEnum.Ativo &&
                     x.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId &&
                         v.Status == StatusVinculoEnum.Ativo), ct);
@@ -113,7 +147,12 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .SingleOrDefaultAsync(x => x.Email.Endereco == buyer.Email.Endereco &&
                     x.StatusAprovacao == StatusUsuarioEnum.Aprovado &&
                     x.StatusExibicao == StatusExibicaoEnum.Ativo, ct);
-            if (responsible?.Agencia == null || !client.AgenciasContratadas.Any(link =>
+            if (responsible?.Agencia == null ||
+                (buyer.AgenciaId.HasValue && responsible.Agencia.Id != buyer.AgenciaId.Value) ||
+                (onboarding.TipoConta != "pj" && !await _db.AfiliadaAgencias.AnyAsync(link =>
+                    link.IdAfiliada == _tenant.AfiliadaId && link.IdAgencia == responsible.Agencia.Id &&
+                    link.Status == StatusVinculoEnum.Ativo, ct)) ||
+                !client.AgenciasContratadas.Any(link =>
                 link.IdAgencia == responsible.Agencia.Id && link.StatusExibicao == StatusExibicaoEnum.Ativo &&
                 link.DataInicioContrato <= DateTime.UtcNow && link.DataExpiracaoContrato >= DateTime.UtcNow))
                 return Conflict(new { message = "O cadastro aprovado ainda não está associado a um responsável comercial habilitado." });
@@ -136,6 +175,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             public DateTime StartDate { get; set; }
             public DateTime EndDate { get; set; }
             [Range(0, 100000000)] public decimal? Budget { get; set; }
+            public int? ClientId { get; set; }
         }
 
         private bool TryUser(out int id)
