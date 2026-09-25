@@ -56,6 +56,34 @@ namespace Veiculando.WhiteLabel.Api.Tests
         }
 
         [Fact]
+        public async Task Periodo_real_filtra_periodicidade_sem_exigir_login()
+        {
+            const int afiliada = 826;
+            var localId = await Seed.LocalAsync(afiliada, "LOC826A");
+            var pecaId = await Seed.PecaAsync(localId, "P-APP-826-A");
+            using (var ctx = new VeiculandoDataContext())
+            {
+                await ctx.Database.ExecuteSqlCommandAsync("UPDATE Peca SET Periodicidade = 2 WHERE Id = @p0", pecaId);
+                await ctx.Database.ExecuteSqlCommandAsync(@"
+IF NOT EXISTS (SELECT 1 FROM Periodo WHERE Id = 82601)
+BEGIN
+    SET IDENTITY_INSERT Periodo ON;
+    INSERT INTO Periodo (Id, Codigo, Periodicidade, DataInicio, DataFim, StatusExibicao)
+    VALUES (82601, 'P-826-BI', 2, GETDATE(), DATEADD(day, 14, GETDATE()), 1);
+    SET IDENTITY_INSERT Periodo OFF;
+END");
+            }
+
+            using var factory = new WlApiFactory(_db, afiliada);
+            using var client = factory.ClienteAnonimo();
+            var filtros = await client.GetFromJsonAsync<InventoryFilters>("/api/wl/app/inventory/filters");
+            filtros.Periods.Should().ContainSingle(p => p.Code == "P-826-BI");
+            var itens = await client.GetFromJsonAsync<InventoryItem[]>("/api/wl/app/inventory?periodCode=P-826-BI");
+            itens.Should().ContainSingle(p => p.Code == "P-APP-826-A");
+            (await client.GetAsync("/api/wl/app/inventory?periodCode=INVALIDO")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        }
+
+        [Fact]
         public async Task Foto_publicada_e_entregue_pelo_BFF_sem_expor_storage_privado()
         {
             const int afiliada = 824;
@@ -86,6 +114,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
         }
 
         private sealed record InventoryItem(string Code, decimal Price, bool Available, string ImageUrl, decimal TablePrice, object Road);
-        private sealed record InventoryFilters(string[] MediaTypes);
+        private sealed record InventoryFilters(string[] MediaTypes, InventoryPeriod[] Periods);
+        private sealed record InventoryPeriod(string Code);
     }
 }

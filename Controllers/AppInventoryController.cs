@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Veiculando.Domain.Entities;
 using Veiculando.Domain.Enums;
+using Veiculando.Data.Contexts;
 using Veiculando.WhiteLabel.Api.Middleware;
 using Veiculando.WhiteLabel.Api.Services;
 
@@ -27,11 +28,13 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     {
         private readonly ITenantQueries _tenant;
         private readonly IWlUploadStorage _storage;
+        private readonly VeiculandoDataContext _db;
 
-        public AppInventoryController(ITenantQueries tenant, IWlUploadStorage storage)
+        public AppInventoryController(ITenantQueries tenant, IWlUploadStorage storage, VeiculandoDataContext db)
         {
             _tenant = tenant;
             _storage = storage;
+            _db = db;
         }
 
         /// <summary>
@@ -42,6 +45,12 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         public async Task<IActionResult> Filters()
         {
             var pecas = await PecasAtivasAsync();
+            var tipos = pecas.Select(p => p.PeriodicidadePadrao.Tipo).Distinct().ToArray();
+            var now = DateTime.UtcNow;
+            var periodos = await _db.Periodos.AsNoTracking()
+                .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo && p.DataFim >= now)
+                .OrderBy(p => p.DataInicio)
+                .ToListAsync();
             return Ok(new
             {
                 mediaTypes = pecas.Select(p => p.Suporte?.Nome)
@@ -54,6 +63,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     .GroupBy(c => (c.name, c.state))
                     .Select(g => new { g.Key.name, g.Key.state })
                     .OrderBy(c => c.name)
+                    .ToList(),
+                periods = periodos.Where(p => tipos.Contains(p.Periodicidade.Tipo))
+                    .Select(p => new { code = p.Codigo, name = p.Nome, periodicity = p.Periodicidade.Nome, startDate = p.DataInicio, endDate = p.DataFim })
                     .ToList()
             });
         }
@@ -64,8 +76,17 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             [FromQuery] string city,
             [FromQuery] string mediaType,
             [FromQuery] decimal? minPrice,
-            [FromQuery] decimal? maxPrice)
+            [FromQuery] decimal? maxPrice,
+            [FromQuery] string periodCode)
         {
+            Periodo periodo = null;
+            if (!string.IsNullOrWhiteSpace(periodCode))
+            {
+                var now = DateTime.UtcNow;
+                periodo = await _db.Periodos.AsNoTracking().FirstOrDefaultAsync(p =>
+                    p.Codigo == periodCode && p.StatusExibicao == StatusExibicaoEnum.Ativo && p.DataFim >= now);
+                if (periodo == null) return BadRequest(new { message = "Período inválido ou encerrado." });
+            }
             var pecas = await PecasAtivasAsync();
             // A propriedade Query de um DTO chamado `query` colide com o prefixo
             // do model binder: ?query=Paulista chegava como filtro vazio.
@@ -74,9 +95,13 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 Query = term, City = city, MediaType = mediaType,
                 MinPrice = minPrice, MaxPrice = maxPrice
             };
-            var resultado = AplicarFiltros(pecas, filtros)
-                .Select(Mapear)
+            var filtradas = AplicarFiltros(pecas, filtros)
+                .Where(p => periodo == null || p.PeriodicidadePadrao.Tipo == periodo.Periodicidade.Tipo)
                 .ToList();
+            var indisponiveis = periodo == null ? new HashSet<int>() : new HashSet<int>(await _tenant.PecaPeriodoStatus
+                .Where(s => s.IdPeriodo == periodo.Id && s.Status != StatusPecaPeriodoEnum.Disponivel)
+                .Select(s => s.IdPeca).ToListAsync());
+            var resultado = filtradas.Select(p => Mapear(p, !indisponiveis.Contains(p.Id))).ToList();
             return Ok(resultado);
         }
 
@@ -144,7 +169,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         private static bool Contem(string valor, string termo) =>
             !string.IsNullOrWhiteSpace(valor) && valor.IndexOf(termo, StringComparison.OrdinalIgnoreCase) >= 0;
 
-        private static object Mapear(Peca peca)
+        private static object Mapear(Peca peca, bool disponivel = true)
         {
             var local = peca.Local;
             return new
@@ -170,7 +195,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 cpm = peca.CPM > 0 ? (decimal?)peca.CPM : null,
                 // "available" aqui significa que o item está publicado no catálogo.
                 // A disponibilidade temporal é revalidada ao cotar/finalizar o pedido.
-                available = true,
+                available = disponivel,
                 illuminated = peca.Iluminacao,
                 viewAngle = peca.AnguloDeVisao,
                 permit = peca.Alvara,
