@@ -34,6 +34,30 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             _storage = storage;
         }
 
+        /// <summary>
+        /// Opções estáveis dos filtros, sempre derivadas do catálogo inteiro da
+        /// exibidora. Uma busca sem resultados não deve apagar os tipos de mídia.
+        /// </summary>
+        [HttpGet("filters")]
+        public async Task<IActionResult> Filters()
+        {
+            var pecas = await PecasAtivasAsync();
+            return Ok(new
+            {
+                mediaTypes = pecas.Select(p => p.Suporte?.Nome)
+                    .Where(nome => !string.IsNullOrWhiteSpace(nome))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(nome => nome)
+                    .ToList(),
+                cities = pecas.Select(p => new { name = p.Local?.Cidade?.Nome, state = p.Local?.Cidade?.Estado?.Sigla })
+                    .Where(c => !string.IsNullOrWhiteSpace(c.name))
+                    .GroupBy(c => (c.name, c.state))
+                    .Select(g => new { g.Key.name, g.Key.state })
+                    .OrderBy(c => c.name)
+                    .ToList()
+            });
+        }
+
         [HttpGet]
         public async Task<IActionResult> Search(
             [FromQuery(Name = "query")] string term,

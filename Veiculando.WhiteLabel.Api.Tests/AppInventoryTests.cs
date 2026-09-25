@@ -39,6 +39,9 @@ namespace Veiculando.WhiteLabel.Api.Tests
             var semCorrespondencia = await client.GetFromJsonAsync<InventoryItem[]>("/api/wl/app/inventory?query=nenhuma-peca-assim");
             semCorrespondencia.Should().BeEmpty("o termo digitado deve chegar ao filtro do servidor");
 
+            var filtros = await client.GetFromJsonAsync<InventoryFilters>("/api/wl/app/inventory/filters");
+            filtros.MediaTypes.Should().Contain("Outdoor", "as opções vêm do catálogo completo e não da busca atual");
+
             (await client.GetAsync("/api/wl/app/inventory/P-APP-822-A")).StatusCode.Should().Be(HttpStatusCode.NotFound);
             (await client.GetAsync("/api/wl/app/inventory/P-APP-821-A")).StatusCode.Should().Be(HttpStatusCode.OK);
         }
@@ -83,5 +86,6 @@ namespace Veiculando.WhiteLabel.Api.Tests
         }
 
         private sealed record InventoryItem(string Code, decimal Price, bool Available, string ImageUrl, decimal TablePrice, object Road);
+        private sealed record InventoryFilters(string[] MediaTypes);
     }
 }
