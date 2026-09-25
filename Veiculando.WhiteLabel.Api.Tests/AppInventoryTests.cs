@@ -81,6 +81,8 @@ END");
             var itens = await client.GetFromJsonAsync<InventoryItem[]>("/api/wl/app/inventory?periodCode=P-826-BI");
             itens.Should().ContainSingle(p => p.Code == "P-APP-826-A");
             (await client.GetAsync("/api/wl/app/inventory?periodCode=INVALIDO")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await client.GetAsync("/api/wl/app/inventory?gender=3")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await client.GetAsync("/api/wl/app/inventory?ageRangeIds=1,abc")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
         }
 
         [Fact]

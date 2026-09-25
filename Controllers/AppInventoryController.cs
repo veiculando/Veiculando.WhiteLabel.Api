@@ -51,6 +51,12 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo && p.DataFim >= now)
                 .OrderBy(p => p.DataInicio)
                 .ToListAsync();
+            var idades = await _db.FaixaEtaria.AsNoTracking().OrderBy(x => x.Minimo)
+                .Select(x => new { id = x.Id, name = x.Nome }).ToListAsync();
+            var rendas = await _db.FaixaRenda.AsNoTracking().OrderBy(x => x.Minimo)
+                .Select(x => new { id = x.Id, name = x.Nome }).ToListAsync();
+            var perfis = await _db.PerfilPsicografico.AsNoTracking().OrderBy(x => x.Nome)
+                .Select(x => new { id = x.Id, name = x.Nome }).ToListAsync();
             return Ok(new
             {
                 mediaTypes = pecas.Select(p => p.Suporte?.Nome)
@@ -66,7 +72,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     .ToList(),
                 periods = periodos.Where(p => tipos.Contains(p.Periodicidade.Tipo))
                     .Select(p => new { code = p.Codigo, name = p.Nome, periodicity = p.Periodicidade.Nome, startDate = p.DataInicio, endDate = p.DataFim })
-                    .ToList()
+                    .ToList(),
+                audience = new { ageRanges = idades, incomeRanges = rendas, psychographicProfiles = perfis }
             });
         }
 
@@ -77,8 +84,17 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             [FromQuery] string mediaType,
             [FromQuery] decimal? minPrice,
             [FromQuery] decimal? maxPrice,
-            [FromQuery] string periodCode)
+            [FromQuery] string periodCode,
+            [FromQuery] int? gender,
+            [FromQuery] string ageRangeIds,
+            [FromQuery] string incomeRangeIds,
+            [FromQuery] string psychographicIds)
         {
+            if (gender.HasValue && gender.Value != 1 && gender.Value != 2)
+                return BadRequest(new { message = "Gênero inválido." });
+            if (!TryIds(ageRangeIds, out var idades) || !TryIds(incomeRangeIds, out var rendas) ||
+                !TryIds(psychographicIds, out var perfis))
+                return BadRequest(new { message = "Filtro de público inválido." });
             Periodo periodo = null;
             if (!string.IsNullOrWhiteSpace(periodCode))
             {
@@ -87,7 +103,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     p.Codigo == periodCode && p.StatusExibicao == StatusExibicaoEnum.Ativo && p.DataFim >= now);
                 if (periodo == null) return BadRequest(new { message = "Período inválido ou encerrado." });
             }
-            var pecas = await PecasAtivasAsync();
+            var temPublico = gender.HasValue || idades.Length > 0 || rendas.Length > 0 || perfis.Length > 0;
+            var pecas = await PecasAtivasAsync(temPublico);
             // A propriedade Query de um DTO chamado `query` colide com o prefixo
             // do model binder: ?query=Paulista chegava como filtro vazio.
             var filtros = new InventorySearchQuery
@@ -101,7 +118,10 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var indisponiveis = periodo == null ? new HashSet<int>() : new HashSet<int>(await _tenant.PecaPeriodoStatus
                 .Where(s => s.IdPeriodo == periodo.Id && s.Status != StatusPecaPeriodoEnum.Disponivel)
                 .Select(s => s.IdPeca).ToListAsync());
-            var resultado = filtradas.Select(p => Mapear(p, !indisponiveis.Contains(p.Id))).ToList();
+            var pontuacoes = filtradas.ToDictionary(p => p.Id, p => temPublico
+                ? p.Local.IndicePublicoAlvo(gender ?? 0, idades, rendas, perfis, Array.Empty<int>(), Array.Empty<int>()) : 0);
+            var resultado = filtradas.OrderByDescending(p => pontuacoes[p.Id])
+                .Select(p => Mapear(p, !indisponiveis.Contains(p.Id), pontuacoes[p.Id])).ToList();
             return Ok(resultado);
         }
 
@@ -139,16 +159,23 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             catch (StorageException ex) when (ex.RequestInformation?.HttpStatusCode == 404) { return NotFound(); }
         }
 
-        private Task<List<Peca>> PecasAtivasAsync() => _tenant.Pecas
-            .AsNoTracking()
-            .Include(p => p.Local)
-            .Include(p => p.Local.Cidade)
-            .Include(p => p.Local.Cidade.Estado)
-            .Include(p => p.Local.Publico)
-            .Include(p => p.Suporte)
-            .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo &&
-                        p.Local.StatusExibicao == StatusExibicaoEnum.Ativo)
-            .ToListAsync();
+        private Task<List<Peca>> PecasAtivasAsync(bool incluirPublico = false)
+        {
+            var query = _tenant.Pecas.AsNoTracking()
+                .Include(p => p.Local)
+                .Include(p => p.Local.Cidade)
+                .Include(p => p.Local.Cidade.Estado)
+                .Include(p => p.Local.Publico)
+                .Include(p => p.Suporte)
+                .Where(p => p.StatusExibicao == StatusExibicaoEnum.Ativo &&
+                            p.Local.StatusExibicao == StatusExibicaoEnum.Ativo);
+            if (incluirPublico)
+                query = query.Include(p => p.Local.Publico.DistribuicaoGenero)
+                    .Include(p => p.Local.Publico.DistribuicaoEtaria)
+                    .Include(p => p.Local.Publico.DistribuicaoRenda)
+                    .Include(p => p.Local.Publico.PerfisPsicograficos);
+            return query.ToListAsync();
+        }
 
         private static IEnumerable<Peca> AplicarFiltros(IEnumerable<Peca> pecas, InventorySearchQuery query)
         {
@@ -169,7 +196,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         private static bool Contem(string valor, string termo) =>
             !string.IsNullOrWhiteSpace(valor) && valor.IndexOf(termo, StringComparison.OrdinalIgnoreCase) >= 0;
 
-        private static object Mapear(Peca peca, bool disponivel = true)
+        private static object Mapear(Peca peca, bool disponivel = true, int audienciaMatch = 0)
         {
             var local = peca.Local;
             return new
@@ -190,6 +217,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 periodicity = peca.PeriodicidadePadrao?.Nome,
                 imageUrl = HasWhiteLabelPhoto(peca) ? $"/api/wl/app/inventory/{Uri.EscapeDataString(peca.Codigo)}/photo" : null,
                 audience = local?.Publico?.Audiencia,
+                audienceMatch = audienciaMatch,
                 rating = peca.AvaliacaoQuantidade > 0 ? (decimal?)peca.AvaliacaoMedia : null,
                 ratingCount = peca.AvaliacaoQuantidade,
                 cpm = peca.CPM > 0 ? (decimal?)peca.CPM : null,
@@ -213,6 +241,22 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         private static bool HasWhiteLabelPhoto(Peca peca) =>
             !string.IsNullOrEmpty(peca.Foto?.ArquivoNome) &&
             Regex.IsMatch(peca.Foto.ArquivoNome, @"^wl-[a-f0-9]{32}\.(jpg|png)$", RegexOptions.CultureInvariant);
+
+        private static bool TryIds(string raw, out int[] ids)
+        {
+            ids = Array.Empty<int>();
+            if (string.IsNullOrWhiteSpace(raw)) return true;
+            var parts = raw.Split(',');
+            if (parts.Length > 20) return false;
+            var values = new List<int>();
+            foreach (var part in parts)
+            {
+                if (!int.TryParse(part, out var id) || id <= 0) return false;
+                values.Add(id);
+            }
+            ids = values.Distinct().ToArray();
+            return true;
+        }
 
         public sealed class InventorySearchQuery
         {
