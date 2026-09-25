@@ -149,6 +149,18 @@ IF NOT EXISTS (SELECT 1 FROM PerfilUsuario WHERE Codigo = 'UsuarioAnunciante')
         (await reviewer.PostAsync($"/api/wl/kyc/app/{onboarding.Id}/review", null)).StatusCode.Should().Be(HttpStatusCode.OK);
         var approved = await reviewer.PostAsync($"/api/wl/kyc/app/{onboarding.Id}/approve", null);
         approved.StatusCode.Should().Be(HttpStatusCode.OK, await approved.Content.ReadAsStringAsync());
+        (await applicant.PostAsync($"/api/wl/kyc/app/{onboarding.Id}/approve", null)).StatusCode
+            .Should().Be(HttpStatusCode.Forbidden, "o solicitante não pode aprovar o próprio KYC");
+        await Seed.AfiliadaAsync(899);
+        await Seed.OperadorAsync(899, "revisor-899@exemplo.com", new[] { "ClienteGerenciar" });
+        using (var otherFactory = new WlApiFactory(_db, 899))
+        using (var otherReviewer = await otherFactory.ClienteAutenticadoAsync("revisor-899@exemplo.com", Seed.SenhaPadrao))
+        {
+            (await otherReviewer.GetAsync($"/api/wl/kyc/app/{onboarding.Id}")).StatusCode
+                .Should().Be(HttpStatusCode.NotFound, "outro tenant não pode ler o cadastro");
+            (await otherReviewer.PostAsync($"/api/wl/kyc/app/{onboarding.Id}/approve", null)).StatusCode
+                .Should().Be(HttpStatusCode.NotFound, "outro tenant não pode decidir o KYC");
+        }
 
         using var verify = new VeiculandoDataContext();
         var agency = await verify.Agencias.SingleAsync(a => a.Cnpj.Numero == cnpj);
