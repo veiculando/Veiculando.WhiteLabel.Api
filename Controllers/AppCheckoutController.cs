@@ -57,7 +57,7 @@ public sealed class AppCheckoutController : ControllerBase
         if (onboarding?.Status != WlAppKycStatus.Aprovado || string.IsNullOrWhiteSpace(onboarding.Documento))
             return StatusCode(403, new { message = "O cadastro deve estar aprovado para cotar." });
 
-        var campaign = await EligibleCampaign(onboarding.Documento, request.CampaignId).SingleOrDefaultAsync(ct);
+        var campaign = await EligibleCampaign(onboarding, buyer, request.CampaignId).SingleOrDefaultAsync(ct);
         if (campaign == null) return NotFound(new { message = "Campanha não encontrada para este anunciante e exibidora." });
         if (campaign.AnuncianteResponsavel?.Agencia == null)
             return Conflict(new { message = "A campanha não possui responsável comercial habilitado para pedidos." });
@@ -143,7 +143,9 @@ public sealed class AppCheckoutController : ControllerBase
             o.UsuarioId == userId && o.AfiliadaId == _tenant.AfiliadaId, ct);
         if (onboarding?.Status != WlAppKycStatus.Aprovado || string.IsNullOrWhiteSpace(onboarding.Documento))
             return StatusCode(403, new { message = "O cadastro deve estar aprovado para fechar o pedido." });
-        var campaign = await EligibleCampaign(onboarding.Documento, quote.CampanhaId).SingleOrDefaultAsync(ct);
+        var buyer = await _tenant.UsuariosAnunciante.AsNoTracking().SingleOrDefaultAsync(u => u.Id == userId, ct);
+        if (buyer == null) return Unauthorized();
+        var campaign = await EligibleCampaign(onboarding, buyer, quote.CampanhaId).SingleOrDefaultAsync(ct);
         if (campaign?.AnuncianteResponsavel?.Agencia == null)
             return Conflict(new { message = "Campanha ou responsável comercial indisponível." });
         var period = await _db.Periodos.SingleOrDefaultAsync(p =>
@@ -210,15 +212,35 @@ public sealed class AppCheckoutController : ControllerBase
         return Content(receipt, "application/json");
     }
 
-    internal IQueryable<Campanha> EligibleCampaign(string document, int campaignId) => _db.Campanhas
-        .Include(c => c.Cliente)
-        .Include(c => c.Agencia.ContratosCliente)
+    internal IQueryable<Campanha> EligibleCampaign(WlAppOnboarding onboarding, WlUsuarioAnunciante buyer, int campaignId)
+    {
+        var query = _db.Campanhas
+        .Include(c => c.Cliente).Include(c => c.Agencia.ContratosCliente)
         .Include(c => c.AnuncianteResponsavel.Agencia)
         .Where(c => c.Id == campaignId && c.StatusExibicao == StatusExibicaoEnum.Ativo &&
             c.Status != StatusCampanhaEnum.Cancelada && c.Status != StatusCampanhaEnum.Aprovada &&
-            c.Cliente.Cnpj.Numero == document &&
             c.Cliente.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId &&
                 v.Status == StatusVinculoEnum.Ativo));
+        if (onboarding.TipoConta == "ad" && buyer.ClienteId.HasValue && buyer.AgenciaId.HasValue)
+            return query.Where(c => c.IdCliente == buyer.ClienteId.Value && c.IdAgencia == buyer.AgenciaId.Value &&
+                c.AnuncianteResponsavel.Email.Endereco == buyer.Email.Endereco &&
+                c.Agencia.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId &&
+                    v.Status == StatusVinculoEnum.Ativo) &&
+                c.Agencia.ContratosCliente.Any(link => link.IdCliente == c.IdCliente &&
+                    link.StatusExibicao == StatusExibicaoEnum.Ativo &&
+                    link.DataInicioContrato <= DateTime.UtcNow && link.DataExpiracaoContrato >= DateTime.UtcNow));
+        if (onboarding.TipoConta == "ag" && buyer.AgenciaId.HasValue)
+            return query.Where(c => c.IdAgencia == buyer.AgenciaId.Value &&
+                c.AnuncianteResponsavel.Email.Endereco == buyer.Email.Endereco &&
+                c.Agencia.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId &&
+                    v.Status == StatusVinculoEnum.Ativo) &&
+                c.Agencia.ContratosCliente.Any(link => link.IdCliente == c.IdCliente &&
+                    link.StatusExibicao == StatusExibicaoEnum.Ativo &&
+                    link.DataInicioContrato <= DateTime.UtcNow && link.DataExpiracaoContrato >= DateTime.UtcNow));
+        if (onboarding.TipoConta == "pj")
+            return query.Where(c => c.Cliente.Cnpj.Numero == onboarding.Documento);
+        return query.Where(c => false);
+    }
 
     internal IQueryable<Peca> ActivePieces(int[] ids) => _tenant.Pecas
         .Include(p => p.Local.Cidade)
