@@ -86,6 +86,20 @@ public sealed class AppRegistrationTests
         factory.EmailSender.Codigos.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Falha_no_envio_do_codigo_nao_pode_ser_apresentada_como_cadastro_entregue()
+    {
+        const string email = "cadastro-855@exemplo.com";
+        using var factory = new WlApiFactory(_db, 855);
+        factory.EmailSender.FalharProximoEnvio = true;
+        using var client = factory.ClienteAnonimo();
+        var response = await client.PostAsJsonAsync("/api/wl/app/auth/register", Registration(email));
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        using var db = new VeiculandoDataContext();
+        var identity = await db.WlAppIdentidades.SingleAsync(i => i.Usuario.Email.Endereco == email && i.Usuario.AfiliadaId == 855);
+        identity.CodigoHash.Should().BeNull("um código não entregue não pode confirmar a conta");
+    }
+
     private static RegistrationBody Registration(string email) => new("Pessoa de Teste", email, "SenhaSegura850", "11987654321", true, "1.0", "1.0");
     private sealed record RegistrationBody(string Name, string Email, string Password, string Phone, bool AcceptedTerms, string TermsVersion, string PrivacyVersion);
     private sealed record Session(string Token);

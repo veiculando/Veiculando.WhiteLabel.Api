@@ -62,7 +62,8 @@ public sealed partial class AppAuthController
         _db.WlUsuariosAnunciante.Add(user); _db.WlAppIdentidades.Add(identity);
         try { await _db.SaveChangesAsync(ct); }
         catch (DbUpdateException error) when (DuplicateEmail(error)) { return Ok(RegistrationResponse); }
-        await EnviarCodigoAsync(identity, code, ct);
+        if (!await EnviarCodigoAsync(identity, code, ct))
+            return StatusCode(503, new { message = "Não foi possível enviar o código agora. Tente reenviar em instantes." });
         _logger.LogInformation("WL_APP_REGISTER tenant={Tenant} actor={Actor}", _tenant.AfiliadaId, user.Id);
         return Ok(RegistrationResponse);
     }
@@ -101,17 +102,19 @@ public sealed partial class AppAuthController
         return Ok(RegistrationResponse);
     }
 
-    private async Task EnviarCodigoAsync(WlAppIdentidade identity, string code, CancellationToken ct)
+    private async Task<bool> EnviarCodigoAsync(WlAppIdentidade identity, string code, CancellationToken ct)
     {
         try
         {
             var brand = await _tenantResolver.ObterBrandingAsync(_tenant.AfiliadaId);
             await _appEmailSender.ConfirmacaoAsync(identity.Usuario.Email.Endereco, brand?.NomeExibicao ?? "Veiculando", code, ct);
+            return true;
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
             identity.InvalidarCodigo(); await _db.SaveChangesAsync(ct);
             _logger.LogError(error, "WL_APP_EMAIL_SEND_FAILED tenant={Tenant} actor={Actor}", _tenant.AfiliadaId, identity.Id);
+            return false;
         }
     }
 

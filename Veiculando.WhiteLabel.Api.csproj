@@ -10,6 +10,7 @@
          exclusao os arquivos de teste seriam compilados DENTRO da API, que
          passaria a depender de xUnit e Testcontainers em runtime. -->
     <DefaultItemExcludes>$(DefaultItemExcludes);obj\**;Veiculando.WhiteLabel.Api.Tests\**</DefaultItemExcludes>
+    <CoreProjectRoot Condition="'$(CoreProjectRoot)' == ''">..\Veiculando</CoreProjectRoot>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,9 +29,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Veiculando\Veiculando.Data\Veiculando.Data.csproj" />
-    <ProjectReference Include="..\Veiculando\Veiculando.Infra.Security\Veiculando.Infra.Security.csproj" />
-    <ProjectReference Include="..\Veiculando\Veiculando.Infra\Veiculando.Infra.csproj" />
+    <ProjectReference Include="$(CoreProjectRoot)\Veiculando.Data\Veiculando.Data.csproj" />
+    <ProjectReference Include="$(CoreProjectRoot)\Veiculando.Infra.Security\Veiculando.Infra.Security.csproj" />
+    <ProjectReference Include="$(CoreProjectRoot)\Veiculando.Infra\Veiculando.Infra.csproj" />
   </ItemGroup>
 
 </Project>
