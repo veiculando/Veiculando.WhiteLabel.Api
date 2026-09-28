@@ -22,6 +22,8 @@ namespace Veiculando.WhiteLabel.Api.Services
         Task<CoreRespostaCadastro> VincularAnuncianteAsync(int idCliente, int? wlUsuarioId);
         Task<CoreRespostaCadastro> SalvarAgenciaAsync(AgenciaCadastroCommand command, int? wlUsuarioId);
         Task<CoreRespostaCadastro> VincularAgenciaAsync(int idAgencia, int? wlUsuarioId);
+        Task<CoreRespostaCadastro> AlterarValoresPecasAsync(PecaAlterarValoresCommand command);
+        Task<CoreRespostaCadastro> AlterarValoresSazonaisPecasAsync(PecaAlterarValoresSazonaisCommand command);
     }
 
     /// <summary>
@@ -228,6 +230,36 @@ namespace Veiculando.WhiteLabel.Api.Services
             if (command == null) throw new ArgumentNullException(nameof(command));
 
             return EnviarAsync("api/pedido-reserva/resposta", command);
+        }
+
+        /// <summary>
+        /// Encaminha a alteração de valor padrão em lote ao core.
+        /// </summary>
+        /// <remarks>
+        /// <c>IdUsuario = 0</c> pelo mesmo motivo de <see cref="SalvarLocalAsync"/>: o
+        /// <c>PecaController.Post</c> do core sobrescreve com o id da conta de
+        /// serviço (<c>command.IdUsuario = UserId</c>) antes de chamar o handler —
+        /// o que for enviado aqui é irrelevante. A validação de que todas as
+        /// peças pertencem à afiliada da instância é feita ANTES desta chamada,
+        /// pelo controller (<c>PecasValoresController</c>): o handler do core, ao
+        /// encontrar uma peça de outra afiliada no meio do lote, para no meio —
+        /// as peças já processadas antes dela na lista já teriam sido gravadas.
+        /// </remarks>
+        public Task<CoreRespostaCadastro> AlterarValoresPecasAsync(PecaAlterarValoresCommand command)
+        {
+            if (command == null) throw new ArgumentNullException(nameof(command));
+
+            command.IdUsuario = 0;
+            return EnviarAsync("api/peca/alterar-valor-padrao", command);
+        }
+
+        /// <summary>Encaminha a alteração de valores sazonais em lote ao core.</summary>
+        public Task<CoreRespostaCadastro> AlterarValoresSazonaisPecasAsync(PecaAlterarValoresSazonaisCommand command)
+        {
+            if (command == null) throw new ArgumentNullException(nameof(command));
+
+            command.IdUsuario = 0;
+            return EnviarAsync("api/peca/alterar-valores-sazonais", command);
         }
 
         private async Task<CoreRespostaCadastro> EnviarAsync(string rota, object command)
