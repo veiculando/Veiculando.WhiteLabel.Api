@@ -131,4 +131,6 @@
 # integracao, que e o que torna o build reproduzivel depois que a sprint fecha.
 # ---------------------------------------------------------------------------
 # Sprint 11: merge do PR Core #198 (identidade comercial apos aprovacao KYC).
-93601c0dbf21245bf57ff6c73863a658974c825d
+# Corrige a autoria da politica de cadastro: o BFF agora usa o operador WL
+# real, e a migration preserva o historico legado sem colisao de IDs.
+e7b4cb6089be8e255ef290d95f02338a9bc6baf9

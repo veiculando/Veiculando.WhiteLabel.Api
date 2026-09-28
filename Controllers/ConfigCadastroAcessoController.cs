@@ -75,7 +75,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     h.ValorAnterior,
                     h.ValorNovo,
                     h.DataHora,
-                    Usuario = h.Usuario == null ? null : h.Usuario.Nome
+                    Usuario = h.NomeOperador ?? (h.Usuario == null ? null : h.Usuario.Nome)
                 })
                 .ToListAsync(ct);
 
@@ -113,8 +113,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (operadorId == null)
                 return Unauthorized();
 
-            var usuario = await _db.Usuarios.FirstOrDefaultAsync(u => u.Id == operadorId.Value, ct);
-            if (usuario == null)
+            var operador = await _db.WlUsuariosAfiliada
+                .FirstOrDefaultAsync(u => u.Id == operadorId.Value && u.AfiliadaId == _tenant.AfiliadaId, ct);
+            if (operador == null)
                 return Unauthorized();
 
             var afiliada = await _db.Afiliadas.FirstOrDefaultAsync(a => a.Id == _tenant.AfiliadaId, ct);
@@ -129,7 +130,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
                 if (config == null)
                 {
-                    config = new AfiliadaConfiguracao(afiliada, usuario);
+                    config = new AfiliadaConfiguracao(afiliada);
                     if (!config.IsValid())
                     {
                         transacao.Rollback();
@@ -150,7 +151,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                         WlPoliticaEmailCorporativo.CampoExigirEmailCorporativo,
                         anterior ? "Ativo" : "Inativo",
                         novo ? "Ativo" : "Inativo",
-                        usuario);
+                        operador);
 
                     if (!registro.IsValid())
                     {
