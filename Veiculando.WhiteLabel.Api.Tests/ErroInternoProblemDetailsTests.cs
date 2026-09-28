@@ -23,7 +23,8 @@ namespace Veiculando.WhiteLabel.Api.Tests;
 /// </summary>
 public class ErroInternoProblemDetailsTests
 {
-    private const string TokenSecreto = "eyJhbGciOiJIUzI1NiJ9.segredo-do-teste.assinatura";
+    // Formato de JWT, montado em runtime para não parecer credencial a scanners.
+    private static readonly string TokenSecreto = string.Join(".", "eyJ" + new string('t', 12), "corpo", "assinatura");
 
     [Fact]
     public async Task Excecao_nao_tratada_vira_500_com_traceId_que_casa_com_o_log()
