@@ -141,6 +141,10 @@ namespace Veiculando.WhiteLabel.Api
                 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Veiculando.WhiteLabel.Api v1"));
             }
 
+            // Primeiro da cadeia: um 500 vindo do TenantMiddleware ou do
+            // binding de sessão também precisa sair com traceId (VEI-RD-102).
+            app.UseMiddleware<Veiculando.WhiteLabel.Api.Middleware.ErroInternoMiddleware>();
+
             app.UseForwardedHeaders();
             // Liveness do processo: não depende de Host/tenant nem consulta dados.
             // Mantém as rotas de negócio atrás da resolução e autorização usuais.
