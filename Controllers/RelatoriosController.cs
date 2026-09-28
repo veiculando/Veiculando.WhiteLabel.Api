@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Veiculando.Data.Contexts;
 using Veiculando.Domain.Enums;
 using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
@@ -41,17 +42,32 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     {
         private readonly ITenantQueries _tenant;
         private readonly IReceitaService _receita;
+        private readonly VeiculandoDataContext _db;
 
-        public RelatoriosController(ITenantQueries tenant, IReceitaService receita)
+        public RelatoriosController(ITenantQueries tenant, IReceitaService receita, VeiculandoDataContext db)
         {
             _tenant = tenant;
             _receita = receita;
+            _db = db;
         }
+
+        /// <summary>
+        /// Período desconhecido é 404, não um resumo zerado: zeros para um Id que
+        /// não existe seriam lidos como "não faturou nada" (R$ 0,00 falso).
+        /// </summary>
+        private Task<bool> PeriodoExisteAsync(int periodoId) =>
+            _db.Periodos.AsNoTracking().AnyAsync(p => p.Id == periodoId && p.StatusExibicao == StatusExibicaoEnum.Ativo);
+
+        private static IActionResult PeriodoNaoEncontrado() =>
+            new NotFoundObjectResult(new { message = "Período não encontrado." });
 
         /// <summary>Resumo financeiro e operacional do período, agregado no servidor.</summary>
         [HttpGet("resumo")]
         public async Task<IActionResult> GetResumo([FromQuery] int periodoId)
         {
+            if (!await PeriodoExisteAsync(periodoId))
+                return PeriodoNaoEncontrado();
+
             var pisDoPeriodo = _tenant.PedidosInsercao
                 .AsNoTracking()
                 .Where(pi => pi.StatusExibicao == StatusExibicaoEnum.Ativo
@@ -117,6 +133,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [Authorize(Policy = AuthorizationSetup.RelatorioExportar)]
         public async Task<IActionResult> Exportar([FromQuery] int periodoId)
         {
+            if (!await PeriodoExisteAsync(periodoId))
+                return PeriodoNaoEncontrado();
+
             var pis = await _tenant.PedidosInsercao
                 .AsNoTracking()
                 .Where(pi => pi.StatusExibicao == StatusExibicaoEnum.Ativo
