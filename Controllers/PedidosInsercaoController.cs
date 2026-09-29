@@ -70,6 +70,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             [FromQuery] string status,
             [FromQuery] int? idPeriodoInicial,
             [FromQuery] int? idPeriodoFinal,
+            [FromQuery] int? periodoId,
             [FromQuery] WlPaginaRequest pagina)
         {
             var (page, pageSize) = WlPaginacao.Normalizar(pagina);
@@ -157,6 +158,15 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 }
             }
 
+            // Filtro "Período" da barra (Figma 154:7083, D8): um período comercial
+            // exato, não um intervalo. A PI entra se ALGUM item for desse período.
+            // Id desconhecido devolve lista vazia — o período é global, não há
+            // o que vazar entre afiliadas.
+            if (periodoId.HasValue)
+            {
+                query = query.Where(pi => pi.Itens.Any(i => i.PedidoItem.Periodo.Id == periodoId.Value));
+            }
+
             var total = await query.CountAsync();
 
             // Resumo (VEI-RD-94): sobre o MESMO `query` filtrado, antes de
@@ -221,19 +231,43 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 })
                 .ToListAsync();
 
-            var pis = brutos
-                .Select(pi => new
+            // Cidade e Período (D8) saem dos itens, e uma PI pode ter itens de
+            // mais de uma cidade e de mais de um período. Segunda query só sobre
+            // as PIs da página: o Periodo.Nome é calculado em memória (depende de
+            // Periodicidade), então o Periodo precisa vir materializado.
+            var idsPagina = brutos.Select(pi => pi.Id).ToList();
+            var itensPagina = await _tenant.PedidosInsercao
+                .Where(pi => idsPagina.Contains(pi.Id))
+                .SelectMany(pi => pi.Itens.Select(i => new
                 {
-                    pi.Id,
-                    pi.Codigo,
-                    pi.DataCadastro,
-                    pi.DataPedido,
-                    Status = pi.Status.ToString(),
-                    pi.Campanha,
-                    Agencia = pi.Agencia ?? AgenciaVendaDiretaProvisionamento.NomeFantasia,
-                    pi.Anunciante,
-                    pi.ValorLiquidoVeiculacao,
-                    pi.ItensCount,
+                    PiId = pi.Id,
+                    Cidade = i.PedidoItem.Peca.Local.Cidade.Nome,
+                    i.PedidoItem.Periodo
+                }))
+                .ToListAsync();
+            var itensPorPi = itensPagina.ToLookup(i => i.PiId);
+
+            var pis = brutos
+                .Select(pi =>
+                {
+                    var itensDaPi = itensPorPi[pi.Id].ToList();
+                    var cidades = WlResumoItens.Cidades(itensDaPi.Select(i => i.Cidade));
+                    return new
+                    {
+                        pi.Id,
+                        pi.Codigo,
+                        pi.DataCadastro,
+                        pi.DataPedido,
+                        Status = pi.Status.ToString(),
+                        pi.Campanha,
+                        Agencia = pi.Agencia ?? AgenciaVendaDiretaProvisionamento.NomeFantasia,
+                        pi.Anunciante,
+                        pi.ValorLiquidoVeiculacao,
+                        pi.ItensCount,
+                        Cidade = cidades.Nome,
+                        QtdCidades = cidades.Quantidade,
+                        Periodo = WlResumoItens.Periodos(itensDaPi.Select(i => i.Periodo)),
+                    };
                 })
                 .ToList();
 
