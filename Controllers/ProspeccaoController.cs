@@ -1,10 +1,17 @@
 using System;
+using System.Collections.Generic;
+using System.Data.Entity;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Veiculando.Data.Contexts;
+using Veiculando.Domain.Entities.WhiteLabel;
 using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
 using Veiculando.WhiteLabel.Api.Services;
@@ -47,6 +54,13 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     /// Um store compartilhado (tabela ou cache distribuído) resolve, e é mudança de
     /// schema — território de outro card. Registrado como pendência, não escondido:
     /// o TTL curto limita a janela, mas não a fecha.</para>
+    ///
+    /// <para><b>Auditoria (cenário 7).</b> Cada emissão grava um evento em
+    /// <c>WL_ProspeccaoSessaoEvento</c>, tabela append-only. O resgate e os pedidos
+    /// criados na sessão gravam os seus eventos no mesmo jti, e
+    /// <c>GET auditoria</c> junta tudo por sessão. O índice único (Jti, Evento) da
+    /// tabela também fecha a limitação acima: um segundo resgate do mesmo jti é
+    /// recusado pelo banco, em qualquer réplica.</para>
     /// </remarks>
     [ApiController]
     [Route("api/wl/prospeccao")]
@@ -55,17 +69,22 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     {
         private const int TtlPadraoSegundos = 120;
 
+        private const int LimiteAuditoria = 100;
+
+        private readonly VeiculandoDataContext _db;
         private readonly IWlLinkTemporario _links;
         private readonly ITenantQueries _tenant;
         private readonly IConfiguration _config;
         private readonly ILogger<ProspeccaoController> _logger;
 
         public ProspeccaoController(
+            VeiculandoDataContext db,
             IWlLinkTemporario links,
             ITenantQueries tenant,
             IConfiguration config,
             ILogger<ProspeccaoController> logger)
         {
+            _db = db;
             _links = links;
             _tenant = tenant;
             _config = config;
@@ -84,11 +103,13 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// no log de qualquer proxy no caminho — o card é explícito: não persistir na
         /// URL. O App WL recebe a URL e apresenta o token por outro meio.</para>
         ///
-        /// <para>O log registra quem abriu, quando e para qual cliente — nunca o token.</para>
+        /// <para>O log registra quem abriu, quando e para qual cliente — nunca o token.
+        /// A trilha consultável é gravada ANTES de o token sair: se a gravação falhar, a
+        /// sessão não é emitida. Sessão sem auditoria é exatamente o que o cenário 7 proíbe.</para>
         /// </remarks>
         [HttpPost("sessao")]
         [EnableRateLimiting(Startup.RateLimitEscrita)]
-        public IActionResult AbrirSessao([FromBody] ProspeccaoSessaoRequest request)
+        public async Task<IActionResult> AbrirSessao([FromBody] ProspeccaoSessaoRequest request, CancellationToken ct)
         {
             var operadorId = WlUsuarioId;
             if (operadorId == null)
@@ -112,6 +133,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 _tenant.AfiliadaId,
                 ttl);
 
+            _db.WlProspeccaoSessaoEventos.Add(WlProspeccaoSessaoEvento.Emitida(
+                token.Jti, _tenant.AfiliadaId, operadorId.Value, request?.AnuncianteId,
+                token.ExpiraEm.UtcDateTime.Subtract(ttl), token.ExpiraEm.UtcDateTime));
+            await _db.SaveChangesAsync(ct);
+
             _logger.LogInformation(
                 "WL_PROSPECCAO_SESSAO tenant={Tenant} operador={Operador} anunciante={Anunciante} expiraEm={ExpiraEm}",
                 _tenant.AfiliadaId, operadorId.Value, request?.AnuncianteId, token.ExpiraEm);
@@ -128,6 +154,82 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 FonteAgenciaId = _tenant.AfiliadaId,
                 FonteUsuarioId = operadorId.Value
             });
+        }
+
+        /// <summary>
+        /// Auditoria consultável das sessões de prospecção da exibidora (cenário 7):
+        /// quem abriu, quando, para qual cliente, quando foi usada e o que foi criado.
+        /// </summary>
+        /// <remarks>
+        /// Exige também <c>UsuarioAfiliadaGerenciar</c>: a trilha mostra sessões de
+        /// TODOS os operadores, então não basta poder abrir uma. Mais recentes primeiro,
+        /// limitadas às últimas <see cref="LimiteAuditoria"/> sessões.
+        /// </remarks>
+        [HttpGet("auditoria")]
+        [Authorize(Policy = AuthorizationSetup.UsuarioAfiliadaGerenciar)]
+        public async Task<IActionResult> Auditoria(CancellationToken ct)
+        {
+            var jtis = await _tenant.ProspeccaoEventos
+                .Where(e => e.Evento == WlProspeccaoEventoTipo.Emitida)
+                .OrderByDescending(e => e.EmitidaEm)
+                .Take(LimiteAuditoria)
+                .Select(e => e.Jti)
+                .ToListAsync(ct);
+
+            var eventos = await _tenant.ProspeccaoEventos
+                .Where(e => jtis.Contains(e.Jti))
+                .ToListAsync(ct);
+
+            var operadorIds = eventos.Select(e => e.OperadorId).Distinct().ToList();
+            var operadores = await _tenant.UsuariosAfiliada
+                .Where(u => operadorIds.Contains(u.Id))
+                .Select(u => new { u.Id, u.Nome, Email = u.Email.Endereco })
+                .ToListAsync(ct);
+
+            var anuncianteIds = eventos.Where(e => e.AnuncianteId.HasValue)
+                .Select(e => e.AnuncianteId.Value).Distinct().ToList();
+            var anunciantes = await _tenant.UsuariosAnunciante
+                .Where(u => anuncianteIds.Contains(u.Id))
+                .Select(u => new { u.Id, Email = u.Email.Endereco })
+                .ToListAsync(ct);
+
+            var sessoes = eventos
+                .GroupBy(e => e.Jti)
+                .Select(g =>
+                {
+                    var emissao = g.First(e => e.Evento == WlProspeccaoEventoTipo.Emitida);
+                    var resgate = g.FirstOrDefault(e => e.Evento == WlProspeccaoEventoTipo.Resgatada);
+                    var anuncianteId = resgate?.AnuncianteId ?? emissao.AnuncianteId;
+                    var operador = operadores.FirstOrDefault(o => o.Id == emissao.OperadorId);
+
+                    return new
+                    {
+                        Sessao = emissao.Jti,
+                        Operador = new { Id = emissao.OperadorId, operador?.Nome, operador?.Email },
+                        Anunciante = anuncianteId == null ? null : new
+                        {
+                            Id = anuncianteId.Value,
+                            anunciantes.FirstOrDefault(a => a.Id == anuncianteId.Value)?.Email
+                        },
+                        emissao.EmitidaEm,
+                        emissao.ExpiraEm,
+                        UsadaEm = resgate?.OcorridoEm,
+                        Pedidos = g.Where(e => e.Evento == WlProspeccaoEventoTipo.PedidoCriado)
+                            .OrderBy(e => e.OcorridoEm)
+                            .Select(e => new { CriadoEm = e.OcorridoEm, Codigos = LerCodigos(e.CodigosPedido) })
+                            .ToList()
+                    };
+                })
+                .OrderByDescending(s => s.EmitidaEm)
+                .ToList();
+
+            return Ok(new { itens = sessoes });
+        }
+
+        private static IReadOnlyList<string> LerCodigos(string json)
+        {
+            try { return System.Text.Json.JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>(); }
+            catch (System.Text.Json.JsonException) { return new List<string>(); }
         }
     }
 

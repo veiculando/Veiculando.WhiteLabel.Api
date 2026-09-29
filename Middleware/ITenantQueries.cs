@@ -106,6 +106,9 @@ namespace Veiculando.WhiteLabel.Api.Middleware
         /// <summary>Histórico append-only de alterações de configuração.</summary>
         IQueryable<AfiliadaConfiguracaoHistorico> ConfiguracaoHistorico { get; }
 
+        /// <summary>Trilha append-only da sessão de prospecção — VEI-RD-83, cenário 7.</summary>
+        IQueryable<WlProspeccaoSessaoEvento> ProspeccaoEventos { get; }
+
         /// <summary>Peças cujo local pertence à exibidora.</summary>
         IQueryable<Peca> Pecas { get; }
 
@@ -191,6 +194,9 @@ namespace Veiculando.WhiteLabel.Api.Middleware
 
         public IQueryable<AfiliadaConfiguracaoHistorico> ConfiguracaoHistorico =>
             _db.AfiliadaConfiguracaoHistoricos.Where(h => h.IdAfiliada == AfiliadaId);
+
+        public IQueryable<WlProspeccaoSessaoEvento> ProspeccaoEventos =>
+            _db.WlProspeccaoSessaoEventos.Where(e => e.AfiliadaId == AfiliadaId);
 
         // A peça não carrega IdAfiliada: ela pertence a um Local, e é por ele que
         // o recorte acontece. Repetir esse caminho em cada endpoint era uma das

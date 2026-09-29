@@ -199,6 +199,7 @@ public sealed class AppCheckoutController : ControllerBase
             acceptedAt = DateTime.UtcNow
         });
         _db.WlAppCheckoutSubmissions.Add(new WlAppCheckoutSubmission(quote, keyHash, receipt));
+        await AuditarPedidoDeProspeccaoAsync(orders, ct);
         await _db.SaveChangesAsync(ct);
         foreach (var available in status)
         {
@@ -288,6 +289,29 @@ public sealed class AppCheckoutController : ControllerBase
         if (actual == null || actual.Length != expected.Length) return false;
         try { return CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actual), Convert.FromHexString(expected)); }
         catch (FormatException) { return false; }
+    }
+
+    /// <summary>
+    /// Pedido fechado numa sessão de prospecção entra na trilha dela (VEI-RD-83,
+    /// cenário 7: "o que foi criado na sessão").
+    /// </summary>
+    /// <remarks>
+    /// Vai no mesmo SaveChanges dos pedidos: pedido sem trilha ou trilha sem pedido
+    /// não existem. A sessão é achada pelo <c>jti</c> do JWT do App, que é o
+    /// <c>WlAppSessao.Id</c> gravado no resgate.
+    /// </remarks>
+    private async Task AuditarPedidoDeProspeccaoAsync(IEnumerable<Pedido> orders, CancellationToken ct)
+    {
+        if (User.FindFirstValue("Prospeccao") != "true" ||
+            !Guid.TryParseExact(User.FindFirstValue("jti"), "N", out var sessaoId))
+            return;
+
+        var resgate = await _tenant.ProspeccaoEventos.AsNoTracking().SingleOrDefaultAsync(e =>
+            e.AppSessaoId == sessaoId && e.Evento == WlProspeccaoEventoTipo.Resgatada, ct);
+        if (resgate == null) return;
+
+        _db.WlProspeccaoSessaoEventos.Add(WlProspeccaoSessaoEvento.PedidoCriado(
+            resgate, JsonSerializer.Serialize(orders.Select(o => o.Codigo).ToArray())));
     }
 
     internal bool TryUser(out int id)

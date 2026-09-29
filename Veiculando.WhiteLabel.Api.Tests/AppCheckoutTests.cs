@@ -157,6 +157,55 @@ IF NOT EXISTS (SELECT 1 FROM dbo.AgenciaCliente WHERE IdAgencia = 1 AND IdClient
         }
     }
 
+    [Fact]
+    public async Task Pedido_fechado_em_sessao_de_prospeccao_entra_na_trilha_da_sessao()
+    {
+        // VEI-RD-83 cenário 7: "o que foi criado na sessão" consta na auditoria.
+        const int tenant = 893;
+        const string email = "checkout-prosp-893@exemplo.com";
+        var piece = await PrepareAsync(tenant, email, "P-CHK-893", 893);
+        await ApproveAsync(tenant, email);
+        const string admin = "prosp-admin-893@exemplo.com";
+        await Seed.OperadorAsync(tenant, admin, new[] { "PedidoCriar", "UsuarioAfiliadaGerenciar" });
+        int anuncianteId;
+        using (var lookup = new VeiculandoDataContext())
+            anuncianteId = (await lookup.WlUsuariosAnunciante
+                .SingleAsync(u => u.AfiliadaId == tenant && u.Email.Endereco == email)).Id;
+
+        using var factory = new WlApiFactory(_db, tenant);
+        using var operador = await factory.ClienteAutenticadoAsync(admin, Seed.SenhaPadrao);
+        var emissao = await operador.PostAsJsonAsync("/api/wl/prospeccao/sessao", new { anuncianteId });
+        emissao.StatusCode.Should().Be(HttpStatusCode.OK, await emissao.Content.ReadAsStringAsync());
+        var sessao = await emissao.Content.ReadFromJsonAsync<ProspeccaoResponse>();
+
+        using var client = factory.ClienteAnonimo();
+        var resgate = await client.PostAsJsonAsync("/api/wl/app/prospeccao/sessao",
+            new { Token = sessao.Token, OperadorId = sessao.FonteUsuarioId, AnuncianteId = anuncianteId });
+        resgate.StatusCode.Should().Be(HttpStatusCode.OK, await resgate.Content.ReadAsStringAsync());
+        var login = await resgate.Content.ReadFromJsonAsync<LoginResponse>();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        var quote = await (await client.PostAsJsonAsync("/api/wl/app/checkout/quote",
+            new { pieceIds = new[] { piece }, campaignId = 1, periodCode = "APP893" }))
+            .Content.ReadFromJsonAsync<QuoteResponse>();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", "checkout-893-prospeccao");
+        var order = await client.PostAsJsonAsync("/api/wl/app/checkout/orders",
+            new { quoteId = quote.QuoteId, termsAccepted = true, termsVersion = "aurum-v1" });
+        order.StatusCode.Should().Be(HttpStatusCode.OK, await order.Content.ReadAsStringAsync());
+
+        using var ctx = new VeiculandoDataContext();
+        var codigo = (await ctx.Pedidos.SingleAsync(p => p.IdCampanha == 1 && p.IdPeriodo == 893)).Codigo;
+        var trilha = await ctx.WlProspeccaoSessaoEventos
+            .Where(e => e.AfiliadaId == tenant && e.Evento == WlProspeccaoEventoTipo.PedidoCriado).ToListAsync();
+        trilha.Should().ContainSingle().Which.CodigosPedido.Should().Contain(codigo);
+
+        var auditoria = await operador.GetStringAsync("/api/wl/prospeccao/auditoria");
+        auditoria.Should().Contain(codigo);
+        auditoria.Should().NotContain(sessao.Token);
+    }
+
+    private sealed record ProspeccaoResponse(string Token, int FonteUsuarioId);
+
     private static async Task<int> PrepareAsync(int tenant, string email, string pieceCode, int periodId)
     {
         var local = await Seed.LocalAsync(tenant, $"CHK{tenant}");
