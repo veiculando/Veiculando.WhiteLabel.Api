@@ -108,6 +108,9 @@ public sealed class AppCheckoutTests
 
         using var ctx = new VeiculandoDataContext();
         (await ctx.Pedidos.CountAsync(p => p.IdCampanha == 1 && p.IdPeriodo == 892)).Should().Be(1);
+        var pedido = await ctx.Pedidos.Include(p => p.Campanha).SingleAsync(p => p.IdCampanha == 1 && p.IdPeriodo == 892);
+        pedido.FonteAgenciaId.Should().Be(pedido.Campanha.IdAgencia, "fora da prospecção a origem continua sendo a campanha");
+        pedido.FonteUsuarioId.Should().Be(pedido.Campanha.IdUsuarioAnunciante);
         (await ctx.PedidosReserva.CountAsync(r => r.Pedido.IdCampanha == 1 && r.Pedido.IdPeriodo == 892)).Should().Be(1);
         (await ctx.WlAppCheckoutSubmissions.CountAsync(s => s.QuoteId == quote.QuoteId)).Should().Be(1);
     }
@@ -194,10 +197,18 @@ IF NOT EXISTS (SELECT 1 FROM dbo.AgenciaCliente WHERE IdAgencia = 1 AND IdClient
         order.StatusCode.Should().Be(HttpStatusCode.OK, await order.Content.ReadAsStringAsync());
 
         using var ctx = new VeiculandoDataContext();
-        var codigo = (await ctx.Pedidos.SingleAsync(p => p.IdCampanha == 1 && p.IdPeriodo == 893)).Codigo;
+        var pedido = await ctx.Pedidos.SingleAsync(p => p.IdCampanha == 1 && p.IdPeriodo == 893);
+        var codigo = pedido.Codigo;
+        // Quem cria o pedido na prospecção é o usuário da exibidora que emitiu a
+        // sessão, em nome da afiliada; não o anunciante da campanha.
+        pedido.FonteOrigem.Should().Be(Veiculando.Domain.Enums.FonteOrigemEnum.WhiteLabel);
+        pedido.FonteAgenciaId.Should().Be(tenant);
+        pedido.FonteUsuarioId.Should().Be(sessao.FonteUsuarioId);
         var trilha = await ctx.WlProspeccaoSessaoEventos
             .Where(e => e.AfiliadaId == tenant && e.Evento == WlProspeccaoEventoTipo.PedidoCriado).ToListAsync();
-        trilha.Should().ContainSingle().Which.CodigosPedido.Should().Contain(codigo);
+        var evento = trilha.Should().ContainSingle().Which;
+        evento.CodigosPedido.Should().Contain(codigo);
+        evento.OperadorId.Should().Be(sessao.FonteUsuarioId, "a trilha registra o emissor como criador do pedido");
 
         var auditoria = await operador.GetStringAsync("/api/wl/prospeccao/auditoria");
         auditoria.Should().Contain(codigo);
