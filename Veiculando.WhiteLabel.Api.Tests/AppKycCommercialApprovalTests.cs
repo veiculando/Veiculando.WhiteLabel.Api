@@ -59,16 +59,33 @@ IF NOT EXISTS (SELECT 1 FROM PerfilUsuario WHERE Codigo = 'UsuarioAnunciante')
         });
         submit.StatusCode.Should().Be(HttpStatusCode.OK, await submit.Content.ReadAsStringAsync());
 
-        foreach (var kind in new[] { "corporate", "representative" })
+        using (var invalid = new MultipartFormDataContent())
         {
-            using var form = new MultipartFormDataContent();
-            form.Add(new StringContent(kind), "type");
-            var document = new ByteArrayContent(Encoding.ASCII.GetBytes("%PDF-1.4\n1 0 obj\n<<>>\nendobj"));
-            document.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
-            form.Add(document, "file", kind + ".pdf");
-            var uploaded = await applicant.PostAsync("/api/wl/app/kyc/documents", form);
-            uploaded.StatusCode.Should().Be(HttpStatusCode.OK, await uploaded.Content.ReadAsStringAsync());
+            foreach (var name in new[] { "first", "second" })
+            {
+                invalid.Add(new StringContent("corporate"), "types");
+                var content = new ByteArrayContent(Encoding.ASCII.GetBytes("%PDF-1.4\n1 0 obj\n<<>>\nendobj"));
+                content.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+                invalid.Add(content, "files", name + ".pdf");
+            }
+            (await applicant.PostAsync("/api/wl/app/kyc/documents/batch", invalid)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await applicant.GetStringAsync("/api/wl/app/kyc/documents")).Should().Be("[]");
         }
+
+        using (var form = new MultipartFormDataContent())
+        {
+            foreach (var kind in new[] { "corporate", "representative" })
+            {
+                form.Add(new StringContent(kind), "types");
+                var document = new ByteArrayContent(Encoding.ASCII.GetBytes("%PDF-1.4\n1 0 obj\n<<>>\nendobj"));
+                document.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+                form.Add(document, "files", kind + ".pdf");
+            }
+            var uploaded = await applicant.PostAsync("/api/wl/app/kyc/documents/batch", form);
+            uploaded.StatusCode.Should().Be(HttpStatusCode.OK, await uploaded.Content.ReadAsStringAsync());
+            (await uploaded.Content.ReadAsStringAsync()).Should().Contain("corporate").And.Contain("representative");
+        }
+        (await applicant.GetStringAsync("/api/wl/app/kyc/documents")).Should().Contain("corporate").And.Contain("representative");
         using var ctx = new VeiculandoDataContext();
         var onboarding = await ctx.WlAppOnboardings.SingleAsync(o => o.AfiliadaId == tenant && o.Usuario.Email.Endereco == email);
         using var reviewer = await factory.ClienteAutenticadoAsync("revisor-897@exemplo.com", Seed.SenhaPadrao);
