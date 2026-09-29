@@ -138,7 +138,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // distintas por checking, que e demais para um Select traduzido.
             var pagina_ = await ordenada
                 .Include(c => c.PedidoInsercao.Pedido.Campanha.Cliente)
-                .Include(c => c.PedidoInsercao.Itens)
+                .Include(c => c.PedidoInsercao.Itens.Select(i => i.PedidoItem.Periodo))
                 .Include(c => c.Itens.Select(i => i.Peca.Local.Cidade))
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
@@ -177,7 +177,13 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                         .Select(i => i.Peca?.Local?.Cidade?.Nome)
                         .Where(nome => nome != null)
                         .Distinct()
-                        .ToList()
+                        .ToList(),
+                    // Coluna Período (D14): as datas de veiculação da PI, não o
+                    // Periodo.Id do filtro. Sai dos itens da PI, e não dos itens
+                    // do checking, para aparecer antes da primeira foto.
+                    Periodo = WlResumoItens.Periodos(
+                        c.PedidoInsercao?.Itens?.Select(i => i.PedidoItem?.Periodo)
+                        ?? Enumerable.Empty<Veiculando.Domain.Entities.Periodo>())
                 })
                 .ToList();
 
