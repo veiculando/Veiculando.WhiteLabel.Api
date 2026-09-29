@@ -162,9 +162,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     l.Descricao,
                     Cidade = l.Cidade?.Nome,
                     UF = l.Cidade?.Estado?.Sigla,
-                    Endereco = l.Endereco != null
-                        ? $"{l.Endereco.Logradouro}, {l.Endereco.Numero}"
-                        : null,
+                    Endereco = FormatarEndereco(l.Endereco?.Logradouro, l.Endereco?.Numero),
                     l.FonteOrigem,
                     l.FonteTimestamp,
                     l.StatusExibicao,
@@ -184,6 +182,22 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             }).ToList();
 
             return Ok(resultado);
+        }
+
+        /// <summary>
+        /// "Logradouro, Número" da coluna Localização. O <c>Endereco</c> é complex
+        /// type e nunca vem null, então sem logradouro a interpolação antiga saía
+        /// <c>", "</c> — truthy no front, que exibia só a vírgula em vez de cair
+        /// na descrição. Sem logradouro, <c>null</c>.
+        /// </summary>
+        internal static string FormatarEndereco(string logradouro, string numero)
+        {
+            if (string.IsNullOrWhiteSpace(logradouro))
+                return null;
+
+            return string.IsNullOrWhiteSpace(numero)
+                ? logradouro.Trim()
+                : $"{logradouro.Trim()}, {numero.Trim()}";
         }
 
         /// <summary>
