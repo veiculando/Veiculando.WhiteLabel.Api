@@ -142,5 +142,9 @@
 # recebeu merge da main do Core, que e o que roda no preview).
 #
 # RE-PIN OBRIGATORIO no commit de merge da PR do Core assim que ela entrar.
+#
+# RE-PIN FINAL (HF-8): 98d2606385 e o commit de merge da PR Core #215 em
+# sprint-10.0, promovido para main pela #216 (7a279c46). Contem 634996b0.
+# SHA completo de `git log origin/main --merges --grep "#215"`.
 # ---------------------------------------------------------------------------
-634996b07593859161d7e6f638ba32b05162817f
+98d2606385aaa32ead1f5830732890996b43d320
