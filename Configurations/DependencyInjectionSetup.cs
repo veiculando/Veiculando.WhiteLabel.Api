@@ -1,6 +1,7 @@
 ﻿using MediatR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using System;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Repositories;
@@ -159,6 +160,16 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             // que pode estar vazia numa instância com o módulo desligado.
             services.AddHttpClient<ISupabaseCmsClient, SupabaseCmsClient>(client =>
                 client.Timeout = SupabaseCmsClient.Timeout);
+
+            // Auditoria, troca de arquivo e varredura (VEI-RD-19f).
+            services.TryAddSingleton(TimeProvider.System);
+            services.AddScoped<ICmsAuditoria, CmsAuditoria>();
+            services.AddScoped<CmsObjetos>();
+            services.AddScoped<CmsTrocaArquivo>();
+            services.AddScoped<CmsVarreduraArquivos>();
+            services.AddSingleton<CmsVarreduraAgendador>();
+            services.AddSingleton<ICmsVarreduraAgendador>(sp => sp.GetRequiredService<CmsVarreduraAgendador>());
+            services.AddHostedService(sp => sp.GetRequiredService<CmsVarreduraAgendador>());
 
             // Não há filtro de sanitização de entrada por lista de padrões, e a
             // ausência é deliberada.

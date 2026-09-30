@@ -170,7 +170,9 @@ public sealed class SupabaseCmsClient : ISupabaseCmsClient
         // bug, não uma troca legítima de arquivo.
         request.Headers.Add("x-upsert", "false");
         request.Content = new StreamContent(conteudo);
-        request.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        // Parse, e não o construtor: o HTML sobe como "text/html; charset=utf-8",
+        // e o construtor recusa parâmetro com FormatException.
+        request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
 
         using var _ = await EnviarAsync(request, ct);
     }
