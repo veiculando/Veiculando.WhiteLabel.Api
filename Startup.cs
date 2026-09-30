@@ -155,6 +155,13 @@ namespace Veiculando.WhiteLabel.Api
 
             app.UseMiddleware<Veiculando.WhiteLabel.Api.Middleware.TenantMiddleware>();
 
+            // Módulo CMS desligado → 404, antes da autenticação e da autorização:
+            // depois delas, quem não tem ConteudoGerenciar receberia 401/403 e
+            // saberia que o módulo existe. Precisa do tenant resolvido acima.
+            app.UseWhen(
+                ctx => ctx.Request.Path.StartsWithSegments(Veiculando.WhiteLabel.Api.Middleware.CmsModuloMiddleware.Prefixo),
+                cms => cms.UseMiddleware<Veiculando.WhiteLabel.Api.Middleware.CmsModuloMiddleware>());
+
             // Antes de UseAuthentication: uma rajada em /auth/login deve ser
             // barrada sem custo de validação de token nem de acesso ao banco.
             app.UseRateLimiter();

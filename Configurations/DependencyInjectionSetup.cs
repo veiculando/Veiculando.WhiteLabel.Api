@@ -9,6 +9,7 @@ using Veiculando.Shared;
 using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
 using Veiculando.WhiteLabel.Api.Services;
+using Veiculando.WhiteLabel.Api.Services.Cms;
 
 namespace Veiculando.WhiteLabel.Api.Configurations
 {
@@ -144,6 +145,14 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             services.AddScoped<WlUploadPipeline>();
             services.AddScoped<WlUploadReferences>();
             services.AddHostedService<WlUploadReconciler>();
+
+            // CMS da Aurum (VEI-RD-19). Sem Cms:SupabaseUrl e Cms:ServiceRoleKey, ou
+            // com a afiliada fora de Cms:AfiliadasHabilitadas, api/wl/cms/* responde
+            // 404 e o branding expõe cmsHabilitado false. Os valores vêm do
+            // environment do Snaps (CMS_*) via compose; nunca do appsettings.
+            services.Configure<CmsOptions>(configuration.GetSection(CmsOptions.Secao));
+            services.AddSingleton<CmsConfiguracao>();
+            services.AddScoped<ICmsHabilitacao, CmsHabilitacao>();
 
             // Não há filtro de sanitização de entrada por lista de padrões, e a
             // ausência é deliberada.
