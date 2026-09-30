@@ -1,0 +1,12 @@
+{
+  "id": "00000000-0000-4000-8000-000000000101",
+  "title": "Banner Fictício de Teste",
+  "imageUrl": "https://cms-ficticio.supabase.co/storage/v1/object/public/cms-assets/banners/00000000-0000-4000-8000-00000000a101.webp",
+  "tipoDestino": "link",
+  "destino": "https://exemplo.com.br/campanha-ficticia",
+  "htmlPath": null,
+  "displayOrder": 1,
+  "ativo": false,
+  "createdAt": "2026-09-01T13:00:00+00:00",
+  "updatedAt": "2026-09-02T14:30:00+00:00"
+}
