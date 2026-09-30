@@ -63,6 +63,7 @@ public sealed class AppKycDocumentsController : ControllerBase
 
         var failure = await SaveDocumentAsync(onboarding, userId, type, file, ct);
         if (failure != null) return failure;
+        await SubmitWhenComplete(onboarding, ct);
         return Ok(new { message = "Documento recebido para análise.", type });
     }
 
@@ -90,6 +91,7 @@ public sealed class AppKycDocumentsController : ControllerBase
             var failure = await SaveDocumentAsync(onboarding, userId, types[index], files[index], ct);
             if (failure != null) return failure;
         }
+        await SubmitWhenComplete(onboarding, ct);
         return Ok(new { received = types });
     }
 
@@ -99,8 +101,20 @@ public sealed class AppKycDocumentsController : ControllerBase
     {
         var onboarding = await _db.WlAppOnboardings.Include(o => o.Documentos)
             .SingleOrDefaultAsync(o => o.UsuarioId == userId && o.AfiliadaId == _tenant.AfiliadaId, ct);
-        return onboarding != null && (onboarding.Status == WlAppKycStatus.PendenteVerificacao ||
+        return onboarding != null && onboarding.Etapa == 4 && (onboarding.Status == WlAppKycStatus.Rascunho ||
+            onboarding.Status == WlAppKycStatus.PendenteVerificacao ||
             onboarding.Status == WlAppKycStatus.AjustesSolicitados) ? onboarding : null;
+    }
+
+    private async Task SubmitWhenComplete(WlAppOnboarding onboarding, CancellationToken ct)
+    {
+        if (onboarding.Status != WlAppKycStatus.Rascunho && onboarding.Status != WlAppKycStatus.AjustesSolicitados)
+            return;
+        var types = await _db.WlAppDocumentos.Where(d => d.OnboardingId == onboarding.Id && d.Ativo)
+            .Select(d => d.Tipo).ToListAsync(ct);
+        if (!types.Contains("corporate") || !types.Contains("representative")) return;
+        onboarding.Enviar();
+        await _db.SaveChangesAsync(ct);
     }
 
     private async Task<IActionResult> SaveDocumentAsync(WlAppOnboarding onboarding, int userId, string type, IFormFile file, CancellationToken ct)

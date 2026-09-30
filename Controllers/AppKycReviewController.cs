@@ -111,9 +111,13 @@ public sealed class AppKycReviewController : ControllerBase
         if (target != WlAppKycStatus.EmAnalise && string.IsNullOrWhiteSpace(reason))
             return BadRequest(new { message = "Informe o motivo da decisão." });
         using var transaction = _db.Database.BeginTransaction(IsolationLevel.Serializable);
-        var onboarding = await _db.WlAppOnboardings
+        var onboarding = await _db.WlAppOnboardings.Include(o => o.Documentos)
             .SingleOrDefaultAsync(o => o.Id == id && o.AfiliadaId == _tenant.AfiliadaId, ct);
         if (onboarding == null) return NotFound();
+        if (target == WlAppKycStatus.EmAnalise &&
+            (!onboarding.Documentos.Any(d => d.Ativo && d.Tipo == "corporate") ||
+             !onboarding.Documentos.Any(d => d.Ativo && d.Tipo == "representative")))
+            return Conflict(new { message = "Aguarde o envio do contrato social e da identificação do responsável." });
         try
         {
             onboarding.Transicionar(target, target == WlAppKycStatus.EmAnalise
