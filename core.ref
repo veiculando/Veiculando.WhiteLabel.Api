@@ -133,4 +133,26 @@
 # Sprint 11: merge do PR Core #198 (identidade comercial apos aprovacao KYC).
 # Core #213 integrado na main. A migration preserva o historico legado e
 # registra o operador WL real, sem colisao de IDs com dbo.Usuario.
-bb23dbfa46489833029c88dcf5da66c64622d527
+# ---------------------------------------------------------------------------
+# Sprint 4.0 (CMS na Exibidora) — pin TEMPORARIO em 6bdd991c0f (HEAD da PR #226
+# do core, feature/sprint-4.0/feature-a10a8119).
+#
+# Por que subiu: VEI-RD-106 cria a permissao ConteudoGerenciar. Este BFF passa a
+# ter a policy (AuthorizationSetup) e os testes exigem que Todas espelhe
+# WlPermissoesValidas.Lista item a item; com o pin em bb23dbfa a lista do dominio
+# ainda tinha 10 itens e a suite reprovava.
+#
+# SHA completo obtido de `gh pr view 226 --repo veiculando/Veiculando --json
+# headRefOid`, nunca abreviado. bb23dbfa e ancestral da main do core, e a #226
+# nasceu de origin/main (7a279c46): contem tudo do pin anterior.
+#
+# ⚠️ RE-PIN OBRIGATORIO no commit de MERGE da #226 em sprint-4.0 (merge commit,
+# nunca squash), antes do fechamento da sprint. O TP-3 depende do mesmo pin.
+# Conflito futuro: a PR #42 deste repo (sprint-10.0) tambem muda este arquivo;
+# quando as duas sprints subirem, o pin final tem de ser um commit do core que
+# contenha as duas linhas.
+# ---------------------------------------------------------------------------
+# RE-PIN FINAL (Sprint 4.0, VEI-RD-106): 517d44b1a0 e o commit de MERGE da PR #226
+# do core em sprint-4.0 (merge commit), nao mais o head da feature (6bdd991c0f, depois
+# 9321591e), que deixa de ser a referencia. O TP-3 usa este mesmo pin.
+517d44b1a09cbd0a6be4fef421cac7b377938df2
