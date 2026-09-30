@@ -153,6 +153,12 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             services.Configure<CmsOptions>(configuration.GetSection(CmsOptions.Secao));
             services.AddSingleton<CmsConfiguracao>();
             services.AddScoped<ICmsHabilitacao, CmsHabilitacao>();
+            services.AddScoped<CmsIndisponivelFiltro>();
+
+            // Sem BaseAddress: o client monta a URL a partir da CmsConfiguracao,
+            // que pode estar vazia numa instância com o módulo desligado.
+            services.AddHttpClient<ISupabaseCmsClient, SupabaseCmsClient>(client =>
+                client.Timeout = SupabaseCmsClient.Timeout);
 
             // Não há filtro de sanitização de entrada por lista de padrões, e a
             // ausência é deliberada.
