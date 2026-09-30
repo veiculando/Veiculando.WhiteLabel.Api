@@ -2,6 +2,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Veiculando.WhiteLabel.Api.Middleware;
+using Veiculando.WhiteLabel.Api.Services.Cms;
 
 namespace Veiculando.WhiteLabel.Api.Controllers
 {
@@ -17,6 +18,10 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     /// <para>Continua <c>[AllowAnonymous]</c> por necessidade: o branding é
     /// aplicado antes de existir token. Por isso responde apenas cor e logo —
     /// nada aqui pode ser sensível.</para>
+    ///
+    /// <para><c>cmsHabilitado</c> e <c>cmsSiteUrl</c> seguem a mesma regra: dizem
+    /// se o menu de conteúdo aparece e para onde apontam os links de prévia, nunca
+    /// a URL do Supabase ou a chave.</para>
     /// </remarks>
     [ApiController]
     [Route("api/wl/config")]
@@ -25,11 +30,16 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     {
         private readonly ITenantContext _tenant;
         private readonly IWlTenantResolver _resolver;
+        private readonly ICmsHabilitacao _cms;
+        private readonly CmsConfiguracao _cmsConfig;
 
-        public ConfigController(ITenantContext tenant, IWlTenantResolver resolver)
+        public ConfigController(ITenantContext tenant, IWlTenantResolver resolver,
+            ICmsHabilitacao cms, CmsConfiguracao cmsConfig)
         {
             _tenant = tenant;
             _resolver = resolver;
+            _cms = cms;
+            _cmsConfig = cmsConfig;
         }
 
         [HttpGet("branding")]
@@ -39,7 +49,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (branding == null)
                 return StatusCode(503, new { message = "Branding WhiteLabel não configurado." });
 
-            return Ok(branding);
+            var cmsHabilitado = await _cms.HabilitadoAsync(_tenant.AfiliadaId);
+            return Ok(branding.ComCms(cmsHabilitado, _cmsConfig.SiteUrl));
         }
     }
 }

@@ -27,6 +27,29 @@ namespace Veiculando.WhiteLabel.Api.Middleware
         public string FooterText { get; set; }
         public string SeoTitle { get; set; }
         public string SeoDescription { get; set; }
+
+        /// <summary>Módulo CMS ligado para esta afiliada (VEI-RD-19b). O front só mostra o grupo Marketing com true.</summary>
+        public bool CmsHabilitado { get; set; }
+
+        /// <summary>URL pública da LP, sem barra final; null quando o CMS está desligado.</summary>
+        public string CmsSiteUrl { get; set; }
+
+        /// <summary>
+        /// Cópia com os campos do CMS preenchidos.
+        /// </summary>
+        /// <remarks>
+        /// Cópia, e não atribuição: a instância vem do IMemoryCache do
+        /// <see cref="WlTenantResolver"/> e é compartilhada entre requisições.
+        /// MemberwiseClone copia também qualquer campo de branding que venha a
+        /// ser acrescentado, sem precisar lembrar de atualizar esta cópia.
+        /// </remarks>
+        public WlBrandingPublico ComCms(bool habilitado, string siteUrl)
+        {
+            var copia = (WlBrandingPublico)MemberwiseClone();
+            copia.CmsHabilitado = habilitado;
+            copia.CmsSiteUrl = habilitado ? siteUrl : null;
+            return copia;
+        }
     }
 
     public interface IWlTenantResolver
