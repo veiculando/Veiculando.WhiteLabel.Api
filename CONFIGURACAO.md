@@ -104,3 +104,22 @@ retorna JWT. Convite e recuperação são independentes.
 
 Esta configuração não migra o banco. Aplicar a migration EF6 do Core antes de
 subir o BFF; `core.ref` fixa o SHA compatível para o CI.
+
+# Módulo CMS (Aurum) — `api/wl/cms/*`
+
+Desligado por padrão. Só liga numa afiliada quando as **duas** chaves estão
+presentes **e** o código da afiliada (`Afiliada.Codigo`) está na lista. Fora
+disso, todo `api/wl/cms/*` responde 404 (antes da autorização, então sem 401 ou 403),
+e o branding traz `cmsHabilitado: false` e `cmsSiteUrl: null`.
+
+| Variável | Origem no preview (Snaps) | Observação |
+|---|---|---|
+| `Cms__SupabaseUrl` | `CMS_SUPABASE_URL` | Barra final é removida. |
+| `Cms__ServiceRoleKey` | `CMS_SUPABASE_SERVICE_ROLE_KEY` | Escrita irrestrita no Supabase que a LP de **produção** lê. Nunca versionar, logar ou expor. |
+| `Cms__SiteUrl` | `CMS_SITE_URL` | URL pública da LP, exposta no branding como `cmsSiteUrl`. Precisa ser `https` absoluta, senão vira null (com Warning). Barra final é removida. |
+| `Cms__AfiliadasHabilitadas__0` | `CMS_AFILIADAS_HABILITADAS` | Código da afiliada (ex.: `PRVIEW`). Aceita `A,B` num único item. Comparação sem diferenciar maiúsculas. |
+
+Por que a lista existe: o BFF é compartilhado entre as exibidoras e o tenant sai
+do Host. Com as chaves no ambiente e `ConteudoGerenciar` concedido a todo admin,
+um flag só pelas chaves deixaria o admin de outra exibidora gravar no site da
+Aurum (ADR-CMS-004).
