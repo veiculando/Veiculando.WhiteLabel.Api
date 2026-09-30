@@ -39,6 +39,9 @@ namespace Veiculando.WhiteLabel.Api.Configurations
         public const string ProgramacaoVisualizar = "ProgramacaoVisualizar";
         public const string FinanceiroVisualizar = "FinanceiroVisualizar";
         public const string RelatorioExportar = "RelatorioExportar";
+        // VEI-RD-106: telas de Marketing do CMS (api/wl/cms/*). Persona própria,
+        // não reusa UsuarioAfiliadaGerenciar.
+        public const string ConteudoGerenciar = "ConteudoGerenciar";
 
         /// <summary>Lista canônica de permissões (VEI-RD-93) — espelha WlPermissoesValidas do domínio.</summary>
         public static readonly string[] Todas =
@@ -52,7 +55,8 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             PedidoCriar,
             ProgramacaoVisualizar,
             FinanceiroVisualizar,
-            RelatorioExportar
+            RelatorioExportar,
+            ConteudoGerenciar
         };
 
         public static IServiceCollection AddWlAuthorization(this IServiceCollection services)
