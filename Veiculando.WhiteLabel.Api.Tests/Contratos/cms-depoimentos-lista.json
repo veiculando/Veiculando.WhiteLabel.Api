@@ -1,0 +1,32 @@
+{
+  "itens": [
+    {
+      "id": "00000000-0000-4000-8000-000000000301",
+      "author": "Pessoa Fictícia Um",
+      "role": "Gerente de Marketing",
+      "company": "Empresa Exemplo Fictícia",
+      "content": "Depoimento fictício usado apenas em testes de contrato.",
+      "avatarUrl": "https://cms-ficticio.supabase.co/storage/v1/object/public/cms-assets/depoimentos/00000000-0000-4000-8000-00000000a301.webp",
+      "displayOrder": 1,
+      "ativo": false,
+      "createdAt": "2026-09-01T13:00:00+00:00",
+      "updatedAt": "2026-09-01T13:00:00+00:00"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000302",
+      "author": "Pessoa Fictícia Dois",
+      "role": "Diretora Comercial",
+      "company": null,
+      "content": "Segundo depoimento fictício, sem empresa e sem foto.",
+      "avatarUrl": null,
+      "displayOrder": 2,
+      "ativo": false,
+      "createdAt": "2026-09-10T18:45:00+00:00",
+      "updatedAt": "2026-09-11T08:00:00+00:00"
+    }
+  ],
+  "page": 1,
+  "pageSize": 25,
+  "total": 2,
+  "totalPaginas": 1
+}

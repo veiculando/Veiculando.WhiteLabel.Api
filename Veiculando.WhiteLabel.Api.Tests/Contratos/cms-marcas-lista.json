@@ -1,0 +1,26 @@
+{
+  "itens": [
+    {
+      "id": "00000000-0000-4000-8000-000000000201",
+      "name": "Marca Fictícia A",
+      "imageUrl": "https://cms-ficticio.supabase.co/storage/v1/object/public/cms-assets/marcas/00000000-0000-4000-8000-00000000a201.svg",
+      "displayOrder": 1,
+      "ativo": false,
+      "createdAt": "2026-09-01T13:00:00+00:00",
+      "updatedAt": "2026-09-01T13:00:00+00:00"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000202",
+      "name": "Marca Fictícia B",
+      "imageUrl": "https://cms-ficticio.supabase.co/storage/v1/object/public/cms-assets/marcas/00000000-0000-4000-8000-00000000a202.png",
+      "displayOrder": 2,
+      "ativo": false,
+      "createdAt": "2026-09-04T09:15:00+00:00",
+      "updatedAt": "2026-09-05T10:00:00+00:00"
+    }
+  ],
+  "page": 1,
+  "pageSize": 25,
+  "total": 2,
+  "totalPaginas": 1
+}
