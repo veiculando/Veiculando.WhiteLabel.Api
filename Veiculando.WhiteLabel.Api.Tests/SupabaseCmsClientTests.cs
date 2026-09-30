@@ -227,6 +227,18 @@ public class SupabaseCmsClientTests
         chamada.Headers["Content-Type"].Should().Be("image/png");
     }
 
+    [Fact]
+    public async Task Upload_de_html_leva_o_charset_no_content_type()
+    {
+        // O construtor de MediaTypeHeaderValue recusa parâmetro com FormatException:
+        // todo hotsite falharia no upload.
+        using var conteudo = new MemoryStream("<html></html>"u8.ToArray());
+
+        await Client().EnviarObjetoAsync(CmsSupabase.BucketHtml, "banners/abc.html", conteudo, "text/html; charset=utf-8");
+
+        _fake.Chamadas.Single().Headers["Content-Type"].Should().Be("text/html; charset=utf-8");
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.OK, true)]
     [InlineData(HttpStatusCode.NotFound, false)]
