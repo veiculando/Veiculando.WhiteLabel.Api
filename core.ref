@@ -152,4 +152,7 @@
 # quando as duas sprints subirem, o pin final tem de ser um commit do core que
 # contenha as duas linhas.
 # ---------------------------------------------------------------------------
-6bdd991c0f39683f3e2d0167a06f17201a448139
+# RE-PIN FINAL (Sprint 4.0, VEI-RD-106): 517d44b1a0 e o commit de MERGE da PR #226
+# do core em sprint-4.0 (merge commit), nao mais o head da feature (6bdd991c0f, depois
+# 9321591e), que deixa de ser a referencia. O TP-3 usa este mesmo pin.
+517d44b1a09cbd0a6be4fef421cac7b377938df2
