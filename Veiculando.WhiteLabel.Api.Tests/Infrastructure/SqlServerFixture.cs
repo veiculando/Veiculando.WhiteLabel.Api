@@ -114,7 +114,11 @@ CREATE UNIQUE INDEX [UK_WlUsuario_Email_Afiliada]
 CREATE UNIQUE INDEX [UK_WlDominio_Host]
     ON [dbo].[WlDominio] ([Host]);
 CREATE UNIQUE INDEX [UK_WlConfiguracao_AfiliadaId]
-    ON [dbo].[WL_Configuracao] ([AfiliadaId]);";
+    ON [dbo].[WL_Configuracao] ([AfiliadaId]);
+-- Espelha AddWlProspeccaoSessaoEvento: uma emissao e um resgate por token.
+CREATE UNIQUE INDEX [UK_ProspeccaoSessaoEvento_Jti_Evento]
+    ON [dbo].[WL_ProspeccaoSessaoEvento] ([Jti], [Evento])
+    WHERE [Evento] IN (1, 2);";
 
             await ExecutarAsync(ConnectionString, indices);
         }

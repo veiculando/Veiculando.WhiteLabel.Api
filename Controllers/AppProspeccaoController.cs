@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.Entity;
+using System.Data.Entity.Infrastructure;
 using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
@@ -35,6 +36,12 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     /// BFF em várias réplicas um token poderia ser resgatado na réplica que ainda não
     /// o viu. Um store compartilhado resolve e é mudança de schema — território de
     /// outro card. O TTL curto limita a janela; não a fecha.</para>
+    ///
+    /// <para><b>Atualização (HF-8).</b> O resgate agora grava o evento
+    /// <c>Resgatada</c> em <c>WL_ProspeccaoSessaoEvento</c>, cujo índice único
+    /// (Jti, Evento) recusa um segundo resgate no banco — em qualquer réplica. O cache
+    /// continua como primeira barreira, barata; o banco é a definitiva. Token sem
+    /// emissão registrada também é recusado: sessão fora da trilha não abre.</para>
     ///
     /// <para><b>O token nunca entra em log</b>, nem o <c>jti</c>: o log registra a
     /// afiliada e o operador de origem, que é o que a auditoria precisa.</para>
@@ -103,6 +110,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // junto. Um token que sobrevive a uma falha parcial é um token reusável.
             _cache.Set(chaveUso, true, TimeSpan.FromHours(1));
 
+            var emissao = await _tenant.ProspeccaoEventos.AsNoTracking()
+                .SingleOrDefaultAsync(e => e.Jti == jti && e.Evento == WlProspeccaoEventoTipo.Emitida, ct);
+            if (emissao == null)
+                return Unauthorized(new { message = recusa });
+
             var anunciante = await ResolverAnuncianteAsync(request.AnuncianteId, ct);
             if (anunciante == null)
                 return Unauthorized(new { message = recusa });
@@ -112,6 +124,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             var sessao = new WlAppSessao(anunciante, _settings.ExpirationInMinutes);
             _db.WlAppSessoes.Add(sessao);
+            _db.WlProspeccaoSessaoEventos.Add(WlProspeccaoSessaoEvento.Resgatada(emissao, anunciante.Id, sessao.Id));
 
             var claims = new List<Claim>
             {
@@ -132,7 +145,16 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // Mesmo tipo de identidade que AppAuthController usa: duas copias das
             // mesmas claims divergiriam no dia em que uma ganhasse um campo.
             var identidade = new AppAuthController.AppUsuarioJwtResult(anunciante.Id, anunciante.Email.Endereco);
-            await _db.SaveChangesAsync(ct);
+            try
+            {
+                await _db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException ex) when (ViolouUsoUnico(ex))
+            {
+                // UK_ProspeccaoSessaoEvento_Jti_Evento: outra réplica já resgatou
+                // este token. A sessão e o evento caem juntos na mesma transação.
+                return Unauthorized(new { message = recusa });
+            }
 
             _logger.LogInformation(
                 "WL_PROSPECCAO_RESGATE tenant={Tenant} operador={Operador} anunciante={Anunciante}",
@@ -146,6 +168,14 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 prospeccao = true,
                 fonteUsuarioId = request.OperadorId
             });
+        }
+
+        private static bool ViolouUsoUnico(Exception ex)
+        {
+            for (var e = ex; e != null; e = e.InnerException)
+                if (e.Message.Contains("UK_ProspeccaoSessaoEvento_Jti_Evento", StringComparison.Ordinal))
+                    return true;
+            return false;
         }
 
         /// <summary>

@@ -174,9 +174,16 @@ public sealed class AppCheckoutController : ControllerBase
             p.Status != StatusPedidoEnum.Revisado, ct))
             return Conflict(new { message = "Já existe pedido nesta campanha, cidade e período." });
 
+        // Na prospecção quem cria o pedido é o usuário da exibidora que emitiu a
+        // sessão, não o anunciante da campanha. O emissor vem do resgate gravado
+        // no banco, nunca de valor do cliente.
+        var resgate = await ResgateDaSessaoDeProspeccaoAsync(ct);
         foreach (var order in orders)
         {
-            order.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, campaign.IdAgencia, campaign.IdUsuarioAnunciante);
+            if (resgate != null)
+                order.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, resgate.AfiliadaId, resgate.OperadorId);
+            else
+                order.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, campaign.IdAgencia, campaign.IdUsuarioAnunciante);
             campaign.AdicionarPedido(order);
             _db.Pedidos.Add(order);
             foreach (var item in order.Itens)
@@ -199,6 +206,9 @@ public sealed class AppCheckoutController : ControllerBase
             acceptedAt = DateTime.UtcNow
         });
         _db.WlAppCheckoutSubmissions.Add(new WlAppCheckoutSubmission(quote, keyHash, receipt));
+        if (resgate != null)
+            _db.WlProspeccaoSessaoEventos.Add(WlProspeccaoSessaoEvento.PedidoCriado(
+                resgate, JsonSerializer.Serialize(orders.Select(o => o.Codigo).ToArray())));
         await _db.SaveChangesAsync(ct);
         foreach (var available in status)
         {
@@ -288,6 +298,26 @@ public sealed class AppCheckoutController : ControllerBase
         if (actual == null || actual.Length != expected.Length) return false;
         try { return CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actual), Convert.FromHexString(expected)); }
         catch (FormatException) { return false; }
+    }
+
+    /// <summary>
+    /// Resgate da sessão de prospecção em que o checkout acontece, ou nulo fora dela.
+    /// </summary>
+    /// <remarks>
+    /// Dá a origem do pedido (afiliada + usuário da exibidora que emitiu a sessão) e
+    /// liga o evento <c>PedidoCriado</c> à trilha (VEI-RD-83, cenário 7), no mesmo
+    /// SaveChanges dos pedidos: pedido sem trilha ou trilha sem pedido não existem.
+    /// A sessão é achada pelo <c>jti</c> do JWT do App, que é o <c>WlAppSessao.Id</c>
+    /// gravado no resgate.
+    /// </remarks>
+    private async Task<WlProspeccaoSessaoEvento> ResgateDaSessaoDeProspeccaoAsync(CancellationToken ct)
+    {
+        if (User.FindFirstValue("Prospeccao") != "true" ||
+            !Guid.TryParseExact(User.FindFirstValue("jti"), "N", out var sessaoId))
+            return null;
+
+        return await _tenant.ProspeccaoEventos.AsNoTracking().SingleOrDefaultAsync(e =>
+            e.AppSessaoId == sessaoId && e.Evento == WlProspeccaoEventoTipo.Resgatada, ct);
     }
 
     internal bool TryUser(out int id)

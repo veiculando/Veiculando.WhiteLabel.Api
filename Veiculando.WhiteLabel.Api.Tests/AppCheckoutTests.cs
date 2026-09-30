@@ -108,6 +108,9 @@ public sealed class AppCheckoutTests
 
         using var ctx = new VeiculandoDataContext();
         (await ctx.Pedidos.CountAsync(p => p.IdCampanha == 1 && p.IdPeriodo == 892)).Should().Be(1);
+        var pedido = await ctx.Pedidos.Include(p => p.Campanha).SingleAsync(p => p.IdCampanha == 1 && p.IdPeriodo == 892);
+        pedido.FonteAgenciaId.Should().Be(pedido.Campanha.IdAgencia, "fora da prospecção a origem continua sendo a campanha");
+        pedido.FonteUsuarioId.Should().Be(pedido.Campanha.IdUsuarioAnunciante);
         (await ctx.PedidosReserva.CountAsync(r => r.Pedido.IdCampanha == 1 && r.Pedido.IdPeriodo == 892)).Should().Be(1);
         (await ctx.WlAppCheckoutSubmissions.CountAsync(s => s.QuoteId == quote.QuoteId)).Should().Be(1);
     }
@@ -156,6 +159,63 @@ IF NOT EXISTS (SELECT 1 FROM dbo.AgenciaCliente WHERE IdAgencia = 1 AND IdClient
             await ctx.Database.ExecuteSqlCommandAsync("UPDATE dbo.Usuario SET Email = @p0 WHERE Id = 1", originalEmail);
         }
     }
+
+    [Fact]
+    public async Task Pedido_fechado_em_sessao_de_prospeccao_entra_na_trilha_da_sessao()
+    {
+        // VEI-RD-83 cenário 7: "o que foi criado na sessão" consta na auditoria.
+        const int tenant = 893;
+        const string email = "checkout-prosp-893@exemplo.com";
+        var piece = await PrepareAsync(tenant, email, "P-CHK-893", 893);
+        await ApproveAsync(tenant, email);
+        const string admin = "prosp-admin-893@exemplo.com";
+        await Seed.OperadorAsync(tenant, admin, new[] { "PedidoCriar", "UsuarioAfiliadaGerenciar" });
+        int anuncianteId;
+        using (var lookup = new VeiculandoDataContext())
+            anuncianteId = (await lookup.WlUsuariosAnunciante
+                .SingleAsync(u => u.AfiliadaId == tenant && u.Email.Endereco == email)).Id;
+
+        using var factory = new WlApiFactory(_db, tenant);
+        using var operador = await factory.ClienteAutenticadoAsync(admin, Seed.SenhaPadrao);
+        var emissao = await operador.PostAsJsonAsync("/api/wl/prospeccao/sessao", new { anuncianteId });
+        emissao.StatusCode.Should().Be(HttpStatusCode.OK, await emissao.Content.ReadAsStringAsync());
+        var sessao = await emissao.Content.ReadFromJsonAsync<ProspeccaoResponse>();
+
+        using var client = factory.ClienteAnonimo();
+        var resgate = await client.PostAsJsonAsync("/api/wl/app/prospeccao/sessao",
+            new { Token = sessao.Token, OperadorId = sessao.FonteUsuarioId, AnuncianteId = anuncianteId });
+        resgate.StatusCode.Should().Be(HttpStatusCode.OK, await resgate.Content.ReadAsStringAsync());
+        var login = await resgate.Content.ReadFromJsonAsync<LoginResponse>();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        var quote = await (await client.PostAsJsonAsync("/api/wl/app/checkout/quote",
+            new { pieceIds = new[] { piece }, campaignId = 1, periodCode = "APP893" }))
+            .Content.ReadFromJsonAsync<QuoteResponse>();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", "checkout-893-prospeccao");
+        var order = await client.PostAsJsonAsync("/api/wl/app/checkout/orders",
+            new { quoteId = quote.QuoteId, termsAccepted = true, termsVersion = "aurum-v1" });
+        order.StatusCode.Should().Be(HttpStatusCode.OK, await order.Content.ReadAsStringAsync());
+
+        using var ctx = new VeiculandoDataContext();
+        var pedido = await ctx.Pedidos.SingleAsync(p => p.IdCampanha == 1 && p.IdPeriodo == 893);
+        var codigo = pedido.Codigo;
+        // Quem cria o pedido na prospecção é o usuário da exibidora que emitiu a
+        // sessão, em nome da afiliada; não o anunciante da campanha.
+        pedido.FonteOrigem.Should().Be(Veiculando.Domain.Enums.FonteOrigemEnum.WhiteLabel);
+        pedido.FonteAgenciaId.Should().Be(tenant);
+        pedido.FonteUsuarioId.Should().Be(sessao.FonteUsuarioId);
+        var trilha = await ctx.WlProspeccaoSessaoEventos
+            .Where(e => e.AfiliadaId == tenant && e.Evento == WlProspeccaoEventoTipo.PedidoCriado).ToListAsync();
+        var evento = trilha.Should().ContainSingle().Which;
+        evento.CodigosPedido.Should().Contain(codigo);
+        evento.OperadorId.Should().Be(sessao.FonteUsuarioId, "a trilha registra o emissor como criador do pedido");
+
+        var auditoria = await operador.GetStringAsync("/api/wl/prospeccao/auditoria");
+        auditoria.Should().Contain(codigo);
+        auditoria.Should().NotContain(sessao.Token);
+    }
+
+    private sealed record ProspeccaoResponse(string Token, int FonteUsuarioId);
 
     private static async Task<int> PrepareAsync(int tenant, string email, string pieceCode, int periodId)
     {
