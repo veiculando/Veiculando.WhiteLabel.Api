@@ -128,13 +128,27 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 ? p.Local.IndicePublicoAlvo(gender ?? 0, idades, rendas, perfis, Array.Empty<int>(), categoriasPoi) : 0);
             // Como no Core, a verba seleciona uma recomendação; não esconde do
             // mapa as outras peças. O valor aqui é referência, não cotação.
-            var ordenadas = filtradas.OrderByDescending(p => pontuacoes[p.Id]).ThenBy(p => p.Id).ToList();
+            var ordenadas = filtradas.OrderByDescending(p => pontuacoes[p.Id]).ThenBy(p => p.ValorPadrao).ThenBy(p => p.Id).ToList();
             var recomendadas = new HashSet<int>();
             var soma = 0m;
-            if (totalBudget.HasValue)
-                foreach (var peca in ordenadas.Where(p => !indisponiveis.Contains(p.Id)))
-                    if (soma + peca.ValorPadrao <= totalBudget.Value)
-                    { soma += peca.ValorPadrao; recomendadas.Add(peca.Id); }
+            // Sem verba explícita, aplica o mesmo princípio do planejador do Core:
+            // reserva uma fração do inventário elegível para compor a sugestão.
+            var disponiveis = ordenadas.Where(p => !indisponiveis.Contains(p.Id) && p.ValorPadrao > 0).ToList();
+            var verba = totalBudget ?? disponiveis.Sum(p => p.ValorPadrao) / 4m;
+            var locaisRecomendados = new HashSet<int>();
+            foreach (var peca in disponiveis)
+                if (!locaisRecomendados.Contains(peca.IdLocal) && soma + peca.ValorPadrao <= verba &&
+                    (!temPublico || pontuacoes[peca.Id] > 0))
+                {
+                    soma += peca.ValorPadrao;
+                    locaisRecomendados.Add(peca.IdLocal);
+                    recomendadas.Add(peca.Id);
+                }
+            if (!totalBudget.HasValue && recomendadas.Count == 0)
+            {
+                var first = disponiveis.FirstOrDefault(p => !temPublico || pontuacoes[p.Id] > 0);
+                if (first != null) recomendadas.Add(first.Id);
+            }
             var resultado = ordenadas
                 .Select(p => Mapear(p, !indisponiveis.Contains(p.Id), pontuacoes[p.Id], recomendadas.Contains(p.Id))).ToList();
             return Ok(resultado);

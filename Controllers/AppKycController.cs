@@ -89,7 +89,6 @@ public sealed class AppKycController : ControllerBase
             });
             onboarding.SalvarRascunho(request.AccountType, document, data, 4);
             onboarding.ReivindicarDocumento(document);
-            onboarding.Enviar();
             await _db.SaveChangesAsync(ct);
         }
         catch (InvalidOperationException) { return Conflict(new { message = "Este cadastro não pode ser alterado neste estado." }); }

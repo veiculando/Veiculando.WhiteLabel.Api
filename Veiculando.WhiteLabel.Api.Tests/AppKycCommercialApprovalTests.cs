@@ -58,6 +58,14 @@ IF NOT EXISTS (SELECT 1 FROM PerfilUsuario WHERE Codigo = 'UsuarioAnunciante')
             representativeEmail = email, representativePhone = "11999999999"
         });
         submit.StatusCode.Should().Be(HttpStatusCode.OK, await submit.Content.ReadAsStringAsync());
+        (await applicant.GetStringAsync("/api/wl/app/kyc/status")).Should().Contain("\"status\":\"incomplete\"").And.Contain("\"step\":4");
+        using var reviewer = await factory.ClienteAutenticadoAsync("revisor-897@exemplo.com", Seed.SenhaPadrao);
+        using (var beforeSend = new VeiculandoDataContext())
+        {
+            var draft = await beforeSend.WlAppOnboardings.SingleAsync(o => o.AfiliadaId == tenant && o.Usuario.Email.Endereco == email);
+            (await reviewer.PostAsync($"/api/wl/kyc/app/{draft.Id}/review", null)).StatusCode.Should().Be(HttpStatusCode.Conflict);
+            (await reviewer.GetStringAsync("/api/wl/kyc/app")).Should().NotContain(draft.Id.ToString());
+        }
 
         using (var invalid = new MultipartFormDataContent())
         {
@@ -86,9 +94,23 @@ IF NOT EXISTS (SELECT 1 FROM PerfilUsuario WHERE Codigo = 'UsuarioAnunciante')
             (await uploaded.Content.ReadAsStringAsync()).Should().Contain("corporate").And.Contain("representative");
         }
         (await applicant.GetStringAsync("/api/wl/app/kyc/documents")).Should().Contain("corporate").And.Contain("representative");
+        (await applicant.GetStringAsync("/api/wl/app/kyc/status")).Should().Contain("\"status\":\"pending\"");
         using var ctx = new VeiculandoDataContext();
         var onboarding = await ctx.WlAppOnboardings.SingleAsync(o => o.AfiliadaId == tenant && o.Usuario.Email.Endereco == email);
-        using var reviewer = await factory.ClienteAutenticadoAsync("revisor-897@exemplo.com", Seed.SenhaPadrao);
+        (await reviewer.PostAsync($"/api/wl/kyc/app/{onboarding.Id}/review", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await applicant.GetStringAsync("/api/wl/app/kyc/status")).Should().Contain("\"status\":\"in_review\"");
+        var adjustments = await reviewer.PostAsJsonAsync($"/api/wl/kyc/app/{onboarding.Id}/adjustments", new { reason = "Substitua a identificação do responsável." });
+        adjustments.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await applicant.GetStringAsync("/api/wl/app/kyc/status")).Should().Contain("\"status\":\"adjustments_required\"").And.Contain("Substitua a identificação");
+        using (var correction = new MultipartFormDataContent())
+        {
+            correction.Add(new StringContent("representative"), "types");
+            var replacement = new ByteArrayContent(Encoding.ASCII.GetBytes("%PDF-1.4\n1 0 obj\n<<>>\nendobj"));
+            replacement.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+            correction.Add(replacement, "files", "identidade-corrigida.pdf");
+            (await applicant.PostAsync("/api/wl/app/kyc/documents/batch", correction)).StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+        (await applicant.GetStringAsync("/api/wl/app/kyc/status")).Should().Contain("\"status\":\"pending\"");
         (await reviewer.PostAsync($"/api/wl/kyc/app/{onboarding.Id}/review", null)).StatusCode.Should().Be(HttpStatusCode.OK);
         var approval = await reviewer.PostAsync($"/api/wl/kyc/app/{onboarding.Id}/approve", null);
         approval.StatusCode.Should().Be(HttpStatusCode.OK, await approval.Content.ReadAsStringAsync());
