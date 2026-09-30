@@ -131,6 +131,8 @@
 # integracao, que e o que torna o build reproduzivel depois que a sprint fecha.
 # ---------------------------------------------------------------------------
 # Sprint 11: merge do PR Core #198 (identidade comercial apos aprovacao KYC).
+# Core #213 integrado na main. A migration preserva o historico legado e
+# registra o operador WL real, sem colisao de IDs com dbo.Usuario.
 #
 # ---------------------------------------------------------------------------
 # HF-8 (Sprint 10.0, D10) — pin TEMPORARIO em 634996b0, topo da branch
@@ -147,4 +149,6 @@
 # sprint-10.0, promovido para main pela #216 (7a279c46). Contem 634996b0.
 # SHA completo de `git log origin/main --merges --grep "#215"`.
 # ---------------------------------------------------------------------------
+# Promocao sprint-10.0 -> master (30/09/2026): 98d2606385 contem bb23dbfa
+# (pin do master, Core #213), entao o pin do HF-8 cobre os dois.
 98d2606385aaa32ead1f5830732890996b43d320
