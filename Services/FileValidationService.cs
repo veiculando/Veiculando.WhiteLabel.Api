@@ -60,5 +60,42 @@ namespace Veiculando.WhiteLabel.Api.Services
             var safeName = Path.GetFileName(originalFileName);
             return $"{Guid.NewGuid():N}{Path.GetExtension(safeName).ToLowerInvariant()}";
         }
+
+        /// <summary>Bytes de cabeçalho que <see cref="DetectarImagem"/> precisa ler.</summary>
+        public const int CabecalhoImagem = 12;
+
+        /// <summary>
+        /// Tipo de imagem raster pelo conteúdo: JPEG, PNG ou WebP. Null para
+        /// qualquer outra coisa.
+        /// </summary>
+        /// <remarks>
+        /// <para>Usado pelo CMS (VEI-RD-19d), que decide o tipo só pelos bytes: o
+        /// Content-Type e a extensão vêm do cliente e não valem nada. Um
+        /// <c>logo.png</c> que é PDF cai em null.</para>
+        ///
+        /// <para>Por que não entrou em <see cref="IsValidFile"/>: aquele método
+        /// atende os uploads que já existem (foto de peça, documentos), e pôr WebP
+        /// na lista dele faria esses fluxos aceitarem um formato que ninguém pediu
+        /// para eles.</para>
+        ///
+        /// <para>WebP é um contêiner RIFF: <c>RIFF</c> nos bytes 0–3, o tamanho nos
+        /// bytes 4–7 e <c>WEBP</c> nos bytes 8–11. Só <c>RIFF</c> não basta, porque
+        /// WAV e AVI começam igual.</para>
+        /// </remarks>
+        public static (string ContentType, string Extensao)? DetectarImagem(ReadOnlySpan<byte> cabecalho)
+        {
+            if (cabecalho.Length >= 3 && cabecalho[..3].SequenceEqual(AllowedMagicBytes["image/jpeg"]))
+                return ("image/jpeg", "jpg");
+
+            if (cabecalho.Length >= 8 && cabecalho[..8].SequenceEqual(AllowedMagicBytes["image/png"]))
+                return ("image/png", "png");
+
+            if (cabecalho.Length >= 12
+                && cabecalho[..4].SequenceEqual("RIFF"u8)
+                && cabecalho[8..12].SequenceEqual("WEBP"u8))
+                return ("image/webp", "webp");
+
+            return null;
+        }
     }
 }
