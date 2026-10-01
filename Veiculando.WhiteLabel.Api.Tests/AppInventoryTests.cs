@@ -102,6 +102,9 @@ END");
             itens.Should().HaveCount(2);
             itens.Should().ContainSingle(i => i.Recommended);
             itens.Should().OnlyContain(i => i.Available);
+            var withoutBudget = await client.GetFromJsonAsync<InventoryItem[]>("/api/wl/app/inventory");
+            withoutBudget.Should().HaveCount(2, "a recomendação não remove as outras peças do mapa");
+            withoutBudget.Should().ContainSingle(i => i.Recommended, "o planejador sugere uma peça mesmo sem verba explícita");
         }
 
         [Fact]

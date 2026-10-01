@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Data.Entity;
 using System.IO;
 using System.Linq;
@@ -52,16 +53,72 @@ public sealed class AppKycDocumentsController : ControllerBase
     public async Task<IActionResult> Upload([FromForm] string type, [FromForm] IFormFile file, CancellationToken ct)
     {
         if (!TryUser(out var userId)) return Unauthorized();
-        if (type != "corporate" && type != "representative" && type != "address")
+        if (!ValidType(type))
             return BadRequest(new { message = "Tipo de documento inválido." });
         if (!_validation.IsValidFile(file, 10 * 1024 * 1024, out var error))
             return BadRequest(new { message = error });
-        var onboarding = await _db.WlAppOnboardings.Include(o => o.Documentos)
-            .SingleOrDefaultAsync(o => o.UsuarioId == userId && o.AfiliadaId == _tenant.AfiliadaId, ct);
-        if (onboarding == null || (onboarding.Status != WlAppKycStatus.PendenteVerificacao &&
-            onboarding.Status != WlAppKycStatus.AjustesSolicitados))
+        var onboarding = await WritableOnboarding(userId, ct);
+        if (onboarding == null)
             return Conflict(new { message = "Envie os dados cadastrais antes do documento ou solicite ajuste da análise." });
 
+        var failure = await SaveDocumentAsync(onboarding, userId, type, file, ct);
+        if (failure != null) return failure;
+        await SubmitWhenComplete(onboarding, ct);
+        return Ok(new { message = "Documento recebido para análise.", type });
+    }
+
+    [HttpPost("batch")]
+    [EnableRateLimiting(Startup.RateLimitEscrita)]
+    [RequestSizeLimit(32 * 1024 * 1024)]
+    public async Task<IActionResult> UploadBatch([FromForm] List<string> types, [FromForm] List<IFormFile> files, CancellationToken ct)
+    {
+        if (!TryUser(out var userId)) return Unauthorized();
+        if (types == null || files == null || types.Count == 0 || types.Count > 3 || types.Count != files.Count ||
+            types.Distinct().Count() != types.Count || types.Any(type => !ValidType(type)))
+            return BadRequest(new { message = "Selecione até três tipos de documento diferentes, um arquivo para cada tipo." });
+        for (var index = 0; index < files.Count; index++)
+            if (!_validation.IsValidFile(files[index], 10 * 1024 * 1024, out var error))
+                return BadRequest(new { message = $"Arquivo {index + 1}: {error}" });
+
+        var onboarding = await WritableOnboarding(userId, ct);
+        if (onboarding == null)
+            return Conflict(new { message = "Envie os dados cadastrais antes dos documentos ou solicite ajuste da análise." });
+
+        // A validação completa acontece antes da primeira gravação. O cliente faz
+        // uma única chamada e recebe confirmação somente após todos os uploads.
+        for (var index = 0; index < files.Count; index++)
+        {
+            var failure = await SaveDocumentAsync(onboarding, userId, types[index], files[index], ct);
+            if (failure != null) return failure;
+        }
+        await SubmitWhenComplete(onboarding, ct);
+        return Ok(new { received = types });
+    }
+
+    private static bool ValidType(string type) => type == "corporate" || type == "representative" || type == "address";
+
+    private async Task<WlAppOnboarding> WritableOnboarding(int userId, CancellationToken ct)
+    {
+        var onboarding = await _db.WlAppOnboardings.Include(o => o.Documentos)
+            .SingleOrDefaultAsync(o => o.UsuarioId == userId && o.AfiliadaId == _tenant.AfiliadaId, ct);
+        return onboarding != null && onboarding.Etapa == 4 && (onboarding.Status == WlAppKycStatus.Rascunho ||
+            onboarding.Status == WlAppKycStatus.PendenteVerificacao ||
+            onboarding.Status == WlAppKycStatus.AjustesSolicitados) ? onboarding : null;
+    }
+
+    private async Task SubmitWhenComplete(WlAppOnboarding onboarding, CancellationToken ct)
+    {
+        if (onboarding.Status != WlAppKycStatus.Rascunho && onboarding.Status != WlAppKycStatus.AjustesSolicitados)
+            return;
+        var types = await _db.WlAppDocumentos.Where(d => d.OnboardingId == onboarding.Id && d.Ativo)
+            .Select(d => d.Tipo).ToListAsync(ct);
+        if (!types.Contains("corporate") || !types.Contains("representative")) return;
+        onboarding.Enviar();
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private async Task<IActionResult> SaveDocumentAsync(WlAppOnboarding onboarding, int userId, string type, IFormFile file, CancellationToken ct)
+    {
         using var body = new MemoryStream();
         using (var source = file.OpenReadStream()) await source.CopyToAsync(body, ct);
         if (body.Length != file.Length || body.Length == 0)
@@ -83,7 +140,7 @@ public sealed class AppKycDocumentsController : ControllerBase
                 file.ContentType, body.Length, type));
             await _db.SaveChangesAsync(ct);
         }, () => _references.ExistsAsync(key, CancellationToken.None), ct);
-        return Ok(new { message = "Documento recebido para análise.", type });
+        return null;
     }
 
     private bool TryUser(out int id)

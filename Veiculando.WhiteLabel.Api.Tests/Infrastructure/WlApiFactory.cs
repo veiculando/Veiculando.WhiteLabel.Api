@@ -103,6 +103,10 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
 
                     ["CoreApiUrl"] = "http://core.invalido/",
 
+                    // Sem isto POST /prospeccao/sessao responde 503, como o preview
+                    // respondia antes do HF-8.
+                    ["WlProspeccao:AppUrl"] = "https://app.invalido",
+
                     // Host inalcançável de proposito: se algum caminho escapar do
                     // FileServerStub a chamada falha em vez de sair para a rede.
                     ["FileServerUrl"] = "http://fileserver.invalido/",

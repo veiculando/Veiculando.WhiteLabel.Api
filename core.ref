@@ -133,6 +133,24 @@
 # Sprint 11: merge do PR Core #198 (identidade comercial apos aprovacao KYC).
 # Core #213 integrado na main. A migration preserva o historico legado e
 # registra o operador WL real, sem colisao de IDs com dbo.Usuario.
+#
+# ---------------------------------------------------------------------------
+# HF-8 (Sprint 10.0, D10) — pin TEMPORARIO em 634996b0, topo da branch
+# feature/sprint-10.0/hf8-prospeccao-appurl-auditoria-69c2ce13 do Core.
+#
+# Por que: ProspeccaoController, AppProspeccaoController e AppCheckoutController
+# gravam em WL_ProspeccaoSessaoEvento (auditoria append-only da prospeccao),
+# entidade que nasce nessa branch. Ela contem 93601c0d inteiro (a branch
+# recebeu merge da main do Core, que e o que roda no preview).
+#
+# RE-PIN OBRIGATORIO no commit de merge da PR do Core assim que ela entrar.
+#
+# RE-PIN FINAL (HF-8): 98d2606385 e o commit de merge da PR Core #215 em
+# sprint-10.0, promovido para main pela #216 (7a279c46). Contem 634996b0.
+# SHA completo de `git log origin/main --merges --grep "#215"`.
+# ---------------------------------------------------------------------------
+# Promocao sprint-10.0 -> master (30/09/2026): 98d2606385 contem bb23dbfa
+# (pin do master, Core #213), entao o pin do HF-8 cobre os dois.
 # ---------------------------------------------------------------------------
 # Sprint 4.0 (CMS na Exibidora) — pin TEMPORARIO em 6bdd991c0f (HEAD da PR #226
 # do core, feature/sprint-4.0/feature-a10a8119).
@@ -155,4 +173,19 @@
 # RE-PIN FINAL (Sprint 4.0, VEI-RD-106): 517d44b1a0 e o commit de MERGE da PR #226
 # do core em sprint-4.0 (merge commit), nao mais o head da feature (6bdd991c0f, depois
 # 9321591e), que deixa de ser a referencia. O TP-3 usa este mesmo pin.
-517d44b1a09cbd0a6be4fef421cac7b377938df2
+# ---------------------------------------------------------------------------
+# Promocao sprint-4.0 -> master (01/10/2026): 0761055e33 e o commit de MERGE da
+# PR Core #270 (sync/sprint-4.0-core -> main), a promocao da Sprint 4.0 no Core.
+#
+# Por que este e nao um dos dois pins que conflitaram:
+#   517d44b1a0 (sprint-4.0, merge da #226) nao contem o HF-8 da sprint-10.0.
+#   98d2606385 (master, merge da #215) nao contem ConteudoGerenciar (VEI-RD-106).
+# O BFF promovido precisa das duas linhas: a policy ConteudoGerenciar e os
+# controllers de CMS (sprint-4.0) e WL_ProspeccaoSessaoEvento (HF-8, master).
+# 0761055e e um commit de main que contem 517d44b1 e 7ab762f4 (que contem
+# 98d2606385). Resolve o "conflito futuro" anunciado no bloco da Sprint 4.0.
+#
+# SHA completo de `gh pr view 270 --repo veiculando/Veiculando --json
+# mergeCommit`, nunca abreviado. Suite do BFF contra esse Core: 429/429.
+# ---------------------------------------------------------------------------
+0761055e33b072a5e159069091a3e2477eecfc19
