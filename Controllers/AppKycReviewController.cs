@@ -35,10 +35,11 @@ public sealed class AppKycReviewController : ControllerBase
     private readonly ITenantQueries _tenant;
     private readonly IWlUploadStorage _storage;
     private readonly ISeedAccountResolver _seed;
+    private readonly VendaDiretaProvisionamento _vendaDireta;
 
     public AppKycReviewController(VeiculandoDataContext db, ITenantQueries tenant,
-        IWlUploadStorage storage, ISeedAccountResolver seed)
-        => (_db, _tenant, _storage, _seed) = (db, tenant, storage, seed);
+        IWlUploadStorage storage, ISeedAccountResolver seed, VendaDiretaProvisionamento vendaDireta)
+        => (_db, _tenant, _storage, _seed, _vendaDireta) = (db, tenant, storage, seed, vendaDireta);
 
     [HttpGet]
     public async Task<IActionResult> Queue(CancellationToken ct)
@@ -183,21 +184,9 @@ public sealed class AppKycReviewController : ControllerBase
         Cliente client = null;
         if (onboarding.TipoConta == "ad")
         {
-            agency = await _db.Agencias.SingleOrDefaultAsync(a => a.Cnpj.Numero == afiliada.Cnpj.Numero, ct);
-            if (agency != null && agency.StatusExibicao != StatusExibicaoEnum.Ativo)
-                return Conflict(new { message = "A agência de venda direta está inativa no Core." });
-            if (agency == null)
-            {
-                if (afiliada.Email == null || afiliada.Telefone == null)
-                    return Conflict(new { message = "Configure e-mail e telefone da exibidora antes de habilitar a venda direta." });
-                agency = new Agencia(AgenciaVendaDiretaProvisionamento.NomeFantasia,
-                    AgenciaVendaDiretaProvisionamento.RazaoSocial, afiliada.Endereco, afiliada.Cidade,
-                    afiliada.Uf, afiliada.Telefone, afiliada.Email, afiliada.Site, afiliada.Cnpj,
-                    afiliada.InscricaoEstadual, afiliada.InscricaoMunicipal, null, null, string.Empty, 0m, actor);
-                if (!agency.IsValid()) return Conflict(new { message = "Não foi possível provisionar a venda direta." });
-                _db.Agencias.Add(agency);
-                await _db.SaveChangesAsync(ct);
-            }
+            var (directAgency, directError) = await _vendaDireta.GarantirAgenciaAsync(afiliada, actor, ct);
+            if (directError != null) return Conflict(new { message = directError });
+            agency = directAgency;
             client = await _db.Clientes.SingleOrDefaultAsync(c => c.Cnpj.Numero == onboarding.Documento, ct);
             if (client != null && client.StatusExibicao != StatusExibicaoEnum.Ativo)
                 return Conflict(new { message = "Este CNPJ já pertence a um anunciante inativo no Core." });
@@ -238,16 +227,8 @@ public sealed class AppKycReviewController : ControllerBase
                 await _db.SaveChangesAsync(ct);
             }
         }
-        var agencyLink = await _db.AfiliadaAgencias.SingleOrDefaultAsync(v =>
-            v.IdAfiliada == afiliada.Id && v.IdAgencia == agency.Id, ct);
-        if (agencyLink == null)
-        {
-            agencyLink = new AfiliadaAgencia(afiliada, agency, actor);
-            agencyLink.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, afiliada.Id, onboarding.UsuarioId);
-            if (!agencyLink.IsValid()) return Conflict(new { message = "Não foi possível vincular a agência à exibidora." });
-            _db.AfiliadaAgencias.Add(agencyLink);
-        }
-        else agencyLink.Ativar();
+        var linkError = await _vendaDireta.GarantirVinculoAsync(afiliada, agency, actor, onboarding.UsuarioId, ct);
+        if (linkError != null) return Conflict(new { message = linkError });
 
         if (client != null)
         {

@@ -56,6 +56,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         private readonly ITenantQueries _tenant;
         private readonly IWlLinkTemporario _links;
         private readonly IMemoryCache _cache;
+        private readonly AnuncianteDaCasaProvisionamento _casa;
         private readonly JwtSettings _settings;
         private readonly ILogger<AppProspeccaoController> _logger;
 
@@ -64,6 +65,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             ITenantQueries tenant,
             IWlLinkTemporario links,
             IMemoryCache cache,
+            AnuncianteDaCasaProvisionamento casa,
             IOptions<JwtSettings> settings,
             ILogger<AppProspeccaoController> logger)
         {
@@ -71,6 +73,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             _tenant = tenant;
             _links = links;
             _cache = cache;
+            _casa = casa;
             _settings = settings.Value;
             _logger = logger;
         }
@@ -115,9 +118,24 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (emissao == null)
                 return Unauthorized(new { message = recusa });
 
-            var anunciante = await ResolverAnuncianteAsync(request.AnuncianteId, ct);
-            if (anunciante == null)
-                return Unauthorized(new { message = recusa });
+            WlUsuarioAnunciante anunciante;
+            if (request.AnuncianteId == null)
+            {
+                // Sem anunciante escolhido: a sessão abre como o anunciante da casa
+                // (a própria exibidora, venda direta). Falha de provisionamento não é
+                // token inválido: é 409 com o motivo, para o operador agir. O token
+                // continua queimado — reabrir a prospecção emite outro.
+                var (casa, erro) = await _casa.GarantirAsync(ct);
+                if (casa == null)
+                    return Conflict(new { message = erro });
+                anunciante = casa;
+            }
+            else
+            {
+                anunciante = await ResolverAnuncianteAsync(request.AnuncianteId.Value, ct);
+                if (anunciante == null)
+                    return Unauthorized(new { message = recusa });
+            }
 
             if (_db.Entry(anunciante).State == EntityState.Detached)
                 _db.WlUsuariosAnunciante.Attach(anunciante);
@@ -179,22 +197,17 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         }
 
         /// <summary>
-        /// Resolve em nome de quem a sessão abre.
+        /// Resolve o anunciante do tenant quando o pedido de resgate informa um.
         /// </summary>
         /// <remarks>
-        /// PENDÊNCIA DO HUMANO, não arbitrada aqui: o Figma abre a prospecção sem
-        /// escolher o cliente. Enquanto não houver seletor, a sessão só abre com um
-        /// <c>AnuncianteId</c> explícito — recusar é mais seguro do que eleger um
-        /// anunciante qualquer da afiliada e criar pedidos em nome de quem não pediu.
-        /// O ponto de extensão está pronto dos dois lados.
+        /// Regra do owner (HF-8): sem <c>AnuncianteId</c> — o caso da tela de
+        /// prospecção da Exibidora, que não escolhe cliente — a sessão abre como o
+        /// anunciante da casa (<see cref="AnuncianteDaCasaProvisionamento"/>). Com
+        /// <c>AnuncianteId</c> explícito o comportamento é o de antes: só vale
+        /// anunciante do próprio tenant.
         /// </remarks>
-        private Task<WlUsuarioAnunciante> ResolverAnuncianteAsync(int? anuncianteId, CancellationToken ct)
-        {
-            if (anuncianteId == null) return Task.FromResult<WlUsuarioAnunciante>(null);
-
-            return _tenant.UsuariosAnunciante
-                .FirstOrDefaultAsync(u => u.Id == anuncianteId.Value, ct);
-        }
+        private Task<WlUsuarioAnunciante> ResolverAnuncianteAsync(int anuncianteId, CancellationToken ct) =>
+            _tenant.UsuariosAnunciante.FirstOrDefaultAsync(u => u.Id == anuncianteId, ct);
     }
 
     public sealed class ResgateProspeccaoRequest
