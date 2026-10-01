@@ -57,8 +57,25 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         /// <summary>Captura o que o BFF pediu ao FileServer (PDF de PI).</summary>
         public FileServerStub FileServer { get; } = new();
 
-        public WlApiFactory(SqlServerFixture db, int afiliadaId, string? host = null)
+        /// <summary>
+        /// O Supabase do CMS desta instância. Sempre ligado, mesmo sem as chaves:
+        /// o CI nunca chama o Supabase real (ADR-CMS-004).
+        /// </summary>
+        public SupabaseEmMemoria Supabase { get; } = new();
+
+        private readonly IReadOnlyDictionary<string, string?> _configuracaoExtra;
+        private readonly bool _comSondaCms;
+
+        /// <param name="configuracao">Chaves somadas à configuração base, como
+        /// <c>Cms:SupabaseUrl</c>. Sem elas, o módulo CMS fica desligado, que é o
+        /// estado de toda exibidora que não é a Aurum.</param>
+        /// <param name="comSondaCms">Registra o <see cref="CmsSondaController"/>,
+        /// uma rota em <c>api/wl/cms</c> que existe só nos testes.</param>
+        public WlApiFactory(SqlServerFixture db, int afiliadaId, string? host = null,
+            IReadOnlyDictionary<string, string?>? configuracao = null, bool comSondaCms = false)
         {
+            _configuracaoExtra = configuracao ?? new Dictionary<string, string?>();
+            _comSondaCms = comSondaCms;
             _connectionString = db.ConnectionString;
             AfiliadaId = afiliadaId;
             Host = host ?? $"afiliada-{afiliadaId}.teste";
@@ -100,6 +117,8 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                     [$"SeedAccounts:{AfiliadaId}:Email"] = $"conta-servico-{AfiliadaId}@teste.local",
                     [$"SeedAccounts:{AfiliadaId}:Password"] = "irrelevante-o-stub-responde",
                 });
+
+                config.AddInMemoryCollection(_configuracaoExtra);
             });
 
             builder.ConfigureTestServices(services =>
@@ -131,6 +150,12 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                         client.BaseAddress = new Uri("http://fileserver.invalido/");
                     })
                     .ConfigurePrimaryHttpMessageHandler(() => FileServer);
+
+                services.AddHttpClient<Services.Cms.ISupabaseCmsClient, Services.Cms.SupabaseCmsClient>()
+                    .ConfigurePrimaryHttpMessageHandler(() => Supabase.Handler);
+
+                if (_comSondaCms)
+                    services.AddControllers().AddApplicationPart(typeof(CmsSondaController).Assembly);
             });
         }
 

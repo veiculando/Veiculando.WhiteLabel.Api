@@ -1,6 +1,7 @@
 ﻿using MediatR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using System;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Repositories;
@@ -9,6 +10,7 @@ using Veiculando.Shared;
 using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
 using Veiculando.WhiteLabel.Api.Services;
+using Veiculando.WhiteLabel.Api.Services.Cms;
 
 namespace Veiculando.WhiteLabel.Api.Configurations
 {
@@ -146,6 +148,33 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             services.AddScoped<WlUploadPipeline>();
             services.AddScoped<WlUploadReferences>();
             services.AddHostedService<WlUploadReconciler>();
+
+            // CMS da Aurum (VEI-RD-19). Sem Cms:SupabaseUrl e Cms:ServiceRoleKey, ou
+            // com a afiliada fora de Cms:AfiliadasHabilitadas, api/wl/cms/* responde
+            // 404 e o branding expõe cmsHabilitado false. Os valores vêm do
+            // environment do Snaps (CMS_*) via compose; nunca do appsettings.
+            services.Configure<CmsOptions>(configuration.GetSection(CmsOptions.Secao));
+            services.AddSingleton<CmsConfiguracao>();
+            services.AddScoped<ICmsHabilitacao, CmsHabilitacao>();
+            services.AddScoped<CmsIndisponivelFiltro>();
+
+            // Sem BaseAddress: o client monta a URL a partir da CmsConfiguracao,
+            // que pode estar vazia numa instância com o módulo desligado.
+            services.AddHttpClient<ISupabaseCmsClient, SupabaseCmsClient>(client =>
+                client.Timeout = SupabaseCmsClient.Timeout);
+
+            // Auditoria, troca de arquivo e varredura (VEI-RD-19f).
+            services.TryAddSingleton(TimeProvider.System);
+            services.AddScoped<ICmsAuditoria, CmsAuditoria>();
+            services.AddScoped<CmsObjetos>();
+            services.AddScoped<CmsTrocaArquivo>();
+            services.AddScoped<CmsVarreduraArquivos>();
+            services.AddSingleton<CmsVarreduraAgendador>();
+            services.AddSingleton<ICmsVarreduraAgendador>(sp => sp.GetRequiredService<CmsVarreduraAgendador>());
+            services.AddHostedService(sp => sp.GetRequiredService<CmsVarreduraAgendador>());
+
+            // Controllers de api/wl/cms/* (VEI-RD-19e).
+            services.AddScoped<Controllers.Cms.CmsDependencias>();
 
             // Não há filtro de sanitização de entrada por lista de padrões, e a
             // ausência é deliberada.

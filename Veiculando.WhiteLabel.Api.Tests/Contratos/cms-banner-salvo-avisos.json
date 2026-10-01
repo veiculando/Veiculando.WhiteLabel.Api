@@ -1,0 +1,17 @@
+{
+  "item": {
+    "id": "00000000-0000-4000-8000-000000000102",
+    "title": "Hotsite Fictício de Teste",
+    "imageUrl": "https://cms-ficticio.supabase.co/storage/v1/object/public/cms-assets/banners/00000000-0000-4000-8000-00000000a102.png",
+    "tipoDestino": "html",
+    "destino": null,
+    "htmlPath": "banners/00000000-0000-4000-8000-00000000b102.html",
+    "displayOrder": 12,
+    "ativo": false,
+    "createdAt": "2026-09-03T12:00:00+00:00",
+    "updatedAt": "2026-09-03T12:00:00+00:00"
+  },
+  "avisos": [
+    "O HTML usa um endereço relativo em src: img/a.png. O hotsite precisa ser autocontido ou usar URLs absolutas."
+  ]
+}

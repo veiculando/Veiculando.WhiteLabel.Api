@@ -141,7 +141,8 @@ namespace Veiculando.WhiteLabel.Api.Tests
         [InlineData("ProgramacaoVisualizar")]
         [InlineData("FinanceiroVisualizar")]
         [InlineData("RelatorioExportar")]
-        public void As_dez_permissoes_da_whitelist_canonica_sao_aceitas(string permissao)
+        [InlineData("ConteudoGerenciar")]
+        public void As_onze_permissoes_da_whitelist_canonica_sao_aceitas(string permissao)
         {
             WlPermissoesValidas.ValidarPermissoes(new[] { permissao }, out _).Should().BeTrue();
         }
@@ -157,12 +158,13 @@ namespace Veiculando.WhiteLabel.Api.Tests
         }
 
         [Fact]
-        public void Whitelist_do_dominio_tem_exatamente_dez_permissoes()
+        public void Whitelist_do_dominio_tem_exatamente_onze_permissoes()
         {
-            // Se alguem adicionar uma decima primeira, o AuthorizationSetup do BFF e
+            // A decima primeira e ConteudoGerenciar (VEI-RD-106).
+            // Se alguem adicionar uma decima segunda, o AuthorizationSetup do BFF e
             // o PERMISSOES_WL do frontend precisam acompanhar. Este teste forca a
             // conversa em vez de deixar os tres divergirem em silencio.
-            WlPermissoesValidas.Lista.Should().HaveCount(10);
+            WlPermissoesValidas.Lista.Should().HaveCount(11);
         }
     }
 }

@@ -25,4 +25,10 @@
     <ProjectReference Include="..\Veiculando.WhiteLabel.Api.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Contrato publicado para os fronts: os testes leem as fixtures da pasta
+         de saida, e a Exibidora copia os mesmos arquivos. -->
+    <None Update="Contratos\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
