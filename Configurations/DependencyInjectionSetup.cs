@@ -101,6 +101,8 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             services.AddHttpClient<IWlCompanyRegistry, BrasilApiCompanyRegistry>(client =>
             { client.BaseAddress = new Uri("https://brasilapi.com.br/api/cnpj/v1/"); client.Timeout = TimeSpan.FromSeconds(10); });
             services.AddScoped<WlPublicLinks>();
+            services.AddScoped<Services.VendaDiretaProvisionamento>();
+            services.AddScoped<Services.AnuncianteDaCasaProvisionamento>();
 
             // Segunda camada de limite do esqueci-senha, por hash do e-mail e
             // independente de IP (ver PasswordResetAttemptGuard). Singleton: o
