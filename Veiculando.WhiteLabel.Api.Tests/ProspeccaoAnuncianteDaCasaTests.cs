@@ -224,6 +224,41 @@ SET IDENTITY_INSERT Periodo OFF;",
         }
 
         [Fact]
+        public async Task Afiliada_com_os_dados_do_seed_de_preview_abre_a_casa_pela_conta_de_servico()
+        {
+            // Mesmos valores de PreviewSeedScripts.TenantAndBranding (Core) e o mesmo
+            // estado do preview: IdUsuarioCadastro NULL, então o ator do provisionamento
+            // é a conta de serviço do tenant (SeedAccounts:{id}:Email), um UsuarioAfiliada.
+            const int tenant = 8977;
+            const string cnpjDoSeed = "90707070000177";
+            await PrepararAfiliadaAsync(tenant, cnpjDoSeed);
+            using (var ctx = new VeiculandoDataContext())
+                await ctx.Database.ExecuteSqlCommandAsync(@"
+UPDATE Afiliada SET IdUsuarioCadastro = NULL, Nome = 'Veiculando Preview', RazaoSocial = 'Veiculando Preview',
+    Email = 'preview@veiculando.invalid', Telefone = '1130000000', Celular = '11930000000',
+    Cep = '01310100', Logradouro = 'Avenida Paulista', Numero = '1000', Bairro = 'Bela Vista',
+    Cidade = 'Sao Paulo', Uf = 'SP'
+WHERE Id = @p0;
+INSERT Usuario (Nome, Email, Senha, StatusAprovacao, Acessos, DataUltimoLogin, EmailConfirmado,
+    DataCadastro, DataAtualizacao, StatusExibicao, IdPerfil)
+VALUES ('Servico Preview', @p1, 'hash-sintetico', 1, 0, GETUTCDATE(), 1, GETUTCDATE(), GETUTCDATE(), 1, 1);
+INSERT UsuarioAfiliada (Id, IdAfiliada) VALUES (SCOPE_IDENTITY(), @p0);",
+                    tenant, $"conta-servico-{tenant}@teste.local");
+            var email = await NovoOperadorAsync(tenant, "casa-seed");
+
+            using var factory = new WlApiFactory(_db, tenant);
+            using var operador = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
+            using var app = factory.ClienteAnonimo();
+            var resposta = await ResgatarAsync(app, await EmitirSemAnuncianteAsync(operador));
+            resposta.StatusCode.Should().Be(HttpStatusCode.OK, await resposta.Content.ReadAsStringAsync());
+
+            using var db = new VeiculandoDataContext();
+            var casa = await db.WlUsuariosAnunciante.SingleAsync(u => u.AfiliadaId == tenant);
+            casa.Cnpj.Should().Be(cnpjDoSeed);
+            (await db.Agencias.SingleAsync(a => a.Cnpj.Numero == cnpjDoSeed)).Id.Should().Be(casa.AgenciaId!.Value);
+        }
+
+        [Fact]
         public async Task Pedido_da_casa_sai_com_a_trilha_do_operador_na_cadeia_de_venda_direta()
         {
             const int tenant = 8976;
