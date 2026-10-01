@@ -171,6 +171,9 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             services.AddSingleton<ICmsVarreduraAgendador>(sp => sp.GetRequiredService<CmsVarreduraAgendador>());
             services.AddHostedService(sp => sp.GetRequiredService<CmsVarreduraAgendador>());
 
+            // Controllers de api/wl/cms/* (VEI-RD-19e).
+            services.AddScoped<Controllers.Cms.CmsDependencias>();
+
             // Não há filtro de sanitização de entrada por lista de padrões, e a
             // ausência é deliberada.
             //

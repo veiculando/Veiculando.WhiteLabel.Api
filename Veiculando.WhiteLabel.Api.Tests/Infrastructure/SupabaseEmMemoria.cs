@@ -42,7 +42,18 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         /// <summary>Com <see cref="Falhar"/>: aplica a mudança mesmo assim (timeout ambíguo).</summary>
         public Func<SupabaseFake.Chamada, bool> Aplicar { get; set; } = _ => false;
 
-        public DateTimeOffset Agora { get; set; } = new(2026, 9, 30, 12, 0, 0, TimeSpan.Zero);
+        private DateTimeOffset? _agora;
+
+        /// <summary>
+        /// O "agora" do banco simulado (default do <c>created_at</c>). Segue o relógio
+        /// real, porque o BFF sob teste usa o relógio real para a carência da
+        /// varredura; um teste que controla o tempo o fixa.
+        /// </summary>
+        public DateTimeOffset Agora
+        {
+            get => _agora ?? DateTimeOffset.UtcNow;
+            set => _agora = value;
+        }
 
         public SupabaseEmMemoria()
         {
@@ -107,8 +118,15 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
 
         private HttpResponseMessage Rest(SupabaseFake.Chamada chamada, string tabela)
         {
-            var (filtros, limit, offset) = LerQuery(chamada.QueryCrua);
-            var linhas = Tabela(tabela);
+            if (tabela.StartsWith("rpc/", StringComparison.Ordinal))
+            {
+                return Rpcs.TryGetValue(tabela[4..], out var rpc)
+                    ? SupabaseFake.Json(HttpStatusCode.OK, rpc(this))
+                    : SupabaseFake.Json(HttpStatusCode.NotFound, "{\"code\":\"PGRST202\"}");
+            }
+
+            var (filtros, ordem, limit, offset) = LerQuery(chamada.QueryCrua);
+            var linhas = ordem == null ? Tabela(tabela) : ordem(Tabela(tabela)).ToList();
 
             if (chamada.Metodo == HttpMethod.Post)
             {
@@ -138,9 +156,14 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
             throw new NotSupportedException($"PostgREST: {chamada.Metodo} não simulado.");
         }
 
-        private static (List<Func<JsonObject, bool>> Filtros, int? Limit, int Offset) LerQuery(string query)
+        /// <summary>RPCs simuladas: nome → corpo JSON da resposta.</summary>
+        public Dictionary<string, Func<SupabaseEmMemoria, string>> Rpcs { get; } = new();
+
+        private static (List<Func<JsonObject, bool>> Filtros, Func<IEnumerable<JsonObject>, IEnumerable<JsonObject>> Ordem, int? Limit, int Offset)
+            LerQuery(string query)
         {
             var filtros = new List<Func<JsonObject, bool>>();
+            Func<IEnumerable<JsonObject>, IEnumerable<JsonObject>> ordem = null;
             int? limit = null;
             var offset = 0;
 
@@ -153,7 +176,9 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                 switch (chave)
                 {
                     case "select":
+                        continue;
                     case "order":
+                        ordem = Ordenar(valor);
                         continue;
                     case "limit":
                         limit = int.Parse(valor, CultureInfo.InvariantCulture);
@@ -161,25 +186,118 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                     case "offset":
                         offset = int.Parse(valor, CultureInfo.InvariantCulture);
                         continue;
+                    case "or":
+                        var alternativas = Alternativas(valor);
+                        filtros.Add(l => alternativas.Any(a => a(l)));
+                        continue;
                 }
 
-                if (valor == "is.null")
-                    filtros.Add(l => l[chave] == null);
-                else if (valor.StartsWith("eq.", StringComparison.Ordinal))
-                {
-                    var esperado = Literal(valor[3..]);
-                    filtros.Add(l => l[chave]?.ToString() == esperado);
-                }
-                else if (valor.StartsWith("lt.", StringComparison.Ordinal))
-                {
-                    var teto = DateTimeOffset.Parse(valor[3..], CultureInfo.InvariantCulture);
-                    filtros.Add(l => DateTimeOffset.Parse(l[chave]!.ToString(), CultureInfo.InvariantCulture) < teto);
-                }
-                else
-                    throw new NotSupportedException($"Filtro não simulado: {chave}={valor}");
+                filtros.Add(Condicao(chave, valor));
             }
 
-            return (filtros, limit, offset);
+            return (filtros, ordem, limit, offset);
+        }
+
+        private static Func<JsonObject, bool> Condicao(string coluna, string valor)
+        {
+            if (valor == "is.null")
+                return l => l[coluna] == null;
+
+            if (valor.StartsWith("eq.", StringComparison.Ordinal))
+            {
+                var esperado = Literal(valor[3..]);
+                return l => l[coluna]?.ToString() == esperado;
+            }
+
+            if (valor.StartsWith("lt.", StringComparison.Ordinal) || valor.StartsWith("gte.", StringComparison.Ordinal))
+            {
+                var menor = valor.StartsWith("lt.", StringComparison.Ordinal);
+                var limite = DateTimeOffset.Parse(valor[(menor ? 3 : 4)..], CultureInfo.InvariantCulture);
+                return l =>
+                {
+                    var data = DateTimeOffset.Parse(l[coluna]!.ToString(), CultureInfo.InvariantCulture);
+                    return menor ? data < limite : data >= limite;
+                };
+            }
+
+            if (valor.StartsWith("ilike.", StringComparison.Ordinal))
+            {
+                var padrao = Literal(valor[6..]);
+                var regex = new System.Text.RegularExpressions.Regex(
+                    "^" + IlikeParaRegex(padrao) + "$",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+                return l => l[coluna] != null && regex.IsMatch(l[coluna]!.ToString());
+            }
+
+            throw new NotSupportedException($"Filtro não simulado: {coluna}={valor}");
+        }
+
+        // "(a.ilike."*x*",b.ilike."*x*")": separa nas vírgulas que estão fora de aspas.
+        private static List<Func<JsonObject, bool>> Alternativas(string valor)
+        {
+            if (!valor.StartsWith('(') || !valor.EndsWith(')'))
+                throw new NotSupportedException($"or= sem parênteses: {valor}");
+
+            var corpo = valor[1..^1];
+            var partes = new List<string>();
+            var atual = new System.Text.StringBuilder();
+            var emAspas = false;
+
+            for (var i = 0; i < corpo.Length; i++)
+            {
+                var c = corpo[i];
+                if (emAspas && c == '\\' && i + 1 < corpo.Length)
+                {
+                    atual.Append(c).Append(corpo[++i]);
+                    continue;
+                }
+                if (c == '"') emAspas = !emAspas;
+                if (c == ',' && !emAspas)
+                {
+                    partes.Add(atual.ToString());
+                    atual.Clear();
+                    continue;
+                }
+                atual.Append(c);
+            }
+            partes.Add(atual.ToString());
+
+            return partes.Select(p =>
+            {
+                var ponto = p.IndexOf('.');
+                return Condicao(p[..ponto], p[(ponto + 1)..]);
+            }).ToList();
+        }
+
+        // * e % são curingas; \x é o caractere x literal.
+        private static string IlikeParaRegex(string padrao)
+        {
+            var regex = new System.Text.StringBuilder();
+            for (var i = 0; i < padrao.Length; i++)
+            {
+                var c = padrao[i];
+                if (c == '\\' && i + 1 < padrao.Length)
+                    regex.Append(System.Text.RegularExpressions.Regex.Escape(padrao[++i].ToString()));
+                else if (c is '*' or '%')
+                    regex.Append(".*");
+                else if (c == '_')
+                    regex.Append('.');
+                else
+                    regex.Append(System.Text.RegularExpressions.Regex.Escape(c.ToString()));
+            }
+            return regex.ToString();
+        }
+
+        // Só a primeira coluna do order; o resto é desempate que o fake não precisa.
+        private static Func<IEnumerable<JsonObject>, IEnumerable<JsonObject>> Ordenar(string valor)
+        {
+            var primeira = valor.Split(',')[0].Split('.');
+            var coluna = primeira[0];
+            var desc = primeira.Length > 1 && primeira[1] == "desc";
+            Func<JsonObject, IComparable> chave = l => l[coluna] is JsonValue v && v.TryGetValue<int>(out var n)
+                ? n
+                : l[coluna]?.ToString();
+            return linhas => desc ? linhas.OrderByDescending(chave) : linhas.OrderBy(chave);
         }
 
         // "..." com \" e \\ escapados, ou o valor cru.

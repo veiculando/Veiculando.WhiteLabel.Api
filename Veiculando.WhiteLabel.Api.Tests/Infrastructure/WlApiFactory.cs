@@ -57,6 +57,12 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         /// <summary>Captura o que o BFF pediu ao FileServer (PDF de PI).</summary>
         public FileServerStub FileServer { get; } = new();
 
+        /// <summary>
+        /// O Supabase do CMS desta instância. Sempre ligado, mesmo sem as chaves:
+        /// o CI nunca chama o Supabase real (ADR-CMS-004).
+        /// </summary>
+        public SupabaseEmMemoria Supabase { get; } = new();
+
         private readonly IReadOnlyDictionary<string, string?> _configuracaoExtra;
         private readonly bool _comSondaCms;
 
@@ -140,6 +146,9 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                         client.BaseAddress = new Uri("http://fileserver.invalido/");
                     })
                     .ConfigurePrimaryHttpMessageHandler(() => FileServer);
+
+                services.AddHttpClient<Services.Cms.ISupabaseCmsClient, Services.Cms.SupabaseCmsClient>()
+                    .ConfigurePrimaryHttpMessageHandler(() => Supabase.Handler);
 
                 if (_comSondaCms)
                     services.AddControllers().AddApplicationPart(typeof(CmsSondaController).Assembly);
