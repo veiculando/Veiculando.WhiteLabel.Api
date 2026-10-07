@@ -188,4 +188,8 @@
 # SHA completo de `gh pr view 270 --repo veiculando/Veiculando --json
 # mergeCommit`, nunca abreviado. Suite do BFF contra esse Core: 429/429.
 # ---------------------------------------------------------------------------
-0761055e33b072a5e159069091a3e2477eecfc19
+# VEI-RD-111: o login de campo usa Usuario_Operador e WLUsuario_Operador.
+# 0761055e33 e anterior as duas entidades. eade84432e e o merge da PR Core #281
+# em main e contem o merge da #280. SHA de `gh api repos/veiculando/Veiculando/commits/main`.
+# ---------------------------------------------------------------------------
+eade84432eb0d61b7122ff0b93e4a7bdbbabd68f
