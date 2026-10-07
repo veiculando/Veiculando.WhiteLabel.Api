@@ -441,7 +441,10 @@ public class CmsControllersTests
         novas.Should().OnlyContain(a => a["wl_usuario_id"] != null && a["usuario_email"] != null && a["afiliada_id"] != null);
 
         var limite = DateTime.UtcNow.AddSeconds(10);
-        while (factory.Supabase.Objetos.Contains(pendenteCaminho) && DateTime.UtcNow < limite)
+        while (DateTime.UtcNow < limite && (
+            factory.Supabase.Objetos.Contains(pendenteCaminho) ||
+            factory.Supabase.Linhas(CmsSupabase.Auditoria)
+                .Single(a => a["id"]!.ToString() == pendente["id"]!.ToString())["arquivo_limpo_em"] == null))
             await Task.Delay(50);
 
         factory.Supabase.Objetos.Should().NotContain(pendenteCaminho,
