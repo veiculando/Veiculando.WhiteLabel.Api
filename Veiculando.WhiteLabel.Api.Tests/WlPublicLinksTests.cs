@@ -17,6 +17,10 @@ namespace Veiculando.WhiteLabel.Api.Tests
         {
             Criar(null).Convite("token", "qa+teste@example.com").Should()
                 .Be("https://exibidora.teste/login/primeiro-acesso?token=token&email=qa%2Bteste%40example.com");
+            Criar(null).CampoPrimeiroAcesso("token", "qa+teste@example.com").Should()
+                .Be("https://exibidora.teste/login/campo/primeiro-acesso?token=token&email=qa%2Bteste%40example.com");
+            Criar(null).CampoRecuperacao("token", "qa@example.com").Should()
+                .Be("https://exibidora.teste/login/campo/alterar-senha?token=token&email=qa%40example.com");
         }
 
         [Fact]

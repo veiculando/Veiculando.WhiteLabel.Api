@@ -21,6 +21,8 @@ namespace Veiculando.WhiteLabel.Api.Services
 
         public string Convite(string token, string email) => Montar("primeiro-acesso", token, email);
         public string Recuperacao(string token, string email) => Montar("alterar-senha", token, email);
+        public string CampoPrimeiroAcesso(string token, string email) => Montar("campo/primeiro-acesso", token, email);
+        public string CampoRecuperacao(string token, string email) => Montar("campo/alterar-senha", token, email);
 
         private string Montar(string pagina, string token, string email)
         {

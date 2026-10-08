@@ -1,10 +1,13 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Data.Entity;
 using Veiculando.Data.Contexts;
@@ -29,15 +32,30 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         private readonly VeiculandoDataContext _db;
         private readonly JwtSettings _jwtSettings;
         private readonly ITenantQueries _tenant;
+        private readonly WlPublicLinks _links;
+        private readonly IWlTenantResolver _tenantResolver;
+        private readonly IWlPasswordEmailSender _email;
+        private readonly IPasswordResetAttemptGuard _tentativas;
+        private readonly ILogger<CampoAuthController> _logger;
 
         public CampoAuthController(
             VeiculandoDataContext db,
             IOptions<JwtSettings> jwtSettings,
-            ITenantQueries tenant)
+            ITenantQueries tenant,
+            WlPublicLinks links,
+            IWlTenantResolver tenantResolver,
+            IWlPasswordEmailSender email,
+            IPasswordResetAttemptGuard tentativas,
+            ILogger<CampoAuthController> logger)
         {
             _db = db;
             _jwtSettings = jwtSettings.Value;
             _tenant = tenant;
+            _links = links;
+            _tenantResolver = tenantResolver;
+            _email = email;
+            _tentativas = tentativas;
+            _logger = logger;
         }
 
         [AllowAnonymous]
@@ -124,6 +142,88 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 : CampoLoginDecisao.Core(core.Id);
 
             return Ok(Emitir(decisao, core.Email.Endereco, core.Nome, afiliadaId));
+        }
+
+        private static readonly object RespostaEmail = new
+        {
+            message = "Se o e-mail informado estiver cadastrado nesta instância, enviaremos o caminho."
+        };
+
+        [AllowAnonymous]
+        [EnableRateLimiting(Startup.RateLimitRecuperacaoSenha)]
+        [HttpPost("esqueci-senha")]
+        public async Task<IActionResult> EsqueciSenha([FromBody] EsqueciSenhaRequest request, CancellationToken ct)
+        {
+            var email = (request?.Email ?? string.Empty).ToLowerInvariant().Trim();
+            var afiliadaId = _tenant.AfiliadaId;
+            if (string.IsNullOrWhiteSpace(email) || !_tentativas.PermitirTentativa(afiliadaId, email))
+                return Ok(RespostaEmail);
+
+            var usuario = await _db.WlUsuariosOperador.FirstOrDefaultAsync(u =>
+                u.Email.Endereco == email
+                && u.AfiliadaId == afiliadaId
+                && u.StatusExibicao == StatusExibicaoEnum.Ativo
+                && u.StatusConvite == StatusConviteWlEnum.Aceito, ct);
+            if (usuario == null)
+                return Ok(RespostaEmail);
+
+            var token = usuario.GerarTokenRecuperacao();
+            await _db.SaveChangesAsync(ct);
+            try
+            {
+                var marca = (await _tenantResolver.ObterBrandingAsync(afiliadaId))?.NomeExibicao;
+                await _email.EnviarRecuperacaoAsync(usuario.Email.Endereco, marca, _links.CampoRecuperacao(token, email), ct);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            {
+                usuario.InvalidarTokenRecuperacao();
+                await _db.SaveChangesAsync(ct);
+                _logger.LogError(ex, "Falha ao enviar esqueci senha de campo para a afiliada {AfiliadaId}.", afiliadaId);
+            }
+
+            return Ok(RespostaEmail);
+        }
+
+        [AllowAnonymous]
+        [EnableRateLimiting(Startup.RateLimitRecuperacaoSenha)]
+        [HttpPost("primeiro-acesso")]
+        public async Task<IActionResult> SolicitarPrimeiroAcesso([FromBody] EsqueciSenhaRequest request, CancellationToken ct)
+        {
+            var email = (request?.Email ?? string.Empty).ToLowerInvariant().Trim();
+            var afiliadaId = _tenant.AfiliadaId;
+            if (string.IsNullOrWhiteSpace(email) || !_tentativas.PermitirTentativa(afiliadaId, email))
+                return Ok(RespostaEmail);
+
+            var usuario = await _db.WlUsuariosOperador.FirstOrDefaultAsync(u =>
+                u.Email.Endereco == email
+                && u.AfiliadaId == afiliadaId
+                && u.StatusExibicao == StatusExibicaoEnum.Ativo
+                && u.StatusConvite == StatusConviteWlEnum.Pendente, ct);
+            if (usuario == null)
+                return Ok(RespostaEmail);
+
+            string token;
+            try
+            {
+                token = usuario.GerarTokenConvite();
+            }
+            catch (InvalidOperationException)
+            {
+                return Ok(RespostaEmail);
+            }
+
+            await _db.SaveChangesAsync(ct);
+            try
+            {
+                var marca = (await _tenantResolver.ObterBrandingAsync(afiliadaId))?.NomeExibicao;
+                await _email.EnviarConviteAsync(usuario.Email.Endereco, marca, _links.CampoPrimeiroAcesso(token, email), ct);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            {
+                _logger.LogError(ex, "Falha ao enviar primeiro acesso de campo para a afiliada {AfiliadaId}.", afiliadaId);
+            }
+
+            return Ok(RespostaEmail);
         }
 
         private LoginResponse Emitir(CampoLoginDecisao decisao, string email, string nome, int afiliadaId)
