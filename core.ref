@@ -192,4 +192,5 @@
 # 0761055e33 e anterior as duas entidades. eade84432e e o merge da PR Core #281
 # em main e contem o merge da #280. SHA de `gh api repos/veiculando/Veiculando/commits/main`.
 # ---------------------------------------------------------------------------
-eade84432eb0d61b7122ff0b93e4a7bdbbabd68f
+# VEI-RD-119: DefinirAtribuidos entra no Core em 30ac8041d6 (main, merge da #285).
+30ac8041d6f97ba85712982eacd3c5de3a54c947

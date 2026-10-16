@@ -275,6 +275,12 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             var ordem = new OrdemServico(afiliada, periodo, numero, cidades, pecas, actor);
 
+            var coladorInvalido = await PapelInvalido(request.IdColador, exigeColador: true, ct);
+            if (coladorInvalido != null) return coladorInvalido;
+            var fiscalInvalido = await PapelInvalido(request.IdFiscal, exigeColador: false, ct);
+            if (fiscalInvalido != null) return fiscalInvalido;
+            ordem.DefinirAtribuidos(request.IdColador, request.IdFiscal);
+
             if (!ordem.IsValid())
             {
                 return BadRequest(new
@@ -291,8 +297,33 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             {
                 ordem.Id,
                 ordem.NumeroFormatado,
-                PecasCount = pecas.Count
+                PecasCount = pecas.Count,
+                Status = ordem.Status.ToString()
             });
+        }
+
+        [HttpGet("operadores")]
+        public async Task<IActionResult> Operadores(CancellationToken ct)
+        {
+            var operadores = await _db.UsuariosOperador
+                .Where(o => o.IdAfiliada == _tenant.AfiliadaId && o.StatusExibicao == StatusExibicaoEnum.Ativo)
+                .OrderBy(o => o.Nome)
+                .Select(o => new { o.Id, o.Nome, o.Colador, o.Fiscal })
+                .ToListAsync(ct);
+            return Ok(operadores);
+        }
+
+        private async Task<IActionResult> PapelInvalido(int? id, bool exigeColador, CancellationToken ct)
+        {
+            if (id is not > 0) return null;
+            var operador = await _db.UsuariosOperador
+                .FirstOrDefaultAsync(o => o.Id == id && o.IdAfiliada == _tenant.AfiliadaId
+                    && o.StatusExibicao == StatusExibicaoEnum.Ativo, ct);
+            var papel = exigeColador ? operador?.Colador == true : operador?.Fiscal == true;
+            if (papel) return null;
+            return BadRequest(new { message = exigeColador
+                ? "Colador não pertence a esta exibidora ou não tem esse papel."
+                : "Fiscal não pertence a esta exibidora ou não tem esse papel." });
         }
 
         /// <summary>
@@ -614,5 +645,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     {
         public int IdPeriodo { get; set; }
         public List<int> IdPecas { get; set; } = new();
+        public int? IdColador { get; set; }
+        public int? IdFiscal { get; set; }
     }
 }
