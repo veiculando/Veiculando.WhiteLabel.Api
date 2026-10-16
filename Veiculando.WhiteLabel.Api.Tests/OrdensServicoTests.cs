@@ -67,7 +67,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
             var detalheResp = await client.GetAsync($"/api/wl/ordens-servico/{id}");
             detalheResp.StatusCode.Should().Be(HttpStatusCode.OK);
             var detalhe = await detalheResp.Content.ReadFromJsonAsync<JsonElement>();
-            detalhe.GetProperty("status").GetString().Should().Be("Aberta");
+            detalhe.GetProperty("status").GetString().Should().Be("Rascunho");
             detalhe.GetProperty("responsavel").ValueKind.Should().Be(JsonValueKind.Null);
 
             var pecas = detalhe.GetProperty("pecas").EnumerateArray().ToList();
@@ -88,6 +88,48 @@ namespace Veiculando.WhiteLabel.Api.Tests
             pdfResp.Content.Headers.ContentType!.MediaType.Should().Be("application/pdf");
             var bytes = await pdfResp.Content.ReadAsByteArrayAsync();
             bytes.Should().StartWith(new byte[] { 0x25, 0x50, 0x44, 0x46 }); // %PDF
+        }
+
+        [Fact]
+        public async Task Atribui_colador_e_fiscal_na_geracao_e_sem_ninguem_fica_rascunho()
+        {
+            var (factory, client, pecaId) = await PrepararAsync("atr");
+            using var _ = factory;
+            using var __ = client;
+
+            var colador = await OperadorCampoAsync(Afiliada, "ana-atr@exemplo.com", "Ana", colador: true, fiscal: true);
+            var soFiscal = await OperadorCampoAsync(Afiliada, "bia-atr@exemplo.com", "Bia", colador: false, fiscal: true);
+
+            var lista = await client.GetFromJsonAsync<JsonElement>("/api/wl/ordens-servico/operadores");
+            var nomes = lista.EnumerateArray().Select(o => o.GetProperty("nome").GetString()).ToList();
+            nomes.Should().Equal("Ana", "Bia");
+
+            var sem = await client.PostAsJsonAsync("/api/wl/ordens-servico",
+                new { IdPeriodo = 1, IdPecas = new[] { pecaId } });
+            sem.StatusCode.Should().Be(HttpStatusCode.Created);
+            (await sem.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("status").GetString().Should().Be("Rascunho");
+
+            var recusa = await client.PostAsJsonAsync("/api/wl/ordens-servico",
+                new { IdPeriodo = 1, IdPecas = new[] { pecaId }, IdColador = soFiscal, IdFiscal = soFiscal });
+            recusa.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+            var com = await client.PostAsJsonAsync("/api/wl/ordens-servico",
+                new { IdPeriodo = 1, IdPecas = new[] { pecaId }, IdColador = colador, IdFiscal = soFiscal });
+            com.StatusCode.Should().Be(HttpStatusCode.Created, await com.Content.ReadAsStringAsync());
+            (await com.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("status").GetString().Should().Be("Pendente");
+        }
+
+        private static async Task<int> OperadorCampoAsync(int afiliadaId, string email, string nome, bool colador, bool fiscal)
+        {
+            using var ctx = new Veiculando.Data.Contexts.VeiculandoDataContext();
+            await ctx.Database.ExecuteSqlCommandAsync(@"
+INSERT Usuario (Nome, Email, Senha, StatusAprovacao, Acessos, DataUltimoLogin,
+                EmailConfirmado, DataCadastro, DataAtualizacao, StatusExibicao, IdPerfil)
+VALUES (@p0, @p1, 'not-a-login-password', 1, 0, GETUTCDATE(), 1, GETUTCDATE(), GETUTCDATE(), 1, 1);
+INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal)
+VALUES (SCOPE_IDENTITY(), @p2, @p3, @p4);",
+                nome, email, afiliadaId, colador, fiscal);
+            return ctx.Database.SqlQuery<int>("SELECT Id FROM Usuario WHERE Email = @p0", email).First();
         }
 
         [Fact]
