@@ -401,6 +401,33 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             });
         }
 
+        [HttpPost("{id:int}/baixa-colagem")]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public async Task<IActionResult> BaixaColagem(int id, CancellationToken ct)
+        {
+            var ordem = await CarregarComDetalhesAsync(id, ct);
+            if (ordem == null) return NotFound(new { message = "Ordem de serviço não encontrada." });
+            var recusa = BaixaManual.RecusaColagem(ordem.IdColador, ordem.Status.ToString());
+            if (recusa != null) return Conflict(new { message = recusa });
+            ordem.BaixarColagemManual();
+            await _db.SaveChangesAsync(ct);
+            return Ok(new { Status = ordem.Status.ToString() });
+        }
+
+        [HttpPost("{id:int}/foto-galeria")]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public async Task<IActionResult> FotoGaleria(int id, [FromForm] Microsoft.AspNetCore.Http.IFormFile foto, CancellationToken ct)
+        {
+            var ordem = await CarregarComDetalhesAsync(id, ct);
+            if (ordem == null) return NotFound(new { message = "Ordem de serviço não encontrada." });
+            if (foto == null || foto.Length == 0) return BadRequest(new { message = "Selecione uma foto da galeria." });
+            var recusa = BaixaManual.RecusaFoto(ordem.IdFiscal, ordem.Status.ToString());
+            if (recusa != null) return Conflict(new { message = recusa });
+            ordem.RegistrarFotoGaleria();
+            await _db.SaveChangesAsync(ct);
+            return Ok(new { Status = ordem.Status.ToString() });
+        }
+
         [HttpGet("{id:int}/historico")]
         public async Task<IActionResult> GetHistorico(int id, CancellationToken ct)
         {
