@@ -339,6 +339,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (ordem == null)
                 return NotFound(new { message = "Ordem de serviço não encontrada." });
 
+            var nomes = await NomesAtribuidos(ordem, ct);
+
             return Ok(new
             {
                 ordem.Id,
@@ -347,6 +349,10 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 Periodo = ordem.Periodo?.Nome,
                 Cidades = ordem.Cidades.Select(c => c.Cidade?.Nome).Where(n => n != null).Distinct().ToList(),
                 Responsavel = ordem.Responsavel?.Nome,
+                ordem.IdColador,
+                ordem.IdFiscal,
+                Colador = nomes.Colador,
+                Fiscal = nomes.Fiscal,
                 // Conta de serviço do tenant, não o operador WL que gerou a OS
                 // — ver o comentário na classe sobre a ausência de Command no
                 // core para este módulo.
@@ -371,6 +377,30 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// de produto, o ajuste é no construtor de <c>OrdemServico</c>
         /// (Core), não aqui.
         /// </remarks>
+        [HttpPut("{id:int}/atribuicao")]
+        [EnableRateLimiting(Startup.RateLimitEscrita)]
+        public async Task<IActionResult> Reatribuir(int id, [FromBody] OrdemServicoAtribuicaoRequest request, CancellationToken ct)
+        {
+            var ordem = await CarregarComDetalhesAsync(id, ct);
+            if (ordem == null)
+                return NotFound(new { message = "Ordem de serviço não encontrada." });
+
+            var coladorInvalido = await PapelInvalido(request?.IdColador, exigeColador: true, ct);
+            if (coladorInvalido != null) return coladorInvalido;
+            var fiscalInvalido = await PapelInvalido(request?.IdFiscal, exigeColador: false, ct);
+            if (fiscalInvalido != null) return fiscalInvalido;
+
+            ordem.Reatribuir(request?.IdColador, request?.IdFiscal);
+            await _db.SaveChangesAsync(ct);
+
+            return Ok(new
+            {
+                ordem.IdColador,
+                ordem.IdFiscal,
+                ordem.HistoricoAtribuicaoIds
+            });
+        }
+
         [HttpGet("{id:int}/historico")]
         public async Task<IActionResult> GetHistorico(int id, CancellationToken ct)
         {
@@ -656,6 +686,12 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     {
         public int IdPeriodo { get; set; }
         public List<int> IdPecas { get; set; } = new();
+        public int? IdColador { get; set; }
+        public int? IdFiscal { get; set; }
+    }
+
+    public sealed class OrdemServicoAtribuicaoRequest
+    {
         public int? IdColador { get; set; }
         public int? IdFiscal { get; set; }
     }
