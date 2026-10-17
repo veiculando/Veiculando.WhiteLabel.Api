@@ -193,4 +193,5 @@
 # em main e contem o merge da #280. SHA de `gh api repos/veiculando/Veiculando/commits/main`.
 # ---------------------------------------------------------------------------
 # VEI-RD-119: DefinirAtribuidos entra no Core em 30ac8041d6 (main, merge da #285).
-30ac8041d6f97ba85712982eacd3c5de3a54c947
+# VEI-RD-124: baixa manual da colagem e da foto. b1997e64bc é o commit da feature no Core.
+b1997e64bccb8b4bcb636e43ba3689f202d37abc
