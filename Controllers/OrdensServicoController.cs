@@ -104,7 +104,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 {
                     return BadRequest(new
                     {
-                        message = "Status inválido. Valores aceitos: Aberta, Atribuida, EmExecucao, Concluida."
+                        message = "Status inválido. Valores aceitos: Rascunho, Pendente, Colagem, AguardandoFoto, FotoEmAndamento, Concluida, Cancelada."
                     });
                 }
                 query = query.Where(o => o.Status == statusEnum);
