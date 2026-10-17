@@ -420,7 +420,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .Include(pps => pps.PedidoInsercao.Pedido.Campanha)
                 .ToListAsync(ct);
 
-            var bytes = GerarPdf(ordem, periodoAnterior, statusRows);
+            var nomes = await NomesAtribuidos(ordem, ct);
+            var bytes = GerarPdf(ordem, periodoAnterior, statusRows, nomes.Colador, nomes.Fiscal);
 
             Response.Headers["X-Content-Type-Options"] = "nosniff";
             var nomeArquivo = "OS-" + ordem.Numero.ToString("D4") + ".pdf";
@@ -500,7 +501,15 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 : $"{endereco.Logradouro}, {endereco.Numero}";
         }
 
-        private byte[] GerarPdf(OrdemServico ordem, Periodo periodoAnterior, List<PecaPeriodoStatus> statusRows)
+        private async Task<(string Colador, string Fiscal)> NomesAtribuidos(OrdemServico ordem, CancellationToken ct)
+        {
+            var ids = new[] { ordem.IdColador, ordem.IdFiscal }.Where(id => id is > 0).Select(id => id.Value).Distinct().ToList();
+            if (ids.Count == 0) return (null, null);
+            var nomes = await _db.UsuariosOperador.Where(o => ids.Contains(o.Id)).Select(o => new { o.Id, o.Nome }).ToListAsync(ct);
+            return (nomes.FirstOrDefault(n => n.Id == ordem.IdColador)?.Nome, nomes.FirstOrDefault(n => n.Id == ordem.IdFiscal)?.Nome);
+        }
+
+        private byte[] GerarPdf(OrdemServico ordem, Periodo periodoAnterior, List<PecaPeriodoStatus> statusRows, string coladorNome, string fiscalNome)
         {
             var afiliada = ordem.Afiliada;
 
@@ -547,6 +556,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             y += 6;
 
             Texto($"{ordem.NumeroFormatado} — Período: {ordem.Periodo?.Nome}", fontSecao, 18);
+            Texto(PlanilhaAtribuicao.Linha("Colador", coladorNome), fontTexto, 14);
+            Texto(PlanilhaAtribuicao.Linha("Fiscal", fiscalNome), fontTexto, 14);
             y += 4;
 
             var colunas = new[] { "CÓDIGO", "CAMPANHA ANTERIOR", "CAMPANHA ATUAL", "DATA COLADO", "FOTO", "MOTIVO" };
