@@ -48,11 +48,24 @@ namespace Veiculando.WhiteLabel.Api
 
                 var proxies = Configuration.GetSection("ReverseProxy:KnownProxies").Get<string[]>()
                               ?? Array.Empty<string>();
+                var configurados = 0;
                 foreach (var proxy in proxies)
                 {
                     if (IPAddress.TryParse(proxy, out var address))
+                    {
                         options.KnownProxies.Add(address);
+                        configurados++;
+                    }
                 }
+
+                // Um salto por proxy confiável. Em produção a cadeia é Cloudflare ->
+                // cloudflared -> edge -> BFF, e o BFF recebe "<cliente>, <cloudflared>"
+                // vindo do edge. Com o padrão (1) ele desembrulha só o edge, o
+                // cliente visto vira o cloudflared e o rate limit por IP passa a
+                // ser global. O limite continua finito: um X-Forwarded-For forjado
+                // à esquerda fica além dele e não escolhe a partição.
+                if (configurados > 1)
+                    options.ForwardLimit = configurados;
             });
 
             // Autorização granular por permissão (TP-R2, blocker B3).
