@@ -50,6 +50,7 @@ fechada (erro explícito, nunca default silencioso).
 | `WlUploads__Container` | Container de uploads. Precisa começar com `wl-uploads-` e ser **privado**; o BFF recusa container público. | `WL_UPLOADS_CONTAINER` (`wl-uploads-prd`) |
 | `WlPasswordEmail__SendGridApiKey` | Convite, primeiro acesso e recuperação de senha. | `SENDGRID_API_KEY` |
 | `WlPasswordEmail__FromEmail` | Remetente autenticado no SendGrid. | `WL_PASSWORD_FROM_EMAIL` |
+| `WlPasswordEmail__FromName` | Nome exibido no remetente (ex.: "Aurum via Veiculando"). Opcional; padrão `Veiculando WhiteLabel`. | `WL_PASSWORD_FROM_NAME` |
 | `WlProspeccao__AppUrl` | Origem HTTPS do App para o handoff de prospecção. Sem ela, `POST /api/wl/prospeccao/sessao` responde 503. | `https://` + `WL_APP_HOST` |
 | `GoogleMapsApiKey` | Chave de **navegador** do Maps, entregue pelo mapa-config (restrita por referrer). Nunca a chave servidor-a-servidor do Core. | `GOOGLE_MAPS_BROWSER_API_KEY` |
 | `ReverseProxy__KnownProxies__N` | IPs literais dos proxies confiáveis. Ver "Atrás do proxy". | fixo no compose |
