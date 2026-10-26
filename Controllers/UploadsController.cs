@@ -35,12 +35,13 @@ public sealed class UploadsController : WlCoreProxyControllerBase
     private readonly WlUploadReferences _references;
     private readonly ISeedAccountResolver _seed;
     private readonly ILogger<UploadsController> _logger;
+    private readonly IFotoPecaLegadaSource _fotoLegada;
 
     public UploadsController(VeiculandoDataContext db, ITenantQueries tenant, IFileValidationService validation,
         IWlUploadStorage storage, WlUploadPipeline pipeline, WlUploadReferences references,
-        ISeedAccountResolver seed, ILogger<UploadsController> logger)
-        => (_db, _tenant, _validation, _storage, _pipeline, _references, _seed, _logger) =
-            (db, tenant, validation, storage, pipeline, references, seed, logger);
+        ISeedAccountResolver seed, ILogger<UploadsController> logger, IFotoPecaLegadaSource fotoLegada)
+        => (_db, _tenant, _validation, _storage, _pipeline, _references, _seed, _logger, _fotoLegada) =
+            (db, tenant, validation, storage, pipeline, references, seed, logger, fotoLegada);
 
     [HttpPost("pecas/locais/{idLocal}/pecas/{pecaId}/foto")]
     [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
@@ -127,10 +128,19 @@ public sealed class UploadsController : WlCoreProxyControllerBase
             && p.StatusExibicao != StatusExibicaoEnum.Deletado && p.Local.StatusExibicao != StatusExibicaoEnum.Deletado, ct);
         if (peca == null) return NotFound(new { message = "Peça não encontrada neste local." });
         var name = peca.Foto?.ArquivoNome;
+        var downloadUrl = $"/api/wl/pecas/locais/{idLocal}/pecas/{pecaId}/foto";
         if (string.IsNullOrEmpty(name) || !System.Text.RegularExpressions.Regex.IsMatch(name, @"^wl-[a-f0-9]{32}\.(jpg|png)$"))
-            return Ok(Array.Empty<object>()); // Foto legada não é um blob privado WL.
+        {
+            // Foto cadastrada pelo Core: a mesma peça, servida do FileServer pelo BFF.
+            FotoPecaLegada legada;
+            try { legada = await _fotoLegada.ObterAsync(name, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { return StorageError(ex); }
+            if (legada == null) return Ok(Array.Empty<object>());
+            return Ok(new[] { new { FileName = name, legada.ContentType, Size = (long)legada.Conteudo.Length,
+                Sha256 = (string)null, CreatedAt = (DateTimeOffset?)null, downloadUrl, status = (string)null } });
+        }
         var key = Key("pecas", pecaId, name);
-        try { return Ok(new[] { Descriptor(await _storage.InfoAsync(key, ct), $"/api/wl/pecas/locais/{idLocal}/pecas/{pecaId}/foto") }); }
+        try { return Ok(new[] { Descriptor(await _storage.InfoAsync(key, ct), downloadUrl) }); }
         catch (Exception ex) when (ex is not OperationCanceledException) { return StorageError(ex); }
     }
 
@@ -165,8 +175,15 @@ public sealed class UploadsController : WlCoreProxyControllerBase
             && p.StatusExibicao != StatusExibicaoEnum.Deletado && p.Local.StatusExibicao != StatusExibicaoEnum.Deletado, ct);
         if (peca == null || string.IsNullOrEmpty(peca.Foto?.ArquivoNome)) return NotFound();
         var key = Key("pecas", pecaId, peca.Foto.ArquivoNome);
-        if (!KeyBelongs(key, "pecas", pecaId)) return NotFound();
-        return await Download(key, ct);
+        if (KeyBelongs(key, "pecas", pecaId)) return await Download(key, ct);
+
+        FotoPecaLegada legada;
+        try { legada = await _fotoLegada.ObterAsync(peca.Foto.ArquivoNome, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return StorageError(ex); }
+        if (legada == null) return NotFound();
+        Response.Headers.CacheControl = "private, no-store";
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        return File(legada.Conteudo, legada.ContentType, peca.Foto.ArquivoNome);
     }
 
     [HttpGet("checking/item/{idItemPI}/fotos/{fotoId}/arquivo")]

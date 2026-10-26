@@ -29,12 +29,14 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         private readonly ITenantQueries _tenant;
         private readonly IWlUploadStorage _storage;
         private readonly VeiculandoDataContext _db;
+        private readonly IFotoPecaLegadaSource _fotoLegada;
 
-        public AppInventoryController(ITenantQueries tenant, IWlUploadStorage storage, VeiculandoDataContext db)
+        public AppInventoryController(ITenantQueries tenant, IWlUploadStorage storage, VeiculandoDataContext db, IFotoPecaLegadaSource fotoLegada)
         {
             _tenant = tenant;
             _storage = storage;
             _db = db;
+            _fotoLegada = fotoLegada;
         }
 
         /// <summary>
@@ -172,7 +174,15 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var peca = await _tenant.Pecas.AsNoTracking().FirstOrDefaultAsync(p =>
                 p.Codigo == code && p.StatusExibicao == StatusExibicaoEnum.Ativo &&
                 p.Local.StatusExibicao == StatusExibicaoEnum.Ativo, ct);
-            if (peca == null || !HasWhiteLabelPhoto(peca)) return NotFound();
+            if (peca == null) return NotFound();
+            if (!HasWhiteLabelPhoto(peca))
+            {
+                var legada = await _fotoLegada.ObterAsync(peca.Foto?.ArquivoNome, ct);
+                if (legada == null) return NotFound();
+                Response.Headers.CacheControl = "public, max-age=300";
+                Response.Headers["X-Content-Type-Options"] = "nosniff";
+                return File(legada.Conteudo, legada.ContentType);
+            }
 
             var key = $"tenant-{_tenant.AfiliadaId}/pecas/{peca.Id}/{peca.Foto.ArquivoNome}";
             try
@@ -245,7 +255,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 price = peca.ValorPadrao,
                 tablePrice = peca.ValorTabela,
                 periodicity = peca.PeriodicidadePadrao?.Nome,
-                imageUrl = HasWhiteLabelPhoto(peca) ? $"/api/wl/app/inventory/{Uri.EscapeDataString(peca.Codigo)}/photo" : null,
+                imageUrl = HasWhiteLabelPhoto(peca) || FileServerFotoPecaLegadaSource.NomeValido(peca.Foto?.ArquivoNome) ? $"/api/wl/app/inventory/{Uri.EscapeDataString(peca.Codigo)}/photo" : null,
                 audience = local?.Publico?.Audiencia,
                 audienceMatch = audienciaMatch,
                 recommended = recomendada,
