@@ -153,10 +153,14 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             {
                 await _db.SaveChangesAsync();
             }
-            catch (DbUpdateException)
+            catch (DbUpdateException ex)
             {
                 // Dois primeiros logins simultâneos: o índice único (Email, AfiliadaId)
                 // barra o segundo, que segue com o registro que o primeiro gravou.
+                // Qualquer outra falha cai no 401 de sempre, mas fica no log.
+                _logger.LogWarning(ex,
+                    "Falha ao migrar o usuário legado {UsuarioLegadoId} na afiliada {AfiliadaId}.",
+                    legado.Id, afiliadaId);
                 _db.Entry(usuario).State = EntityState.Detached;
                 return await _tenant.UsuariosAfiliada.FirstOrDefaultAsync(u =>
                     u.Email.Endereco == email && u.StatusExibicao == StatusExibicaoEnum.Ativo);
