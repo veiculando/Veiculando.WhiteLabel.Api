@@ -142,9 +142,9 @@ END");
         [Fact]
         public async Task Foto_cadastrada_pelo_Core_e_entregue_pelo_BFF_mesmo_com_nome_em_maiusculas()
         {
-            const int afiliada = 826;
-            var localId = await Seed.LocalAsync(afiliada, "LOC826A");
-            var pecaId = await Seed.PecaAsync(localId, "P-APP-826-A");
+            const int afiliada = 830;
+            var localId = await Seed.LocalAsync(afiliada, "LOC830A");
+            var pecaId = await Seed.PecaAsync(localId, "P-APP-830-A");
             using (var ctx = new VeiculandoDataContext())
                 await ctx.Database.ExecuteSqlCommandAsync("UPDATE Peca SET Foto = @p0 WHERE Id = @p1", "peca_SJCAUR2_1_2.jpg", pecaId);
 
@@ -159,8 +159,8 @@ END");
                 : new HttpResponseMessage(HttpStatusCode.NotFound);
             using var client = factory.ClienteAnonimo();
 
-            var item = await client.GetFromJsonAsync<InventoryItem>("/api/wl/app/inventory/P-APP-826-A");
-            item.ImageUrl.Should().Be("/api/wl/app/inventory/P-APP-826-A/photo");
+            var item = await client.GetFromJsonAsync<InventoryItem>("/api/wl/app/inventory/P-APP-830-A");
+            item.ImageUrl.Should().Be("/api/wl/app/inventory/P-APP-830-A/photo");
 
             var photo = await client.GetAsync(item.ImageUrl);
             photo.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -168,9 +168,9 @@ END");
             (await photo.Content.ReadAsByteArrayAsync()).Should().Equal(bytes);
 
             // Outra exibidora não alcança a peça, então nem pergunta ao FileServer.
-            using var otherFactory = new WlApiFactory(_db, 827);
+            using var otherFactory = new WlApiFactory(_db, 831);
             using var otherClient = otherFactory.ClienteAnonimo();
-            (await otherClient.GetAsync("/api/wl/app/inventory/P-APP-826-A/photo")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+            (await otherClient.GetAsync("/api/wl/app/inventory/P-APP-830-A/photo")).StatusCode.Should().Be(HttpStatusCode.NotFound);
             otherFactory.FileServer.Rotas.Should().BeEmpty();
         }
 
@@ -181,9 +181,9 @@ END");
         [InlineData("foto.pdf")]
         public async Task Nome_de_foto_legada_invalido_nao_vira_imageUrl_nem_chamada_ao_FileServer(string nome)
         {
-            const int afiliada = 828;
-            var codigo = $"P-APP-828-{Math.Abs(nome.GetHashCode()) % 100000}";
-            var localId = await Seed.LocalAsync(afiliada, $"L828{Math.Abs(nome.GetHashCode()) % 100000}");
+            const int afiliada = 832;
+            var codigo = $"P-APP-832-{Math.Abs(nome.GetHashCode()) % 100000}";
+            var localId = await Seed.LocalAsync(afiliada, $"L832{Math.Abs(nome.GetHashCode()) % 100000}");
             var pecaId = await Seed.PecaAsync(localId, codigo);
             using (var ctx = new VeiculandoDataContext())
                 await ctx.Database.ExecuteSqlCommandAsync("UPDATE Peca SET Foto = @p0 WHERE Id = @p1", nome, pecaId);
