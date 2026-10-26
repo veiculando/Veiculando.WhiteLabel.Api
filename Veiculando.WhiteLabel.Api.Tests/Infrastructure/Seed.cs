@@ -84,6 +84,36 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
             return operador.Id;
         }
 
+        /// <summary>
+        /// Usuário da Exibidora antiga (Usuario + UsuarioAfiliada do Core), com a
+        /// senha no hash legado. Exige a afiliada criada (<see cref="AfiliadaAsync"/>).
+        /// </summary>
+        public static async Task<int> UsuarioExibidoraLegadoAsync(
+            int afiliadaId, string email, string senha = SenhaPadrao, bool aprovado = true)
+        {
+            using var ctx = new VeiculandoDataContext();
+            var hash = Veiculando.WhiteLabel.Api.Services.SenhaUsuarioCore.Hash(senha);
+            var status = aprovado ? 1 : 0;
+
+            return await ctx.Database.SqlQuery<int>($@"
+IF NOT EXISTS (SELECT 1 FROM PerfilUsuario WHERE Id = 6)
+BEGIN
+    SET IDENTITY_INSERT PerfilUsuario ON;
+    INSERT INTO PerfilUsuario (Id, Nome, Codigo, DataCadastro, DataAtualizacao, StatusExibicao)
+    VALUES (6, 'Exibidora', 'EXIB', GETDATE(), GETDATE(), 1);
+    SET IDENTITY_INSERT PerfilUsuario OFF;
+END
+
+INSERT INTO Usuario (Nome, Email, Senha, StatusAprovacao, Acessos, DataUltimoLogin,
+                     EmailConfirmado, DataCadastro, DataAtualizacao, StatusExibicao, IdPerfil)
+VALUES ('Usuario Legado', '{email}', '{hash}', {status}, 0, GETDATE(),
+        1, GETDATE(), GETDATE(), 1, 6);
+
+DECLARE @id INT = SCOPE_IDENTITY();
+INSERT INTO UsuarioAfiliada (Id, IdAfiliada, Cargo) VALUES (@id, {afiliadaId}, 'Diretor');
+SELECT @id;").SingleAsync();
+        }
+
         public static async Task<int> AnuncianteAsync(int afiliadaId, string email, string cnpj = null)
         {
             using var ctx = new VeiculandoDataContext();

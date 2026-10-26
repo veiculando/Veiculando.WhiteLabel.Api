@@ -92,6 +92,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .FirstOrDefaultAsync(u => u.Email.Endereco == normalizedEmail 
                                        && u.StatusExibicao == StatusExibicaoEnum.Ativo );
 
+            if (usuario == null)
+                usuario = await MigrarUsuarioLegadoAsync(normalizedEmail, request.Senha, afiliadaId);
+
             if (usuario == null ||
                 usuario.StatusConvite != StatusConviteWlEnum.Aceito ||
                 string.IsNullOrWhiteSpace(usuario.SenhaHash) ||
@@ -102,6 +105,67 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             await _db.SaveChangesAsync();
 
             return Ok(EmitirSessao(usuario, afiliadaId));
+        }
+
+        /// <summary>
+        /// Primeiro login de um usuário da Exibidora antiga (UsuarioAfiliada do Core)
+        /// nesta instância: confere a senha legada e cria o WlUsuarioAfiliada
+        /// correspondente, já com o convite aceito e a mesma senha em bcrypt.
+        /// </summary>
+        /// <remarks>
+        /// O tenant reaproveita o banco do Core, então os usuários da exibidora já
+        /// existem — sem isto, cada um precisaria de um convite para entrar.
+        /// Só migra quando não há NENHUM WlUsuario com o e-mail nesta afiliada
+        /// (inclusive excluído ou com convite pendente): quem já tem cadastro WL
+        /// segue o fluxo WL, e um usuário excluído não volta pela porta do legado.
+        /// O legado era o administrador da exibidora, por isso recebe todas as
+        /// permissões; o ajuste fino fica na tela de usuários.
+        /// </remarks>
+        private async Task<WlUsuarioAfiliada> MigrarUsuarioLegadoAsync(string email, string senha, int afiliadaId)
+        {
+            if (await _tenant.Usuarios.AnyAsync(u => u.Email.Endereco == email))
+                return null;
+
+            var legado = await _db.UsuariosAfiliada.AsNoTracking().FirstOrDefaultAsync(u =>
+                u.Email.Endereco == email
+                && u.IdAfiliada == afiliadaId
+                && u.StatusExibicao == StatusExibicaoEnum.Ativo
+                && u.EmailConfirmado
+                && u.StatusAprovacao == StatusUsuarioEnum.Aprovado);
+
+            if (legado == null || !SenhaUsuarioCore.Confere(senha, legado.Senha))
+                return null;
+
+            var usuario = new WlUsuarioAfiliada(
+                legado.Nome,
+                email,
+                BC.HashPassword(senha),
+                afiliadaId,
+                legado.Cargo,
+                legado.Departamento,
+                permissoes: WlPermissoesValidas.Lista.ToArray());
+
+            if (!usuario.IsValid())
+                return null;
+
+            _db.WlUsuariosAfiliada.Add(usuario);
+            try
+            {
+                await _db.SaveChangesAsync();
+            }
+            catch (DbUpdateException)
+            {
+                // Dois primeiros logins simultâneos: o índice único (Email, AfiliadaId)
+                // barra o segundo, que segue com o registro que o primeiro gravou.
+                _db.Entry(usuario).State = EntityState.Detached;
+                return await _tenant.UsuariosAfiliada.FirstOrDefaultAsync(u =>
+                    u.Email.Endereco == email && u.StatusExibicao == StatusExibicaoEnum.Ativo);
+            }
+
+            _logger.LogInformation(
+                "Usuário legado {UsuarioLegadoId} migrado para o WL como {WlUsuarioId} na afiliada {AfiliadaId}.",
+                legado.Id, usuario.Id, afiliadaId);
+            return usuario;
         }
 
         /// <summary>
