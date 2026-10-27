@@ -1,10 +1,10 @@
 using System;
-using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Veiculando.Shared.Helpers;
 
 namespace Veiculando.WhiteLabel.Api.Services
 {
@@ -20,10 +20,10 @@ namespace Veiculando.WhiteLabel.Api.Services
     /// continua no BFF, que só chega aqui depois de achar a peça em
     /// <c>ITenantQueries.Pecas</c>. O browser nunca recebe a URL do FileServer.</para>
     ///
-    /// <para>O FileServer roda em Linux e os arquivos estão em minúsculas, mas
-    /// boa parte dos nomes gravados no banco vem em maiúsculas
-    /// (<c>peca_SJCAUR2_1_2.jpg</c>). Por isso a busca tenta o nome gravado e,
-    /// se não achar, o nome em minúsculas.</para>
+    /// <para>O nome é normalizado com <c>FileHelper.NormalizeFileName</c>, a
+    /// mesma regra do Core (VEI-SUP-13): o FileServer grava em minúsculas e o
+    /// <c>FotoPeca.Url</c> lê em minúsculas, mas há nomes no banco em
+    /// maiúsculas (<c>peca_SJCAUR2_1_2.jpg</c>).</para>
     /// </remarks>
     public interface IFotoPecaLegadaSource
     {
@@ -55,23 +55,19 @@ namespace Veiculando.WhiteLabel.Api.Services
         {
             if (!NomeValido(arquivoNome)) return null;
 
-            foreach (var nome in new[] { arquivoNome, arquivoNome.ToLowerInvariant() }.Distinct(StringComparer.Ordinal))
-            {
-                using var resposta = await _http.GetAsync(
-                    $"conteudo/pecas/fotos/{Uri.EscapeDataString(nome)}", HttpCompletionOption.ResponseHeadersRead, ct);
+            var nome = FileHelper.NormalizeFileName(arquivoNome);
+            using var resposta = await _http.GetAsync(
+                $"conteudo/pecas/fotos/{Uri.EscapeDataString(nome)}", HttpCompletionOption.ResponseHeadersRead, ct);
 
-                if (resposta.StatusCode == HttpStatusCode.NotFound) continue;
-                resposta.EnsureSuccessStatusCode();
+            if (resposta.StatusCode == HttpStatusCode.NotFound) return null;
+            resposta.EnsureSuccessStatusCode();
 
-                var tipo = resposta.Content.Headers.ContentType?.MediaType;
-                if (tipo != "image/jpeg" && tipo != "image/png") return null;
-                if (resposta.Content.Headers.ContentLength > TamanhoMaximo) return null;
+            var tipo = resposta.Content.Headers.ContentType?.MediaType;
+            if (tipo != "image/jpeg" && tipo != "image/png") return null;
+            if (resposta.Content.Headers.ContentLength > TamanhoMaximo) return null;
 
-                var bytes = await resposta.Content.ReadAsByteArrayAsync(ct);
-                return bytes.Length > TamanhoMaximo ? null : new FotoPecaLegada(bytes, tipo);
-            }
-
-            return null;
+            var bytes = await resposta.Content.ReadAsByteArrayAsync(ct);
+            return bytes.Length > TamanhoMaximo ? null : new FotoPecaLegada(bytes, tipo);
         }
     }
 }
