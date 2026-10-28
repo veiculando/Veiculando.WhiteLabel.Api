@@ -1,0 +1,158 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.Data.Entity;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Mvc;
+using Veiculando.Data.Contexts;
+using Veiculando.Domain.Entities;
+using Veiculando.Domain.Entities.OrdensServico;
+using Veiculando.Domain.Enums;
+using Veiculando.WhiteLabel.Api.Middleware;
+using Veiculando.WhiteLabel.Api.Services;
+
+namespace Veiculando.WhiteLabel.Api.Controllers;
+
+public sealed class CampoOrdensFiltro
+{
+    public string Busca { get; set; }
+    public string Estado { get; set; }
+    public DateTime? De { get; set; }
+    public DateTime? Ate { get; set; }
+    public string Ordenacao { get; set; } = "recente";
+    [Range(-90d, 90d)] public double? Lat { get; set; }
+    [Range(-180d, 180d)] public double? Lng { get; set; }
+    [Range(1, int.MaxValue)] public int Pagina { get; set; } = 1;
+    [Range(1, 100)] public int Tamanho { get; set; } = WlPaginacao.PageSizePadrao;
+}
+
+[Route("api/wl/campo/ordens")]
+public sealed class CampoOrdensController : CampoControllerBase
+{
+    private readonly VeiculandoDataContext _db;
+    private readonly ITenantQueries _queries;
+
+    public CampoOrdensController(VeiculandoDataContext db, ITenantQueries queries, ITenantContext tenant) : base(tenant)
+    {
+        _db = db;
+        _queries = queries;
+    }
+
+    // O filtro do Core inclui atribuicao atual/legada e historico delimitado.
+    // A afiliada vem do Host e o operador do JWT, nunca da query string.
+    private IQueryable<OrdemServico> Visiveis(FiltroListaCampo filtro) =>
+        ListaCampoConsulta.Aplicar(_queries.OrdensServico.AsNoTracking()
+            .Where(o => o.Pecas.All(p => p.Peca.Local.IdAfiliada == AfiliadaId)), filtro);
+
+    private static IQueryable<OrdemServico> ComResumo(IQueryable<OrdemServico> consulta) => consulta
+        .Include(o => o.Periodo)
+        .Include(o => o.Cidades.Select(c => c.Cidade))
+        .Include(o => o.Pecas.Select(p => p.Peca.Local.Cidade));
+
+    [HttpGet]
+    public async Task<IActionResult> Listar([FromQuery] CampoOrdensFiltro pedido, CancellationToken ct)
+    {
+        if (pedido.De > pedido.Ate)
+            return BadRequest(new { message = "O período inicial deve ser anterior ou igual ao final." });
+        if ((long)(pedido.Pagina - 1) * pedido.Tamanho > int.MaxValue)
+            return BadRequest(new { message = "Página fora do limite de consulta." });
+        var filtro = new FiltroListaCampo(AfiliadaId, OperadorId) {
+            Busca = pedido.Busca, De = pedido.De, Ate = pedido.Ate,
+            Latitude = pedido.Lat, Longitude = pedido.Lng
+        };
+        if (!string.IsNullOrWhiteSpace(pedido.Estado))
+        {
+            if (!Enum.TryParse<StatusOrdemServicoEnum>(pedido.Estado, true, out var estado)
+                || !Enum.IsDefined(estado) || estado == StatusOrdemServicoEnum.Rascunho)
+                return BadRequest(new { message = "Estado de campo inválido." });
+            filtro.Estado = estado;
+        }
+        switch (pedido.Ordenacao?.ToLowerInvariant())
+        {
+            case null: case "": case "recente": filtro.Ordenacao = OrdenacaoListaCampo.MaisRecente; break;
+            case "antigo": filtro.Ordenacao = OrdenacaoListaCampo.MaisAntigo; break;
+            case "proximo":
+                if (!pedido.Lat.HasValue || !pedido.Lng.HasValue)
+                    return BadRequest(new { message = "Informe latitude e longitude para ordenar por proximidade." });
+                filtro.Ordenacao = OrdenacaoListaCampo.Proximidade;
+                break;
+            default: return BadRequest(new { message = "Ordenação inválida. Use proximo, recente ou antigo." });
+        }
+        var consulta = Visiveis(filtro);
+        var total = await consulta.CountAsync(ct);
+        // Fecha os empates de distancia/data da consulta do Core antes do OFFSET.
+        var ordenada = ((IOrderedQueryable<OrdemServico>)consulta).ThenBy(o => o.Id);
+        var ordens = await ComResumo(ordenada.Skip((pedido.Pagina - 1) * pedido.Tamanho).Take(pedido.Tamanho)).ToListAsync(ct);
+        return Ok(new { itens = ordens.Select(o => CampoOrdensProjecao.Linha(o, OperadorId)), total,
+            pagina = pedido.Pagina, tamanho = pedido.Tamanho });
+    }
+
+    [HttpGet("{id:int}")]
+    public async Task<IActionResult> Detalhar(int id, CancellationToken ct)
+    {
+        var ordem = await ComResumo(Visiveis(new FiltroListaCampo(AfiliadaId, OperadorId)))
+            .FirstOrDefaultAsync(o => o.Id == id, ct);
+        if (ordem == null) return NotFound(new { message = "Ordem de serviço não encontrada." });
+        var resposta = CampoOrdensProjecao.Linha(ordem, OperadorId);
+        resposta.Locais = Array.Empty<CampoLocalDto>();
+        if (ordem.DataInicio == null) return Ok(resposta);
+
+        var anterior = await _db.Periodos.AsNoTracking()
+            .Where(p => p.Periodicidade.Tipo == ordem.Periodo.Periodicidade.Tipo && p.DataInicio < ordem.Periodo.DataInicio)
+            .OrderByDescending(p => p.DataInicio).ThenByDescending(p => p.Id).FirstOrDefaultAsync(ct);
+        var periodos = new[] { ordem.IdPeriodo, anterior?.Id ?? ordem.IdPeriodo };
+        var pecas = ordem.Pecas.Select(p => p.IdPeca).ToArray();
+        var status = await _queries.PecaPeriodoStatus.AsNoTracking()
+            .Where(p => pecas.Contains(p.IdPeca) && periodos.Contains(p.IdPeriodo)
+                && (p.PedidoInsercao == null || p.PedidoInsercao.IdAfiliada == AfiliadaId)
+                && (p.PedidoReserva == null || p.PedidoReserva.IdAfiliada == AfiliadaId))
+            .Include(p => p.Pedido.Campanha).Include(p => p.PedidoReserva.Pedido.Campanha)
+            .Include(p => p.PedidoInsercao.Pedido.Campanha).ToListAsync(ct);
+        var atuais = status.Where(p => p.IdPeriodo == ordem.IdPeriodo)
+            .GroupBy(p => p.IdPeca).ToDictionary(g => g.Key, g => g.OrderByDescending(p => p.Id).First());
+        var anteriores = status.Where(p => anterior != null && p.IdPeriodo == anterior.Id)
+            .GroupBy(p => p.IdPeca).ToDictionary(g => g.Key, g => g.OrderByDescending(p => p.Id).First());
+        var campanhas = atuais.Values.Select(CampanhaDe).Where(c => c != null).Select(c => c.Id).Distinct().ToArray();
+        var artes = await _db.ArtesFinais.AsNoTracking().Include(a => a.Motivo)
+            .Where(a => campanhas.Contains(a.Motivo.IdCampanha) && a.StatusExibicao == StatusExibicaoEnum.Ativo
+                && a.Motivo.StatusExibicao == StatusExibicaoEnum.Ativo && a.ImagemPreview.ArquivoNome != null
+                && a.ImagemPreview.ArquivoNome != "")
+            .OrderByDescending(a => a.DataCadastro).ThenByDescending(a => a.Id).ToListAsync(ct);
+        var fotos = await _db.CheckingFotos.AsNoTracking()
+            .Where(f => pecas.Contains(f.CheckingItem.IdPeca)
+                && f.CheckingItem.Peca.Local.IdAfiliada == AfiliadaId
+                && f.CheckingItem.Checking.PedidoInsercao.IdAfiliada == AfiliadaId
+                && f.CheckingItem.PedidoInsercaoItem.PedidoItem.Periodo.DataInicio < ordem.Periodo.DataInicio
+                && f.UrlArquivo != null && f.UrlArquivo != ""
+                && (f.StatusExibicao == StatusExibicaoEnum.Ativo || f.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente))
+            .Select(f => new { f.Id, f.CheckingItem.IdPeca, f.DataCadastro,
+                Periodo = f.CheckingItem.PedidoInsercaoItem.PedidoItem.Periodo.DataInicio })
+            .ToListAsync(ct);
+        resposta.Locais = ordem.Pecas.OrderBy(p => p.Peca.Local.Codigo).ThenBy(p => p.Peca.Codigo)
+            .GroupBy(p => p.Peca.Local.Id).Select(g => {
+                var local = g.First().Peca.Local;
+                var itens = g.Select(p => {
+                    atuais.TryGetValue(p.IdPeca, out var atual);
+                    anteriores.TryGetValue(p.IdPeca, out var antes);
+                    var campanha = CampanhaDe(atual);
+                    // O modelo liga a arte a campanha/motivo/formato, nao diretamente a peca.
+                    var arte = p.Peca.IdFormatoArteFinal == null ? null : artes.FirstOrDefault(a =>
+                        a.Motivo.IdCampanha == campanha?.Id && a.IdFormato == p.Peca.IdFormatoArteFinal);
+                    var foto = fotos.Where(f => f.IdPeca == p.IdPeca).OrderByDescending(f => f.Periodo)
+                        .ThenByDescending(f => f.DataCadastro).ThenByDescending(f => f.Id).FirstOrDefault();
+                    return new CampoPecaDto(p.IdPeca, p.Peca.Codigo, CampanhaDe(antes)?.Nome, campanha?.Nome,
+                        arte?.Motivo.Nome, p.DataColagem, p.DataFotoCampo, local.GeoLocalizacao?.Latitude,
+                        local.GeoLocalizacao?.Longitude, foto == null ? null : $"/api/wl/campo/imagens/checking/{foto.Id}",
+                        arte == null ? null : $"/api/wl/campo/imagens/arte/{arte.Id}");
+                }).ToArray();
+                return new CampoLocalDto(local.Id, local.Endereco?.Numero, local.Codigo,
+                    local.Endereco?.Logradouro, local.Endereco?.Bairro, local.Cidade?.Nome, itens);
+            }).ToArray();
+        return Ok(resposta);
+    }
+
+    private static Campanha CampanhaDe(PecaPeriodoStatus p) =>
+        p?.PedidoInsercao?.Pedido?.Campanha ?? p?.PedidoReserva?.Pedido?.Campanha ?? p?.Pedido?.Campanha;
+}
