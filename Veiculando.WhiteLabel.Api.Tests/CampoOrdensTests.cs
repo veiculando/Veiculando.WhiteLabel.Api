@@ -189,6 +189,8 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
                 9, 3, 100, 100, 0, "", "", new[] { ".jpg" }, user);
             var motivo = new Veiculando.Domain.Entities.Arte.Motivo(campanha, "Motivo Campo", "", await ctx.UsuariosAnunciantes.FindAsync(1));
             var arte = new Veiculando.Domain.Entities.Arte.ArteFinal(motivo, formato, "privado-alta.pdf", "privado-preview.jpg", user);
+            var arteAntiga = new Veiculando.Domain.Entities.Arte.ArteFinal(motivo, formato, "privado-antiga.pdf", "privado-antiga.jpg", user);
+            ctx.ArtesFinais.Add(arteAntiga);
             ctx.ArtesFinais.Add(arte);
             var pedidoAtual = await ctx.Pedidos.Where(x => x.IdPeriodo == 1 && x.Itens.Any(i => i.IdPeca == pecaId)).FirstAsync();
             ctx.PecaPeriodoStatus.Add(new Veiculando.Domain.Entities.PecaPeriodoStatus(peca, atual, pedidoAtual));
@@ -200,7 +202,7 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
             ctx.Checkings.Add(checking);
             var foto = new Veiculando.Domain.Entities.CheckingFoto(item, "checking/privado-anterior.jpg",
                 DateTime.UtcNow, 100, new Veiculando.Domain.ValueObjects.Geolocalizacao(-23.55, -46.63),
-                new System.Collections.Generic.Dictionary<string, string>(), "", user);
+                new System.Collections.Generic.Dictionary<string, string> { ["Modelo"] = "Aparelho de teste" }, "", user);
             ctx.CheckingFotos.Add(foto);
             (await ctx.OrdensServico.Include(x => x.Pecas).SingleAsync(x => x.Id == id))
                 .Iniciar(op, -23.55, -46.63, DateTimeOffset.UtcNow).Should().BeNull();
@@ -209,6 +211,7 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
             erros.Should().BeEmpty("o grafo de campanha/arte/checking do teste precisa ser valido");
             await ctx.SaveChangesAsync();
             await ctx.Database.ExecuteSqlCommandAsync("UPDATE Peca SET IdFormatoArteFinal=@p0 WHERE Id=@p1", formato.Id, pecaId);
+            await ctx.Database.ExecuteSqlCommandAsync("UPDATE ArteFinal SET DataCadastro=@p0 WHERE Id=@p1", new DateTime(2020, 1, 1), arteAntiga.Id);
             arteId = arte.Id; fotoId = foto.Id;
         }
         var resp = await client.GetAsync($"/api/wl/campo/ordens/{id}");
