@@ -125,7 +125,8 @@ public sealed class CampoOrdensController : CampoControllerBase
                 && f.CheckingItem.Peca.Local.IdAfiliada == AfiliadaId
                 && f.CheckingItem.Checking.PedidoInsercao.IdAfiliada == AfiliadaId
                 && f.CheckingItem.PedidoInsercaoItem.PedidoItem.Periodo.DataInicio < ordem.Periodo.DataInicio
-                && f.UrlArquivo != null && f.UrlArquivo != "" && f.StatusExibicao == StatusExibicaoEnum.Ativo)
+                && f.UrlArquivo != null && f.UrlArquivo != ""
+                && (f.StatusExibicao == StatusExibicaoEnum.Ativo || f.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente))
             .Select(f => new { f.Id, f.CheckingItem.IdPeca, f.DataCadastro,
                 Periodo = f.CheckingItem.PedidoInsercaoItem.PedidoItem.Periodo.DataInicio })
             .ToListAsync(ct);

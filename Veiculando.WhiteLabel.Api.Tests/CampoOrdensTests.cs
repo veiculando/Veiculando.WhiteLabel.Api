@@ -204,6 +204,9 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
             ctx.CheckingFotos.Add(foto);
             (await ctx.OrdensServico.Include(x => x.Pecas).SingleAsync(x => x.Id == id))
                 .Iniciar(op, -23.55, -46.63, DateTimeOffset.UtcNow).Should().BeNull();
+            var erros = ctx.GetValidationErrors().SelectMany(e => e.ValidationErrors.Select(v =>
+                e.Entry.Entity.GetType().Name + "." + v.PropertyName + ": " + v.ErrorMessage)).ToArray();
+            erros.Should().BeEmpty("o grafo de campanha/arte/checking do teste precisa ser valido");
             await ctx.SaveChangesAsync();
             await ctx.Database.ExecuteSqlCommandAsync("UPDATE Peca SET IdFormatoArteFinal=@p0 WHERE Id=@p1", formato.Id, pecaId);
             arteId = arte.Id; fotoId = foto.Id;
