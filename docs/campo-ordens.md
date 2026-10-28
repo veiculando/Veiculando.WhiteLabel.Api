@@ -44,9 +44,27 @@ recente (data/ID) é escolhida. O motivo é o da arte selecionada.
 
 As imagens retornam URLs relativas autenticadas em
 `/api/wl/campo/imagens/checking/{id}` e `/api/wl/campo/imagens/arte/{id}`.
-Sem arquivo compatível, o valor é null. Nomes internos de arquivo, blobs e
-credenciais não são enviados. O streaming dessas URLs pertence à subtarefa
-154d. As rotas GET não aplicam migrations nem alteram ordens.
+Sem arquivo servível, o valor é null. Nomes internos de arquivo, blobs e
+credenciais não são enviados. As rotas GET não aplicam migrations nem alteram ordens.
+
+## Imagens e pacote offline (154d)
+
+`GET /api/wl/campo/imagens/checking/{id}` e `GET /api/wl/campo/imagens/arte/{id}`
+fazem o stream pelo BFF (`Cache-Control: private, no-store`). A imagem só sai se
+o detalhe de uma ordem iniciada e visível ao operador a referenciaria; caso
+contrário, 404 antes de qualquer acesso a storage ou FileServer.
+
+Origem:
+- foto com `wl-upload:` → storage privado WL;
+- foto legada → FileServer em `conteudo/checking/...` (extraído da URL gravada);
+- arte → FileServer em `conteudo/{ArquivoAlta}`, só quando é `arte-final/*.jpg|png`.
+  O Core grava toda prévia como `temp.jpg`, então a prévia não é usada.
+
+Caminhos legados são validados (raiz fixa, sem `..`, extensão de imagem) e o
+tipo de conteúdo vem da extensão, não do FileServer, que não autentica.
+
+`GET /api/wl/campo/pacote` aceita os mesmos filtros da lista, força a página 1 e
+devolve `{ itens, total, tamanho, geradoEm }`, cada item no formato do detalhe.
 
 ## Ações (154c)
 
