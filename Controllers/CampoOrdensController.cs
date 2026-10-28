@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Data.Entity;
+using System.Data.Entity.Infrastructure;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -26,6 +27,14 @@ public sealed class CampoOrdensFiltro
     [Range(-180d, 180d)] public double? Lng { get; set; }
     [Range(1, int.MaxValue)] public int Pagina { get; set; } = 1;
     [Range(1, 100)] public int Tamanho { get; set; } = WlPaginacao.PageSizePadrao;
+}
+
+public sealed class CampoAcaoPedido
+{
+    [Required] public Guid? IdCliente { get; set; }
+    [Required] public DateTimeOffset? Hora { get; set; }
+    [Range(-90d, 90d)] public double? Latitude { get; set; }
+    [Range(-180d, 180d)] public double? Longitude { get; set; }
 }
 
 [Route("api/wl/campo/ordens")]
@@ -151,6 +160,59 @@ public sealed class CampoOrdensController : CampoControllerBase
                     local.Endereco?.Logradouro, local.Endereco?.Bairro, local.Cidade?.Nome, itens);
             }).ToArray();
         return Ok(resposta);
+    }
+
+    [HttpPost("{id:int}/iniciar")]
+    public Task<IActionResult> Iniciar(int id, [FromBody] CampoAcaoPedido pedido, CancellationToken ct)
+    {
+        if (pedido.Latitude == null || pedido.Longitude == null)
+            return Task.FromResult<IActionResult>(BadRequest(new { message = "Informe latitude e longitude do aparelho." }));
+        return Executar(id, null, TipoAcaoCampoEnum.Iniciar, pedido, ct);
+    }
+
+    [HttpPost("{id:int}/pecas/{idPeca:int}/colagem")]
+    public Task<IActionResult> MarcarColagem(int id, int idPeca, [FromBody] CampoAcaoPedido pedido, CancellationToken ct) =>
+        Executar(id, idPeca, TipoAcaoCampoEnum.MarcarColagem, pedido, ct);
+
+    // ADR-WL-022: o registro pelo UUID do aparelho e gravado na mesma
+    // transacao da ordem; repeticoes devolvem o resultado ja gravado.
+    private async Task<IActionResult> Executar(int id, int? idPeca, TipoAcaoCampoEnum tipo, CampoAcaoPedido pedido,
+        CancellationToken ct)
+    {
+        if (pedido.IdCliente == Guid.Empty)
+            return BadRequest(new { message = "Informe o identificador da ação." });
+        var visiveis = Visiveis(new FiltroListaCampo(AfiliadaId, OperadorId));
+        if (!await visiveis.AnyAsync(o => o.Id == id, ct))
+            return NotFound(new { message = "Ordem de serviço não encontrada." });
+
+        var idCliente = pedido.IdCliente.Value;
+        var registro = await _db.OrdemServicoAcoesCampo.AsNoTracking().FirstOrDefaultAsync(a => a.IdCliente == idCliente, ct);
+        if (registro == null)
+        {
+            var ordem = await _db.OrdensServico.Include(o => o.Pecas).SingleAsync(o => o.Id == id, ct);
+            var comando = new ComandoAcaoCampo(idCliente, OperadorId, tipo, idPeca, pedido.Hora.Value,
+                pedido.Latitude, pedido.Longitude);
+            registro = AcoesCampo.Executar(ordem, null, comando).Registro;
+            _db.OrdemServicoAcoesCampo.Add(registro);
+            try
+            {
+                await _db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException)
+            {
+                // Corrida com o mesmo UUID: a PK recusou esta gravacao.
+                registro = await _db.OrdemServicoAcoesCampo.AsNoTracking().FirstOrDefaultAsync(a => a.IdCliente == idCliente, ct);
+                if (registro == null) throw;
+            }
+        }
+        if (registro.IdOperador != OperadorId || registro.IdOrdemServico != id || registro.Tipo != tipo
+            || registro.IdPeca != idPeca)
+            return RecusarCampo(IdClienteReutilizado);
+        if (registro.CodigoRecusa != null)
+            return RecusarCampo(registro.CodigoRecusa);
+
+        var atual = await ComResumo(visiveis).FirstAsync(o => o.Id == id, ct);
+        return Ok(new { idCliente, idPeca, hora = registro.DataAcao, ordem = CampoOrdensProjecao.Linha(atual, OperadorId) });
     }
 
     private static Campanha CampanhaDe(PecaPeriodoStatus p) =>

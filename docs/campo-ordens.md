@@ -46,5 +46,24 @@ As imagens retornam URLs relativas autenticadas em
 `/api/wl/campo/imagens/checking/{id}` e `/api/wl/campo/imagens/arte/{id}`.
 Sem arquivo compatível, o valor é null. Nomes internos de arquivo, blobs e
 credenciais não são enviados. O streaming dessas URLs pertence à subtarefa
-154d; este PR só publica o contrato e a leitura dos metadados. POSTs de início
-e colagem pertencem à 154c. Estas rotas não aplicam migrations nem alteram ordens.
+154d. As rotas GET não aplicam migrations nem alteram ordens.
+
+## Ações (154c)
+
+- `POST /api/wl/campo/ordens/{id}/iniciar`
+- `POST /api/wl/campo/ordens/{id}/pecas/{idPeca}/colagem`
+
+Corpo: `{ idCliente: uuid, hora: DateTimeOffset, latitude, longitude }`.
+Coordenadas são obrigatórias para iniciar e opcionais na colagem. A ordem
+precisa ser visível ao operador (mesmo filtro do GET); caso contrário, 404.
+
+O `idCliente` gerado no aparelho é a chave de `OrdemServicoAcaoCampo` e é
+gravado na mesma transação da ordem pelo serviço `AcoesCampo` do Core. Repetir
+o mesmo id devolve o resultado já gravado, sem reaplicar: 200
+`{ idCliente, idPeca, hora, ordem }`, com `ordem` no formato da lista, ou o
+mesmo 409. Em corrida, a PK recusa a segunda gravação e o registro é relido.
+
+Recusas do Core saem como 409 `{ codigo, message }` (`campo.somente_historico`,
+`campo.ordem_cancelada`, `campo.fora_de_pendente` etc.). Um `idCliente` já usado
+em outra ação, ordem, peça ou operador sai como 409
+`campo.id_cliente_reutilizado`.

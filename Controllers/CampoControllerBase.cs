@@ -10,6 +10,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     [Authorize(Policy = AuthorizationSetup.Campo)]
     public abstract class CampoControllerBase : ControllerBase
     {
+        // O UUID do aparelho ja foi usado em outra acao, ordem, peca ou operador.
+        public const string IdClienteReutilizado = "campo.id_cliente_reutilizado";
+
         private readonly ITenantContext _tenant;
 
         protected CampoControllerBase(ITenantContext tenant) => _tenant = tenant;
@@ -31,6 +34,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 RecusaCampo.ForaDeColagem => "A ordem não está na etapa de colagem.",
                 RecusaCampo.PecaInexistente => "A peça não pertence a esta ordem.",
                 RecusaCampo.PecaNaoColada => "A colagem desta peça ainda não foi marcada.",
+                IdClienteReutilizado => "Este identificador já foi usado em outra ação.",
                 _ => "A ação de campo foi recusada."
             }
         });
