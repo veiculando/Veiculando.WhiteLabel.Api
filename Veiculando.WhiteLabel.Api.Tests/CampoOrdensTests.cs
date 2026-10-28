@@ -177,7 +177,7 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
         using (var ctx = new VeiculandoDataContext())
         {
             var atual = await ctx.Periodos.FindAsync(1);
-            await ctx.Database.ExecuteSqlCommandAsync("UPDATE Periodo SET DataInicio=@p0, DataFim=@p1 WHERE Id=@p2",
+            await ctx.Database.ExecuteSqlCommandAsync("UPDATE Periodo SET DataInicio=@p0, DataFim=@p1, Periodicidade=(SELECT Periodicidade FROM Periodo WHERE Id=1) WHERE Id=@p2",
                 atual.DataInicio.AddDays(-30), atual.DataInicio.AddDays(-16), anteriorId);
             await ctx.Database.ExecuteSqlCommandAsync(@"UPDATE PedidoItem SET IdPeriodo=@p0
                 WHERE Id IN (SELECT IdPedidoItem FROM PedidoInsercaoItem WHERE IdPedidoInsercao=@p1);
