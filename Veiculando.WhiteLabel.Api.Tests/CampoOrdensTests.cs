@@ -111,6 +111,9 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
         item.GetProperty("latitude").GetDouble().Should().BeApproximately(-23.55, 0.001);
         item.GetProperty("dataColagem").GetDateTimeOffset().Should().Be(hora.AddSeconds(1));
         item.GetProperty("fotoAnteriorUrl").ValueKind.Should().Be(JsonValueKind.Null);
+        using (var ctx = new VeiculandoDataContext())
+            item.GetProperty("tipo").GetString().Should().Be(
+                (await ctx.Pecas.Include(p => p.Suporte).SingleAsync(p => p.Id == peca)).Suporte.Nome);
         depois.GetProperty("progresso").GetProperty("tipo").GetString().Should().Be("fotos");
     }
 
@@ -256,6 +259,41 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
         client.DefaultRequestHeaders.Authorization = null;
         (await client.GetAsync($"/api/wl/campo/imagens/checking/{fotoId}")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         factory.FileServer.Rotas.Count.Should().Be(antes);
+    }
+
+    [Fact]
+    public async Task Pacote_so_traz_ordens_visiveis_e_nao_cruza_host()
+    {
+        var (factory, client, op, peca) = await Preparar("pac");
+        using var f = factory; using var c = client;
+        var pendente = await Criar(op, peca);
+        var iniciada = await Criar(op, peca);
+        await Criar(1, peca); // Sem papel nem historico.
+        await Criar(op, peca, rascunho: true);
+        var localB = await Seed.LocalAsync(Afiliada + 1, "LCpacb");
+        await Criar(op, await Seed.PecaAsync(localB, "PCpacb"), afiliadaId: Afiliada + 1);
+        using (var ctx = new VeiculandoDataContext())
+        {
+            (await ctx.OrdensServico.Include(o => o.Pecas).SingleAsync(o => o.Id == iniciada))
+                .Iniciar(op, -23.55, -46.63, DateTimeOffset.UtcNow).Should().BeNull();
+            await ctx.SaveChangesAsync();
+        }
+        var pacote = await client.GetFromJsonAsync<JsonElement>("/api/wl/campo/pacote?tamanho=100");
+        pacote.GetProperty("total").GetInt32().Should().Be(2);
+        var itens = pacote.GetProperty("itens").EnumerateArray().ToDictionary(o => o.GetProperty("id").GetInt32());
+        itens.Keys.Should().BeEquivalentTo(new[] { pendente, iniciada });
+        itens[pendente].GetProperty("locais").GetArrayLength().Should().Be(0);
+        var pecaPacote = itens[iniciada].GetProperty("locais")[0].GetProperty("pecas")[0];
+        pecaPacote.GetProperty("codigo").GetString().Should().Be("PCpac");
+        pecaPacote.GetProperty("tipo").GetString().Should().NotBeNullOrEmpty();
+        itens[iniciada].GetProperty("progresso").GetProperty("tipo").GetString().Should().Be("colagens");
+
+        await Seed.DominioAsync(Afiliada + 1, "campo-pac-b.teste", true);
+        client.DefaultRequestHeaders.Host = "campo-pac-b.teste";
+        (await client.GetAsync("/api/wl/campo/pacote")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        client.DefaultRequestHeaders.Host = null;
+        client.DefaultRequestHeaders.Authorization = null;
+        (await client.GetAsync("/api/wl/campo/pacote")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
