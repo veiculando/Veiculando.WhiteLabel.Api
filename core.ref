@@ -194,4 +194,7 @@
 # ---------------------------------------------------------------------------
 # VEI-RD-119: DefinirAtribuidos entra no Core em 30ac8041d6 (main, merge da #285).
 # VEI-RD-124: baixa manual da colagem e da foto. b1997e64bc é o commit da feature no Core.
-b1997e64bccb8b4bcb636e43ba3689f202d37abc
+# VEI-RD-154: Core da sprint-16.0 apos sincronizacao com producao (PR #299).
+# Contem AcoesCampo, RecusaCampo e ListaCampoConsulta (PRs #292/#293).
+# Refixar no SHA da main quando a Sprint 16 for promovida.
+aff3a5de1d2bf7bc45beeba8b668642970622ef5

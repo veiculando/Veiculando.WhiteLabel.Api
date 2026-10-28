@@ -1,4 +1,6 @@
 using System;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Veiculando.WhiteLabel.Api.Configurations
@@ -25,6 +27,9 @@ namespace Veiculando.WhiteLabel.Api.Configurations
         /// Tipo da claim de permissão emitida pelo <c>AuthController</c>.
         /// </summary>
         public const string ClaimPermissao = "permission";
+
+        // Identidade de campo, separada das permissoes administrativas de Todas.
+        public const string Campo = "Campo";
 
         public const string PecaGerenciar = "PecaGerenciar";
         // "Checking" foi reconciliado para "CheckingGerenciar" (VEI-RD-93, único nome
@@ -64,8 +69,12 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             if (services == null)
                 throw new ArgumentNullException(nameof(services));
 
+            services.TryAddEnumerable(ServiceDescriptor.Scoped<IAuthorizationHandler, CampoAuthorizationHandler>());
             services.AddAuthorization(options =>
             {
+                options.AddPolicy(Campo, policy => policy.RequireAuthenticatedUser()
+                    .AddRequirements(new CampoRequirement()));
+
                 foreach (var permissao in Todas)
                 {
                     // Nome da policy == nome da permissão: evita uma tabela de

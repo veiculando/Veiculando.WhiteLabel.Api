@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Veiculando.Domain.Entities.WhiteLabel;
 using Veiculando.WhiteLabel.Api.Configurations;
 using Xunit;
+using Veiculando.WhiteLabel.Api.Middleware;
 
 namespace Veiculando.WhiteLabel.Api.Tests
 {
@@ -27,7 +28,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
         {
             // VEI-RD-106: marketing é persona própria. Admin de operadores sem
             // ConteudoGerenciar não passa; quem tem só ConteudoGerenciar passa.
-            var provider = new ServiceCollection().AddLogging().AddWlAuthorization().BuildServiceProvider();
+            var provider = new ServiceCollection().AddLogging().AddSingleton<ITenantContext>(new TenantContext()).AddWlAuthorization().BuildServiceProvider();
             var authorization = provider.GetRequiredService<IAuthorizationService>();
 
             var admin = Operador(AuthorizationSetup.UsuarioAfiliadaGerenciar);
