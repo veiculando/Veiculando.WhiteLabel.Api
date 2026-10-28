@@ -188,8 +188,8 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
             var formato = new Veiculando.Domain.Entities.Formato(Veiculando.Domain.Enums.MidiaTipoEnum.Fisica,
                 9, 3, 100, 100, 0, "", "", new[] { ".jpg" }, user);
             var motivo = new Veiculando.Domain.Entities.Arte.Motivo(campanha, "Motivo Campo", "", await ctx.UsuariosAnunciantes.FindAsync(1));
-            var arte = new Veiculando.Domain.Entities.Arte.ArteFinal(motivo, formato, "privado-alta.pdf", "privado-preview.jpg", user);
-            var arteAntiga = new Veiculando.Domain.Entities.Arte.ArteFinal(motivo, formato, "privado-antiga.pdf", "privado-antiga.jpg", user);
+            var arte = new Veiculando.Domain.Entities.Arte.ArteFinal(motivo, formato, "arte-final/cli/camp/privado-alta.jpg", "temp.jpg", user);
+            var arteAntiga = new Veiculando.Domain.Entities.Arte.ArteFinal(motivo, formato, "arte-final/cli/camp/privado-antiga.jpg", "temp.jpg", user);
             ctx.ArtesFinais.Add(arteAntiga);
             ctx.ArtesFinais.Add(arte);
             var pedidoAtual = await ctx.Pedidos.Where(x => x.IdPeriodo == 1 && x.Itens.Any(i => i.IdPeca == pecaId)).FirstAsync();
@@ -200,7 +200,7 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
             var checking = new Veiculando.Domain.Entities.Checking(pi, user);
             var item = new Veiculando.Domain.Entities.CheckingItem(checking, pi.Itens.Single(), user);
             ctx.Checkings.Add(checking);
-            var foto = new Veiculando.Domain.Entities.CheckingFoto(item, "checking/privado-anterior.jpg",
+            var foto = new Veiculando.Domain.Entities.CheckingFoto(item, "https://file.invalido/conteudo/checking/privado-anterior.jpg",
                 DateTime.UtcNow, 100, new Veiculando.Domain.ValueObjects.Geolocalizacao(-23.55, -46.63),
                 new System.Collections.Generic.Dictionary<string, string> { ["Modelo"] = "Aparelho de teste" }, "", user);
             ctx.CheckingFotos.Add(foto);
@@ -225,6 +225,64 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
         p.GetProperty("motivo").GetString().Should().Be("Motivo Campo");
         p.GetProperty("fotoAnteriorUrl").GetString().Should().Be($"/api/wl/campo/imagens/checking/{fotoId}");
         p.GetProperty("arteAtualUrl").GetString().Should().Be($"/api/wl/campo/imagens/arte/{arteId}");
+
+        // 154d: as duas URLs servem a imagem pelo BFF, sem expor o FileServer.
+        factory.FileServer.Conteudo = new byte[] { 0xFF, 0xD8, 0xFF };
+        foreach (var url in new[] { $"/api/wl/campo/imagens/checking/{fotoId}", $"/api/wl/campo/imagens/arte/{arteId}" })
+        {
+            var img = await client.GetAsync(url);
+            img.StatusCode.Should().Be(HttpStatusCode.OK, url);
+            img.Content.Headers.ContentType!.MediaType.Should().Be("image/jpeg");
+            (await img.Content.ReadAsByteArrayAsync()).Should().Equal(0xFF, 0xD8, 0xFF);
+            img.Headers.CacheControl!.NoStore.Should().BeTrue();
+        }
+        factory.FileServer.Rotas.Should().Equal(
+            "http://fileserver.invalido/conteudo/checking/privado-anterior.jpg",
+            "http://fileserver.invalido/conteudo/arte-final/cli/camp/privado-alta.jpg");
+
+        var pacote = await client.GetFromJsonAsync<JsonElement>("/api/wl/campo/pacote");
+        var noPacote = pacote.GetProperty("itens").EnumerateArray().Single(o => o.GetProperty("id").GetInt32() == id);
+        noPacote.GetProperty("locais")[0].GetProperty("pecas")[0].GetProperty("arteAtualUrl").GetString()
+            .Should().Be($"/api/wl/campo/imagens/arte/{arteId}");
+
+        // Outra afiliada, id inexistente ou sem token: nada chega ao FileServer.
+        await Seed.DominioAsync(Afiliada + 1, "campo-img-b.teste", true);
+        var antes = factory.FileServer.Rotas.Count;
+        (await client.GetAsync("/api/wl/campo/imagens/checking/" + int.MaxValue)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await client.GetAsync("/api/wl/campo/imagens/arte/" + int.MaxValue)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        client.DefaultRequestHeaders.Host = "campo-img-b.teste";
+        (await client.GetAsync($"/api/wl/campo/imagens/arte/{arteId}")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        client.DefaultRequestHeaders.Host = null;
+        client.DefaultRequestHeaders.Authorization = null;
+        (await client.GetAsync($"/api/wl/campo/imagens/checking/{fotoId}")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        factory.FileServer.Rotas.Count.Should().Be(antes);
+    }
+
+    [Fact]
+    public async Task Imagem_de_ordem_nao_iniciada_ou_sem_vinculo_e_404_sem_chamar_o_fileserver()
+    {
+        var (factory, client, op, peca) = await Preparar("imv");
+        using var f = factory; using var c = client;
+        await Criar(op, peca); // Pendente: o detalhe ainda nao mostra imagens.
+        int fotoId;
+        using (var ctx = new VeiculandoDataContext())
+        {
+            var piId = await Seed.InsercaoAsync(Afiliada, "CIMV", peca);
+            var pi = await ctx.PedidosInsercao.Include(x => x.Pedido)
+                .Include(x => x.Itens.Select(i => i.PedidoItem.Peca.Local)).SingleAsync(x => x.Id == piId);
+            var user = await ctx.Usuarios.FindAsync(1);
+            var checking = new Veiculando.Domain.Entities.Checking(pi, user);
+            var item = new Veiculando.Domain.Entities.CheckingItem(checking, pi.Itens.Single(), user);
+            ctx.Checkings.Add(checking);
+            var foto = new Veiculando.Domain.Entities.CheckingFoto(item, "https://file.invalido/conteudo/checking/imv.jpg",
+                DateTime.UtcNow, 100, new Veiculando.Domain.ValueObjects.Geolocalizacao(-23.55, -46.63),
+                new System.Collections.Generic.Dictionary<string, string> { ["Modelo"] = "Aparelho de teste" }, "", user);
+            ctx.CheckingFotos.Add(foto);
+            await ctx.SaveChangesAsync();
+            fotoId = foto.Id;
+        }
+        (await client.GetAsync($"/api/wl/campo/imagens/checking/{fotoId}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        factory.FileServer.Rotas.Should().BeEmpty();
     }
 
     [Fact]
