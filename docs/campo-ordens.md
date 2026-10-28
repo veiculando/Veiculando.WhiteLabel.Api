@@ -65,6 +65,7 @@ tipo de conteúdo vem da extensão, não do FileServer, que não autentica.
 
 `GET /api/wl/campo/pacote` aceita os mesmos filtros da lista, força a página 1 e
 devolve `{ itens, total, tamanho, geradoEm }`, cada item no formato do detalhe.
+Cada peça traz `tipo` (nome do tipo de suporte), no detalhe e no pacote.
 
 ## Ações (154c)
 

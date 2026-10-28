@@ -60,7 +60,8 @@ public sealed class CampoOrdensController : CampoControllerBase
     private static IQueryable<OrdemServico> ComResumo(IQueryable<OrdemServico> consulta) => consulta
         .Include(o => o.Periodo)
         .Include(o => o.Cidades.Select(c => c.Cidade))
-        .Include(o => o.Pecas.Select(p => p.Peca.Local.Cidade));
+        .Include(o => o.Pecas.Select(p => p.Peca.Local.Cidade))
+        .Include(o => o.Pecas.Select(p => p.Peca.Suporte));
 
     [HttpGet]
     public async Task<IActionResult> Listar([FromQuery] CampoOrdensFiltro pedido, CancellationToken ct)
@@ -190,7 +191,7 @@ public sealed class CampoOrdensController : CampoControllerBase
                     return new CampoPecaDto(p.IdPeca, p.Peca.Codigo, CampanhaDe(antes)?.Nome, campanha?.Nome,
                         arte?.Motivo.Nome, p.DataColagem, p.DataFotoCampo, local.GeoLocalizacao?.Latitude,
                         local.GeoLocalizacao?.Longitude, foto == null ? null : $"/api/wl/campo/imagens/checking/{foto.Id}",
-                        arte == null ? null : $"/api/wl/campo/imagens/arte/{arte.Id}");
+                        arte == null ? null : $"/api/wl/campo/imagens/arte/{arte.Id}", p.Peca.Suporte?.Nome);
                 }).ToArray();
                 return new CampoLocalDto(local.Id, local.Endereco?.Numero, local.Codigo,
                     local.Endereco?.Logradouro, local.Endereco?.Bairro, local.Cidade?.Nome, itens);

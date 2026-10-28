@@ -11,7 +11,7 @@ public sealed record CampoProgressoDto(string Tipo, int Feitos, int Total);
 public sealed record CampoPeriodoDto(int Id, string Nome, DateTime De, DateTime Ate);
 public sealed record CampoPecaDto(int Id, string Codigo, string Anterior, string Atual, string Motivo,
     DateTimeOffset? DataColagem, DateTimeOffset? DataFotoCampo, double? Latitude, double? Longitude,
-    string FotoAnteriorUrl, string ArteAtualUrl);
+    string FotoAnteriorUrl, string ArteAtualUrl, string Tipo);
 public sealed record CampoLocalDto(int Id, string Numero, string Codigo, string Logradouro, string Bairro,
     string Cidade, IReadOnlyList<CampoPecaDto> Pecas);
 
