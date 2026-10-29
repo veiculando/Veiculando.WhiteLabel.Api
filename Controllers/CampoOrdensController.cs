@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Entities;
+using Veiculando.Domain.Entities.Arte;
 using Veiculando.Domain.Entities.OrdensServico;
 using Veiculando.Domain.Enums;
 using Veiculando.WhiteLabel.Api.Middleware;
@@ -81,8 +82,7 @@ public sealed class CampoOrdensController : CampoControllerBase
         var erro = MontarFiltro(pedido, out var filtro);
         if (erro != null) return erro;
         var (ordens, total) = await Pagina(filtro, pedido, ct);
-        var itens = new List<CampoOrdemDto>();
-        foreach (var ordem in ordens) itens.Add(await Detalhe(ordem, ct));
+        var itens = await Detalhes(ordens, ct);
         return Ok(new { itens, total, tamanho = pedido.Tamanho, geradoEm = DateTimeOffset.UtcNow });
     }
 
@@ -135,68 +135,91 @@ public sealed class CampoOrdensController : CampoControllerBase
         var ordem = await ComResumo(Visiveis(new FiltroListaCampo(AfiliadaId, OperadorId)))
             .FirstOrDefaultAsync(o => o.Id == id, ct);
         if (ordem == null) return NotFound(new { message = "Ordem de serviço não encontrada." });
-        return Ok(await Detalhe(ordem, ct));
+        return Ok((await Detalhes(new List<OrdemServico> { ordem }, ct))[0]);
     }
 
-    private async Task<CampoOrdemDto> Detalhe(OrdemServico ordem, CancellationToken ct)
+    // Pacote offline: as consultas sao feitas uma vez para a pagina inteira,
+    // nao por ordem. O periodo anterior e consultado por periodo distinto.
+    private async Task<List<CampoOrdemDto>> Detalhes(List<OrdemServico> ordens, CancellationToken ct)
     {
-        var resposta = CampoOrdensProjecao.Linha(ordem, OperadorId);
-        resposta.Locais = Array.Empty<CampoLocalDto>();
-        if (ordem.DataInicio == null) return resposta;
+        var iniciadas = ordens.Where(o => o.DataInicio != null).ToList();
+        var anteriores = new Dictionary<int, Periodo>();
+        foreach (var periodo in iniciadas.Select(o => o.Periodo).GroupBy(p => p.Id).Select(g => g.First()))
+            anteriores[periodo.Id] = await _db.Periodos.AsNoTracking()
+                .Where(p => p.Periodicidade.Tipo == periodo.Periodicidade.Tipo && p.DataInicio < periodo.DataInicio)
+                .OrderByDescending(p => p.DataInicio).ThenByDescending(p => p.Id).FirstOrDefaultAsync(ct);
 
-        var anterior = await _db.Periodos.AsNoTracking()
-            .Where(p => p.Periodicidade.Tipo == ordem.Periodo.Periodicidade.Tipo && p.DataInicio < ordem.Periodo.DataInicio)
-            .OrderByDescending(p => p.DataInicio).ThenByDescending(p => p.Id).FirstOrDefaultAsync(ct);
-        var periodos = new[] { ordem.IdPeriodo, anterior?.Id ?? ordem.IdPeriodo };
-        var pecas = ordem.Pecas.Select(p => p.IdPeca).ToArray();
-        var status = await _queries.PecaPeriodoStatus.AsNoTracking()
+        var pecas = iniciadas.SelectMany(o => o.Pecas.Select(p => p.IdPeca)).Distinct().ToArray();
+        var periodos = iniciadas.Select(o => o.IdPeriodo)
+            .Concat(anteriores.Values.Where(p => p != null).Select(p => p.Id)).Distinct().ToArray();
+        var status = pecas.Length == 0 ? new List<PecaPeriodoStatus>() : await _queries.PecaPeriodoStatus.AsNoTracking()
             .Where(p => pecas.Contains(p.IdPeca) && periodos.Contains(p.IdPeriodo)
                 && (p.PedidoInsercao == null || p.PedidoInsercao.IdAfiliada == AfiliadaId)
                 && (p.PedidoReserva == null || p.PedidoReserva.IdAfiliada == AfiliadaId))
             .Include(p => p.Pedido.Campanha).Include(p => p.PedidoReserva.Pedido.Campanha)
             .Include(p => p.PedidoInsercao.Pedido.Campanha).ToListAsync(ct);
-        var atuais = status.Where(p => p.IdPeriodo == ordem.IdPeriodo)
-            .GroupBy(p => p.IdPeca).ToDictionary(g => g.Key, g => g.OrderByDescending(p => p.Id).First());
-        var anteriores = status.Where(p => anterior != null && p.IdPeriodo == anterior.Id)
-            .GroupBy(p => p.IdPeca).ToDictionary(g => g.Key, g => g.OrderByDescending(p => p.Id).First());
-        var campanhas = atuais.Values.Select(CampanhaDe).Where(c => c != null).Select(c => c.Id).Distinct().ToArray();
+        // Status vigente de cada peca em cada periodo: o de maior Id.
+        var vigente = status.GroupBy(p => (p.IdPeca, p.IdPeriodo))
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(p => p.Id).First());
+        PecaPeriodoStatus Status(int idPeca, int? idPeriodo) =>
+            idPeriodo != null && vigente.TryGetValue((idPeca, idPeriodo.Value), out var s) ? s : null;
+
+        var campanhas = iniciadas.SelectMany(o => o.Pecas.Select(p => CampanhaDe(Status(p.IdPeca, o.IdPeriodo))))
+            .Where(c => c != null).Select(c => c.Id).Distinct().ToArray();
         // So entram arquivos que a rota de imagens consegue servir (CampoImagemCaminho).
-        var artes = (await _db.ArtesFinais.AsNoTracking().Include(a => a.Motivo)
-            .Where(a => campanhas.Contains(a.Motivo.IdCampanha) && a.StatusExibicao == StatusExibicaoEnum.Ativo
-                && a.Motivo.StatusExibicao == StatusExibicaoEnum.Ativo && a.ArquivoAlta.Nome != null)
-            .OrderByDescending(a => a.DataCadastro).ThenByDescending(a => a.Id).ToListAsync(ct))
+        var artes = campanhas.Length == 0 ? new List<ArteFinal>() : (await _db.ArtesFinais.AsNoTracking()
+                .Include(a => a.Motivo)
+                .Where(a => campanhas.Contains(a.Motivo.IdCampanha) && a.StatusExibicao == StatusExibicaoEnum.Ativo
+                    && a.Motivo.StatusExibicao == StatusExibicaoEnum.Ativo && a.ArquivoAlta.Nome != null)
+                .OrderByDescending(a => a.DataCadastro).ThenByDescending(a => a.Id).ToListAsync(ct))
             .Where(a => CampoImagemCaminho.Arte(a.ArquivoAlta.Nome) != null).ToList();
-        var fotos = (await _db.CheckingFotos.AsNoTracking()
+        var limite = iniciadas.Count == 0 ? DateTime.MinValue : iniciadas.Max(o => o.Periodo.DataInicio);
+        var fotos = pecas.Length == 0 ? new List<FotoAnterior>() : (await _db.CheckingFotos.AsNoTracking()
             .Where(f => pecas.Contains(f.CheckingItem.IdPeca)
                 && f.CheckingItem.Peca.Local.IdAfiliada == AfiliadaId
                 && f.CheckingItem.Checking.PedidoInsercao.IdAfiliada == AfiliadaId
-                && f.CheckingItem.PedidoInsercaoItem.PedidoItem.Periodo.DataInicio < ordem.Periodo.DataInicio
+                && f.CheckingItem.PedidoInsercaoItem.PedidoItem.Periodo.DataInicio < limite
                 && f.UrlArquivo != null && f.UrlArquivo != ""
                 && (f.StatusExibicao == StatusExibicaoEnum.Ativo || f.StatusExibicao == StatusExibicaoEnum.AprovacaoPendente))
-            .Select(f => new { f.Id, f.CheckingItem.IdPeca, f.DataCadastro, f.UrlArquivo,
-                Periodo = f.CheckingItem.PedidoInsercaoItem.PedidoItem.Periodo.DataInicio })
+            .Select(f => new FotoAnterior { Id = f.Id, IdPeca = f.CheckingItem.IdPeca, DataCadastro = f.DataCadastro,
+                UrlArquivo = f.UrlArquivo, Periodo = f.CheckingItem.PedidoInsercaoItem.PedidoItem.Periodo.DataInicio })
             .ToListAsync(ct)).Where(f => CampoImagemCaminho.Checking(f.UrlArquivo) != null).ToList();
-        resposta.Locais = ordem.Pecas.OrderBy(p => p.Peca.Local.Codigo).ThenBy(p => p.Peca.Codigo)
-            .GroupBy(p => p.Peca.Local.Id).Select(g => {
-                var local = g.First().Peca.Local;
-                var itens = g.Select(p => {
-                    atuais.TryGetValue(p.IdPeca, out var atual);
-                    anteriores.TryGetValue(p.IdPeca, out var antes);
-                    var campanha = CampanhaDe(atual);
-                    // O modelo liga a arte a campanha/motivo/formato, nao diretamente a peca.
-                    var arte = p.Peca.IdFormatoArteFinal == null ? null : artes.FirstOrDefault(a =>
-                        a.Motivo.IdCampanha == campanha?.Id && a.IdFormato == p.Peca.IdFormatoArteFinal);
-                    var foto = fotos.Where(f => f.IdPeca == p.IdPeca).OrderByDescending(f => f.Periodo)
-                        .ThenByDescending(f => f.DataCadastro).ThenByDescending(f => f.Id).FirstOrDefault();
-                    return new CampoPecaDto(p.IdPeca, p.Peca.Codigo, CampanhaDe(antes)?.Nome, campanha?.Nome,
-                        arte?.Motivo.Nome, p.DataColagem, p.DataFotoCampo, local.GeoLocalizacao?.Latitude,
-                        local.GeoLocalizacao?.Longitude, foto == null ? null : $"/api/wl/campo/imagens/checking/{foto.Id}",
-                        arte == null ? null : $"/api/wl/campo/imagens/arte/{arte.Id}", p.Peca.Suporte?.Nome);
+
+        return ordens.Select(ordem => {
+            var resposta = CampoOrdensProjecao.Linha(ordem, OperadorId);
+            resposta.Locais = Array.Empty<CampoLocalDto>();
+            if (ordem.DataInicio == null) return resposta;
+            var anterior = anteriores[ordem.IdPeriodo];
+            resposta.Locais = ordem.Pecas.OrderBy(p => p.Peca.Local.Codigo).ThenBy(p => p.Peca.Codigo)
+                .GroupBy(p => p.Peca.Local.Id).Select(g => {
+                    var local = g.First().Peca.Local;
+                    var itens = g.Select(p => {
+                        var campanha = CampanhaDe(Status(p.IdPeca, ordem.IdPeriodo));
+                        // O modelo liga a arte a campanha/motivo/formato, nao diretamente a peca.
+                        var arte = p.Peca.IdFormatoArteFinal == null ? null : artes.FirstOrDefault(a =>
+                            a.Motivo.IdCampanha == campanha?.Id && a.IdFormato == p.Peca.IdFormatoArteFinal);
+                        var foto = fotos.Where(f => f.IdPeca == p.IdPeca && f.Periodo < ordem.Periodo.DataInicio)
+                            .OrderByDescending(f => f.Periodo).ThenByDescending(f => f.DataCadastro)
+                            .ThenByDescending(f => f.Id).FirstOrDefault();
+                        return new CampoPecaDto(p.IdPeca, p.Peca.Codigo, CampanhaDe(Status(p.IdPeca, anterior?.Id))?.Nome,
+                            campanha?.Nome, arte?.Motivo.Nome, p.DataColagem, p.DataFotoCampo, local.GeoLocalizacao?.Latitude,
+                            local.GeoLocalizacao?.Longitude, foto == null ? null : $"/api/wl/campo/imagens/checking/{foto.Id}",
+                            arte == null ? null : $"/api/wl/campo/imagens/arte/{arte.Id}", p.Peca.Suporte?.Nome);
+                    }).ToArray();
+                    return new CampoLocalDto(local.Id, local.Endereco?.Numero, local.Codigo,
+                        local.Endereco?.Logradouro, local.Endereco?.Bairro, local.Cidade?.Nome, itens);
                 }).ToArray();
-                return new CampoLocalDto(local.Id, local.Endereco?.Numero, local.Codigo,
-                    local.Endereco?.Logradouro, local.Endereco?.Bairro, local.Cidade?.Nome, itens);
-            }).ToArray();
-        return resposta;
+            return resposta;
+        }).ToList();
+    }
+
+    private sealed class FotoAnterior
+    {
+        public int Id { get; set; }
+        public int IdPeca { get; set; }
+        public DateTime DataCadastro { get; set; }
+        public string UrlArquivo { get; set; }
+        public DateTime Periodo { get; set; }
     }
 
     [HttpPost("{id:int}/iniciar")]
