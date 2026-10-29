@@ -22,7 +22,9 @@ namespace Veiculando.WhiteLabel.Api.Tests;
 public class CampoAcoesTests
 {
     private const int Afiliada = 9872;
-    private static readonly DateTimeOffset Hora = new(2026, 10, 28, 9, 15, 0, TimeSpan.FromHours(-3));
+    // Dentro da janela de HoraCampo (30 dias): relativa ao dia do teste, em segundos inteiros.
+    private static readonly DateTimeOffset Hora = DateTimeOffset.FromUnixTimeSeconds(
+        DateTimeOffset.UtcNow.AddHours(-2).ToUnixTimeSeconds()).ToOffset(TimeSpan.FromHours(-3));
     private readonly SqlServerFixture _db;
     public CampoAcoesTests(SqlServerFixture db) => _db = db;
 
@@ -76,6 +78,27 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
     {
         resp.StatusCode.Should().Be(HttpStatusCode.Conflict, await resp.Content.ReadAsStringAsync());
         return (await resp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("codigo").GetString();
+    }
+
+    [Fact]
+    public async Task Hora_do_aparelho_fora_da_janela_e_aceita_com_a_hora_do_servidor()
+    {
+        var (factory, client, op, peca) = await Preparar("hor");
+        using var f = factory; using var c = client;
+        var id = await Criar(op, peca);
+        var antiga = Hora.AddDays(-45);
+        var antes = DateTimeOffset.UtcNow;
+        var idCliente = Guid.NewGuid();
+
+        var resp = await client.PostAsJsonAsync($"/api/wl/campo/ordens/{id}/iniciar",
+            new { idCliente, hora = antiga, latitude = -23.55, longitude = -46.63 });
+
+        resp.StatusCode.Should().Be(HttpStatusCode.OK, await resp.Content.ReadAsStringAsync());
+        using var ctx = new VeiculandoDataContext();
+        var registro = await ctx.OrdemServicoAcoesCampo.SingleAsync(a => a.IdCliente == idCliente);
+        registro.DataAcaoAparelho.Should().Be(antiga);
+        registro.DataAcao.Should().BeOnOrAfter(antes);
+        (await ctx.OrdensServico.FindAsync(id)).DataInicio.Should().Be(registro.DataAcao);
     }
 
     [Fact]

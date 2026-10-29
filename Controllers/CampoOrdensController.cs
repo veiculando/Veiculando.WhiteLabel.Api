@@ -251,7 +251,7 @@ public sealed class CampoOrdensController : CampoControllerBase
         {
             var ordem = await _db.OrdensServico.Include(o => o.Pecas).SingleAsync(o => o.Id == id, ct);
             var comando = new ComandoAcaoCampo(idCliente, OperadorId, tipo, idPeca, pedido.Hora.Value,
-                pedido.Latitude, pedido.Longitude);
+                pedido.Latitude, pedido.Longitude, DateTimeOffset.UtcNow);
             registro = AcoesCampo.Executar(ordem, null, comando).Registro;
             _db.OrdemServicoAcoesCampo.Add(registro);
             try
