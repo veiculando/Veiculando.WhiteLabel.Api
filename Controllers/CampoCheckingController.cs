@@ -149,6 +149,7 @@ public sealed class CampoCheckingController : CampoControllerBase
             // RegistrarFoto propaga o status ao item de PI, ao item do pedido e ao checking.
             var item = await _db.CheckingItens
                 .Include(i => i.Fotos)
+                .Include(i => i.Peca.Local) // CheckingFoto mede a distancia ate a peca.
                 .Include(i => i.Checking.Itens)
                 .Include(i => i.PedidoInsercaoItem.PedidoItem)
                 .Include(i => i.PedidoInsercaoItem.PedidoInsercao.Itens.Select(x => x.PedidoItem))
