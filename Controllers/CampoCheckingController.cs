@@ -126,7 +126,10 @@ public sealed class CampoCheckingController : CampoControllerBase
         }
         catch (RecusaCheckingException recusa)
         {
-            return RecusarCampo(recusa.Codigo);
+            // A mesma acao pode ter sido gravada por uma requisicao concorrente,
+            // que concluiu a ordem antes desta recarregar o grafo.
+            existente = await Gravada(idCliente, ct);
+            if (existente == null) return RecusarCampo(recusa.Codigo);
         }
         catch (DbUpdateException ex) when (ex is not DbUpdateConcurrencyException)
         {
