@@ -81,7 +81,7 @@ public sealed class CampoCheckingController : CampoControllerBase
         // Pre-condicoes do Core antes de subir o arquivo. Sem item, o Core so
         // devolve checking_indisponivel depois de todas as outras recusas.
         var ordemAtual = await _db.OrdensServico.AsNoTracking().Include(o => o.Pecas).SingleAsync(o => o.Id == id, ct);
-        var previa = CheckingColagemCampo.Executar(ordemAtual, null, null, new ComandoCheckingCampo(idCliente, OperadorId,
+        var previa = CheckingColagemCampo.Executar(ordemAtual, null, null, null, new ComandoCheckingCampo(idCliente, OperadorId,
             idPeca, pedido.Hora.Value, pedido.Latitude.Value, pedido.Longitude.Value, null, null, null, null, 0), null);
         if (previa.CodigoRecusa != RecusaCampo.CheckingIndisponivel)
             return RecusarCampo(previa.CodigoRecusa);
@@ -93,6 +93,10 @@ public sealed class CampoCheckingController : CampoControllerBase
             _logger.LogError("CAMPO_CHECKING_ITEM_AUSENTE tenant={Tenant} ordem={Ordem} peca={Peca}", AfiliadaId, id, idPeca);
             return RecusarCampo(RecusaCampo.CheckingIndisponivel);
         }
+        // VEI-RD-143: outro operador ja fez o checking deste item nesta ordem; recusa antes do upload.
+        if (await _db.CheckingCampoAutores.AsNoTracking().AnyAsync(a => a.IdPedidoItem == item.IdPedidoItem
+                && a.IdOrdemServico == id && a.IdOperador != OperadorId, ct))
+            return RecusarCampo(RecusaCampo.CheckingJaRealizado);
 
         using var corpo = new MemoryStream();
         using (var origem = pedido.Foto.OpenReadStream())
@@ -188,19 +192,25 @@ public sealed class CampoCheckingController : CampoControllerBase
                 .Include(i => i.PedidoInsercaoItem.PedidoInsercao.Pedido.Campanha.Pedidos.Select(p => p.PedidosInsercao))
                 .SingleAsync(i => i.IdPedidoItem == idPedidoItem, ct);
             var operador = await _db.UsuariosOperador.SingleAsync(u => u.Id == comando.IdOperador, ct);
+            var autor = await _db.CheckingCampoAutores.SingleOrDefaultAsync(a => a.IdPedidoItem == idPedidoItem
+                && a.IdOrdemServico == id, ct);
 
-            var resultado = CheckingColagemCampo.Executar(ordem, item, null, comando, operador);
+            var resultado = CheckingColagemCampo.Executar(ordem, item, null, autor, comando, operador);
             if (resultado.CodigoRecusa != null) throw new RecusaCheckingException(resultado.CodigoRecusa);
             _db.CheckingFotos.Add(resultado.Foto);
+            if (resultado.Autor != null) _db.CheckingCampoAutores.Add(resultado.Autor);
             try
             {
                 await _db.SaveChangesAsync(ct);
                 return;
             }
-            catch (DbUpdateConcurrencyException) when (tentativa < Tentativas)
+            catch (DbUpdateException ex) when (tentativa < Tentativas)
             {
                 foreach (var entrada in _db.ChangeTracker.Entries().ToList())
                     entrada.State = EntityState.Detached;
+                // Indice unico do IdClienteAcao: a mesma acao ja foi gravada; quem chamou devolve essa foto.
+                if (ex is not DbUpdateConcurrencyException && await Gravada(comando.IdCliente, ct) != null) throw;
+                // TimeStamp da ordem ou PK de CheckingCampoAutor (primeiro autor concorrente): reaplica a regra.
             }
         }
     }
