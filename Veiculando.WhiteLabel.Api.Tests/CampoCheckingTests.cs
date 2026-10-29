@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Veiculando.Data.Contexts;
@@ -31,6 +32,13 @@ public class CampoCheckingTests
     {
         var local = await Seed.LocalAsync(Afiliada, "LC" + sufixo);
         var peca = await Seed.PecaAsync(local, "PC" + sufixo);
+        var factory = new WlApiFactory(_db, Afiliada);
+        var (op, client) = await Operador(factory, sufixo);
+        return (factory, client, op, peca);
+    }
+
+    private static async Task<(int Operador, HttpClient Client)> Operador(WlApiFactory factory, string sufixo)
+    {
         using var ctx = new VeiculandoDataContext();
         var email = $"checking-{sufixo}@exemplo.com";
         await ctx.Database.ExecuteSqlCommandAsync(@"
@@ -40,13 +48,12 @@ VALUES ('Campo', @p0, @p1, 1, 0, GETUTCDATE(), 1, GETUTCDATE(), GETUTCDATE(), 1,
 INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY(), @p2, 1, 1);",
             email, SenhaUsuarioCore.Hash(Seed.SenhaPadrao), Afiliada);
         var op = await ctx.Database.SqlQuery<int>("SELECT Id FROM Usuario WHERE Email=@p0", email).SingleAsync();
-        var factory = new WlApiFactory(_db, Afiliada);
         var client = factory.ClienteAnonimo();
         var login = await client.PostAsJsonAsync("/api/wl/campo/auth/login", new { email, senha = Seed.SenhaPadrao });
         login.StatusCode.Should().Be(HttpStatusCode.OK, await login.Content.ReadAsStringAsync());
         var token = (await login.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        return (factory, client, op, peca);
+        return (op, client);
     }
 
     // Ordem iniciada no periodo 1; com colar, a peca ja tem a colagem marcada.
@@ -319,6 +326,85 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
             cmd.Parameters.AddWithValue("@id", _id);
             cmd.ExecuteNonQuery();
         }
+    }
+
+    // VEI-RD-143: ordem com duas pecas (nao conclui na primeira foto), a primeira
+    // colada pelo operador e o segundo operador como Responsavel, tambem fiscal atual.
+    private async Task<(WlApiFactory Factory, HttpClient Fiscal, HttpClient Responsavel, int Id, int Peca, int Fiscal1)>
+        DoisFiscais(string sufixo)
+    {
+        var (factory, client, op, peca) = await Preparar(sufixo);
+        var (op2, client2) = await Operador(factory, sufixo + "2");
+        var outra = await Seed.PecaAsync(await Seed.LocalAsync(Afiliada, "LD" + sufixo), "PD" + sufixo);
+        await Seed.AfiliadaAsync(Afiliada);
+        int id;
+        using (var ctx = new VeiculandoDataContext())
+        {
+            var pecas = await ctx.Pecas.Include(p => p.Local.Cidade).Where(p => p.Id == peca || p.Id == outra).ToListAsync();
+            var ordem = new OrdemServico(await ctx.Afiliadas.FindAsync(Afiliada), await ctx.Periodos.FindAsync(1),
+                3000 + await ctx.OrdensServico.CountAsync(o => o.IdAfiliada == Afiliada),
+                pecas.Select(p => p.Local.Cidade).Distinct().ToArray(), pecas.ToArray(), await ctx.Usuarios.FindAsync(1));
+            ordem.DefinirAtribuidos(op, op);
+            ctx.OrdensServico.Add(ordem);
+            await ctx.SaveChangesAsync();
+            id = ordem.Id;
+        }
+        var corpo = new { idCliente = Guid.NewGuid(), hora = Hora, latitude = -23.55, longitude = -46.63 };
+        (await client.PostAsJsonAsync($"/api/wl/campo/ordens/{id}/iniciar", corpo)).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/wl/campo/ordens/{id}/pecas/{peca}/colagem",
+            corpo with { idCliente = Guid.NewGuid() })).EnsureSuccessStatusCode();
+        using (var ctx = new VeiculandoDataContext())
+            await ctx.Database.ExecuteSqlCommandAsync("UPDATE OrdemServico SET IdResponsavel=@p0 WHERE Id=@p1", op2, id);
+        await ItemDeChecking(peca, "CK" + sufixo);
+        return (factory, client, client2, id, peca, op);
+    }
+
+    [Fact]
+    public async Task Primeiro_autor_vale_outro_fiscal_e_recusado_e_o_mesmo_autor_segue_enviando()
+    {
+        var (factory, fiscal, responsavel, id, peca, op) = await DoisFiscais("aut");
+        using var f = factory; using var c1 = fiscal; using var c2 = responsavel;
+        var rota = $"/api/wl/campo/ordens/{id}/pecas/{peca}/checking";
+
+        using (var form = Foto(Guid.NewGuid()))
+            (await fiscal.PostAsync(rota, form)).StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var form = Foto(Guid.NewGuid()))
+            (await Codigo(await responsavel.PostAsync(rota, form))).Should().Be(RecusaCampo.CheckingJaRealizado);
+        factory.Uploads.Files.Should().ContainSingle("a recusa sai antes do upload");
+        using (var form = Foto(Guid.NewGuid()))
+            (await fiscal.PostAsync(rota, form)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var ctx = new VeiculandoDataContext();
+        (await ctx.CheckingFotos.CountAsync(x => x.IdOrdemServicoCampo == id)).Should().Be(2);
+        (await ctx.CheckingCampoAutores.SingleAsync(a => a.IdOrdemServico == id)).IdOperador.Should().Be(op);
+    }
+
+    [Fact]
+    public async Task Dois_fiscais_enviando_ao_mesmo_tempo_so_o_primeiro_persistido_vale()
+    {
+        var (factory, fiscal, responsavel, id, peca, _) = await DoisFiscais("con");
+        using var f = factory; using var c1 = fiscal; using var c2 = responsavel;
+        var rota = $"/api/wl/campo/ordens/{id}/pecas/{peca}/checking";
+        // As duas requisicoes passam da verificacao previa e so seguem juntas para a gravacao.
+        var chegaram = 0;
+        var juntas = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        factory.Uploads.AntesDoPut = async () =>
+        {
+            if (Interlocked.Increment(ref chegaram) == 2) juntas.TrySetResult();
+            await juntas.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        };
+
+        using var form1 = Foto(Guid.NewGuid());
+        using var form2 = Foto(Guid.NewGuid());
+        var respostas = await Task.WhenAll(fiscal.PostAsync(rota, form1), responsavel.PostAsync(rota, form2));
+
+        respostas.Count(r => r.StatusCode == HttpStatusCode.OK).Should().Be(1);
+        var recusada = respostas.Single(r => r.StatusCode != HttpStatusCode.OK);
+        (await Codigo(recusada)).Should().Be(RecusaCampo.CheckingJaRealizado);
+        factory.Uploads.Files.Should().ContainSingle("o arquivo do perdedor e apagado");
+        using var ctx = new VeiculandoDataContext();
+        (await ctx.CheckingFotos.CountAsync(x => x.IdOrdemServicoCampo == id)).Should().Be(1);
+        (await ctx.CheckingCampoAutores.CountAsync(a => a.IdOrdemServico == id)).Should().Be(1);
     }
 
     [Fact]

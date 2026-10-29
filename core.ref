@@ -199,4 +199,6 @@
 # Refixar no SHA da main quando a Sprint 16 for promovida.
 # VEI-RD-141c: aab415f767 e o merge da PR Core #300 em sprint-16.0 (merge commit).
 # Traz CheckingColagemCampo e a migration AddCheckingCampo.
-aab415f7676fc40bda633bd9dc503693c840055d
+# VEI-RD-143: pin TEMPORARIO em 5939f71 (head da PR Core #301, CheckingCampoAutor).
+# RE-PIN OBRIGATORIO no merge commit da #301.
+5939f7185b8ce65329b46ca66d94ea5d30987304
