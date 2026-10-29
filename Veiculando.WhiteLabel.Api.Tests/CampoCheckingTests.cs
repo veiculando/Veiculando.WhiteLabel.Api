@@ -233,6 +233,95 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
     }
 
     [Fact]
+    public async Task Corrida_com_o_mesmo_id_cliente_devolve_a_foto_gravada_e_apaga_o_arquivo_perdedor()
+    {
+        var (factory, client, op, peca) = await Preparar("cor");
+        using var f = factory; using var c = client;
+        var id = await Ordem(client, op, peca);
+        await ItemDeChecking(peca, "CKCOR");
+        var idCliente = Guid.NewGuid();
+        var rota = $"/api/wl/campo/ordens/{id}/pecas/{peca}/checking";
+        string vencedora = null;
+        var disparado = false;
+        // A segunda requisicao grava inteira enquanto a primeira esta no upload.
+        factory.Uploads.AntesDoPut = async () =>
+        {
+            if (disparado) return;
+            disparado = true;
+            using var form = Foto(idCliente);
+            var resp = await client.PostAsync(rota, form);
+            vencedora = await resp.Content.ReadAsStringAsync();
+            resp.StatusCode.Should().Be(HttpStatusCode.OK, vencedora);
+        };
+
+        using var primeira = Foto(idCliente);
+        var perdedora = await client.PostAsync(rota, primeira);
+        var texto = await perdedora.Content.ReadAsStringAsync();
+        perdedora.StatusCode.Should().Be(HttpStatusCode.OK, texto);
+        texto.Should().Be(vencedora);
+        factory.Uploads.Files.Should().ContainSingle();
+        using var ctx = new VeiculandoDataContext();
+        (await ctx.CheckingFotos.CountAsync(x => x.IdClienteAcao == idCliente)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Ordem_alterada_durante_a_gravacao_e_reaplicada()
+    {
+        var (factory, client, op, peca) = await Preparar("cnc");
+        using var f = factory; using var c = client;
+        var id = await Ordem(client, op, peca);
+        await ItemDeChecking(peca, "CKCNC");
+        var interceptor = new AlteraOrdemAntesDoUpdate(_db.ConnectionString, id);
+        System.Data.Entity.Infrastructure.Interception.DbInterception.Add(interceptor);
+        try
+        {
+            using var form = Foto(Guid.NewGuid());
+            var resp = await client.PostAsync($"/api/wl/campo/ordens/{id}/pecas/{peca}/checking", form);
+            resp.StatusCode.Should().Be(HttpStatusCode.OK, await resp.Content.ReadAsStringAsync());
+        }
+        finally
+        {
+            System.Data.Entity.Infrastructure.Interception.DbInterception.Remove(interceptor);
+        }
+        interceptor.Disparos.Should().Be(1, "a primeira gravacao precisa ter colidido no TimeStamp");
+        using var ctx = new VeiculandoDataContext();
+        (await ctx.OrdensServico.Include(o => o.Pecas).SingleAsync(o => o.Id == id)).Pecas.Single()
+            .DataFotoCampo.Should().Be(Hora);
+        factory.Uploads.Files.Should().ContainSingle();
+    }
+
+    // Na primeira gravacao da ordem, outra conexao muda a linha antes do UPDATE:
+    // o TimeStamp nao confere e o EF lanca DbUpdateConcurrencyException.
+    private sealed class AlteraOrdemAntesDoUpdate
+        : System.Data.Entity.Infrastructure.Interception.DbCommandInterceptor
+    {
+        private readonly string _conexao;
+        private readonly int _id;
+        public int Disparos { get; private set; }
+        public AlteraOrdemAntesDoUpdate(string conexao, int id) => (_conexao, _id) = (conexao, id);
+
+        public override void ReaderExecuting(System.Data.Common.DbCommand command,
+            System.Data.Entity.Infrastructure.Interception.DbCommandInterceptionContext<System.Data.Common.DbDataReader> ctx) =>
+            Alterar(command);
+
+        public override void NonQueryExecuting(System.Data.Common.DbCommand command,
+            System.Data.Entity.Infrastructure.Interception.DbCommandInterceptionContext<int> ctx) =>
+            Alterar(command);
+
+        private void Alterar(System.Data.Common.DbCommand command)
+        {
+            if (Disparos > 0 || !command.CommandText.TrimStart().StartsWith("UPDATE [dbo].[OrdemServico]")) return;
+            Disparos++;
+            using var conexao = new System.Data.SqlClient.SqlConnection(_conexao);
+            conexao.Open();
+            using var cmd = new System.Data.SqlClient.SqlCommand(
+                "UPDATE OrdemServico SET DataAtualizacao = SYSUTCDATETIME() WHERE Id = @id", conexao);
+            cmd.Parameters.AddWithValue("@id", _id);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    [Fact]
     public async Task Falha_do_storage_e_503_sem_foto_e_permite_reenviar()
     {
         var (factory, client, op, peca) = await Preparar("sto");

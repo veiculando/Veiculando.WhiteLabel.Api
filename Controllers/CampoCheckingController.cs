@@ -78,7 +78,15 @@ public sealed class CampoCheckingController : CampoControllerBase
         if (pedido.Foto.ContentType != "image/jpeg" && pedido.Foto.ContentType != "image/png")
             return BadRequest(new { message = "Envie uma foto JPG ou PNG." });
 
-        var item = await ItemDoPeriodo(id, idPeca, ct);
+        // Pre-condicoes do Core antes de subir o arquivo. Sem item, o Core so
+        // devolve checking_indisponivel depois de todas as outras recusas.
+        var ordemAtual = await _db.OrdensServico.AsNoTracking().Include(o => o.Pecas).SingleAsync(o => o.Id == id, ct);
+        var previa = CheckingColagemCampo.Executar(ordemAtual, null, null, new ComandoCheckingCampo(idCliente, OperadorId,
+            idPeca, pedido.Hora.Value, pedido.Latitude.Value, pedido.Longitude.Value, null, null, null, null, 0), null);
+        if (previa.CodigoRecusa != RecusaCampo.CheckingIndisponivel)
+            return RecusarCampo(previa.CodigoRecusa);
+
+        var item = await ItemDoPeriodo(ordemAtual.IdPeriodo, idPeca, ct);
         if (item == null)
         {
             // Anomalia de dados: a peca colada nao tem item de checking no PI do periodo. Nunca criar.
@@ -113,7 +121,7 @@ public sealed class CampoCheckingController : CampoControllerBase
 
         try
         {
-            await _pipeline.SaveAsync(arquivo, corpo, OperadorId, () => Gravar(id, item.IdPedidoItem, comando, ct),
+            await _pipeline.SaveAsync(arquivo, corpo, AtorStorage, () => Gravar(id, item.IdPedidoItem, comando, ct),
                 () => _references.ExistsAsync(arquivo.Key, CancellationToken.None), ct);
         }
         catch (RecusaCheckingException recusa)
@@ -128,10 +136,18 @@ public sealed class CampoCheckingController : CampoControllerBase
         }
         catch (DbUpdateConcurrencyException)
         {
-            return Conflict(new { message = "A ordem foi alterada por outra ação. Sincronize e tente novamente." });
+            return RecusarCampo(OrdemAlterada);
+        }
+        catch (FalhaGravacaoException falha)
+        {
+            // Erro de regra/grafo nao melhora com reenvio: 500, para a fila do app nao repetir para sempre.
+            _logger.LogError(falha.InnerException, "CAMPO_CHECKING_GRAVACAO_FALHOU tenant={Tenant} operador={Operador}",
+                AfiliadaId, OperadorId);
+            return StatusCode(500, new { message = "Não foi possível registrar o checking. Avise a exibidora." });
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not DbUpdateException)
         {
+            // So chega aqui falha do storage: transitoria, o app reenvia.
             _logger.LogError(ex, "CAMPO_CHECKING_FALHOU tenant={Tenant} operador={Operador}", AfiliadaId, OperadorId);
             return StatusCode(503, new { message = "Não foi possível salvar a foto. Tente novamente." });
         }
@@ -142,6 +158,19 @@ public sealed class CampoCheckingController : CampoControllerBase
     // A ordem tem TimeStamp: outra acao de campo simultanea faz o SaveChanges
     // falhar. Recarrega o grafo e reaplica a regra do Core.
     private async Task Gravar(int id, int idPedidoItem, ComandoCheckingCampo comando, CancellationToken ct)
+    {
+        try
+        {
+            await GravarComRetentativa(id, idPedidoItem, comando, ct);
+        }
+        catch (Exception ex) when (ex is not DbUpdateException && ex is not RecusaCheckingException
+            && ex is not OperationCanceledException)
+        {
+            throw new FalhaGravacaoException(ex);
+        }
+    }
+
+    private async Task GravarComRetentativa(int id, int idPedidoItem, ComandoCheckingCampo comando, CancellationToken ct)
     {
         for (var tentativa = 1; ; tentativa++)
         {
@@ -175,9 +204,8 @@ public sealed class CampoCheckingController : CampoControllerBase
 
     // Item de PI da peca no periodo da ordem, na afiliada do token:
     // PecaPeriodoStatus -> PedidoInsercao -> CheckingItem.
-    private async Task<CheckingItem> ItemDoPeriodo(int id, int idPeca, CancellationToken ct)
+    private async Task<CheckingItem> ItemDoPeriodo(int idPeriodo, int idPeca, CancellationToken ct)
     {
-        var idPeriodo = await _db.OrdensServico.Where(o => o.Id == id).Select(o => o.IdPeriodo).SingleAsync(ct);
         var idInsercao = await _queries.PecaPeriodoStatus.AsNoTracking()
             .Where(p => p.IdPeca == idPeca && p.IdPeriodo == idPeriodo && p.IdPedidoInsercao != null
                 && p.PedidoInsercao.IdAfiliada == AfiliadaId && p.PedidoInsercao.StatusExibicao == StatusExibicaoEnum.Ativo)
@@ -201,6 +229,15 @@ public sealed class CampoCheckingController : CampoControllerBase
             .FirstAsync(o => o.Id == id, ct);
         return Ok(new { idCliente = foto.IdClienteAcao, idPeca, idFoto = foto.Id, hora = foto.DataCapturaAparelho,
             ordem = CampoOrdensProjecao.Linha(ordem, OperadorId) });
+    }
+
+    // Metadado do blob: o usuario WL do operador quando existe; senao o do Core.
+    private int AtorStorage =>
+        int.TryParse(User.FindFirst(CampoAuthController.ClaimWlUsuarioOperadorId)?.Value, out var wl) ? wl : OperadorId;
+
+    private sealed class FalhaGravacaoException : Exception
+    {
+        public FalhaGravacaoException(Exception causa) : base(causa.Message, causa) { }
     }
 
     private sealed class RecusaCheckingException : Exception
