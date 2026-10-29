@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Entities.OrdensServico;
 using Veiculando.Domain.Enums;
@@ -21,14 +22,16 @@ public sealed class CampoImagensController : CampoControllerBase
     private readonly ITenantQueries _queries;
     private readonly IWlUploadStorage _storage;
     private readonly IWlArquivoLegado _legado;
+    private readonly ILogger<CampoImagensController> _logger;
 
     public CampoImagensController(VeiculandoDataContext db, ITenantQueries queries, ITenantContext tenant,
-        IWlUploadStorage storage, IWlArquivoLegado legado) : base(tenant)
+        IWlUploadStorage storage, IWlArquivoLegado legado, ILogger<CampoImagensController> logger) : base(tenant)
     {
         _db = db;
         _queries = queries;
         _storage = storage;
         _legado = legado;
+        _logger = logger;
     }
 
     private IQueryable<OrdemServico> Iniciadas() =>
@@ -71,10 +74,24 @@ public sealed class CampoImagensController : CampoControllerBase
         return visivel ? await DoLegado(caminho, ct) : NotFound();
     }
 
+    // Referencia sem arquivo vira 404 (o app mostra "sem imagem"); falha do storage, 503.
     private async Task<IActionResult> DoStorage(string chave, CancellationToken ct)
     {
-        var arquivo = await _storage.InfoAsync(chave, ct);
-        return Arquivo(await _storage.ReadAsync(chave, ct), arquivo.ContentType);
+        try
+        {
+            var arquivo = await _storage.InfoAsync(chave, ct);
+            return Arquivo(await _storage.ReadAsync(chave, ct), arquivo.ContentType);
+        }
+        catch (Exception ex) when (WlUploadErro.Ausente(ex))
+        {
+            _logger.LogWarning("CAMPO_IMAGEM_AUSENTE tenant={Tenant} chave={Chave}", AfiliadaId, chave);
+            return NotFound();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "CAMPO_IMAGEM_STORAGE_FALHOU tenant={Tenant}", AfiliadaId);
+            return StatusCode(503);
+        }
     }
 
     private async Task<IActionResult> DoLegado(string caminho, CancellationToken ct)

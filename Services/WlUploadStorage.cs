@@ -121,3 +121,10 @@ public sealed record WlUploadKey(int TenantId, string Kind, int ResourceId, stri
         return new(tenant, match.Groups[2].Value, resource, match.Groups[4].Value);
     }
 }
+
+/// <summary>Arquivo inexistente no storage (404 do Azure ou chave ausente no fake), distinto de falha transitória.</summary>
+public static class WlUploadErro
+{
+    public static bool Ausente(Exception erro) =>
+        erro is StorageException { RequestInformation.HttpStatusCode: 404 } || erro is KeyNotFoundException;
+}
