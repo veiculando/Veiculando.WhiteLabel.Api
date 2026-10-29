@@ -12,6 +12,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     {
         // O UUID do aparelho ja foi usado em outra acao, ordem, peca ou operador.
         public const string IdClienteReutilizado = "campo.id_cliente_reutilizado";
+        // Outra acao alterou a ordem em todas as tentativas; o app sincroniza e reenvia.
+        public const string OrdemAlterada = "campo.ordem_alterada";
 
         private readonly ITenantContext _tenant;
 
@@ -34,7 +36,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 RecusaCampo.ForaDeColagem => "A ordem não está na etapa de colagem.",
                 RecusaCampo.PecaInexistente => "A peça não pertence a esta ordem.",
                 RecusaCampo.PecaNaoColada => "A colagem desta peça ainda não foi marcada.",
+                RecusaCampo.CheckingIndisponivel => "O checking desta peça não está disponível. Avise a exibidora.",
                 IdClienteReutilizado => "Este identificador já foi usado em outra ação.",
+                OrdemAlterada => "A ordem foi alterada por outra ação. Sincronize e tente novamente.",
                 _ => "A ação de campo foi recusada."
             }
         });

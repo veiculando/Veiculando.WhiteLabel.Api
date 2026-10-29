@@ -15,9 +15,12 @@ public sealed class FakeWlUploadStorage : IWlUploadStorage
     public bool FailPut { get; set; }
     public bool FailDelete { get; set; }
     public bool FailCommit { get; set; }
+    // Roda antes de cada Put: simula outra requisição chegando no meio do upload.
+    public Func<Task> AntesDoPut { get; set; }
     public async Task PutAsync(WlStoredFile file, Stream body, int actorId, CancellationToken ct)
     {
         if (FailPut) throw new IOException("Storage indisponível");
+        if (AntesDoPut != null) await AntesDoPut();
         using var bytes = new MemoryStream();
         await body.CopyToAsync(bytes, ct);
         Files[file.Key] = (file, bytes.ToArray(), true);
