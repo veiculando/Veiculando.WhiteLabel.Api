@@ -57,7 +57,7 @@ public sealed class CampoOrdensController : CampoControllerBase
         ListaCampoConsulta.Aplicar(queries.OrdensServico.AsNoTracking()
             .Where(o => o.Pecas.All(p => p.Peca.Local.IdAfiliada == afiliadaId)), filtro);
 
-    private static IQueryable<OrdemServico> ComResumo(IQueryable<OrdemServico> consulta) => consulta
+    internal static IQueryable<OrdemServico> ComResumo(IQueryable<OrdemServico> consulta) => consulta
         .Include(o => o.Periodo)
         .Include(o => o.Cidades.Select(c => c.Cidade))
         .Include(o => o.Pecas.Select(p => p.Peca.Local.Cidade))

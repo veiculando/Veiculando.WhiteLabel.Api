@@ -197,4 +197,6 @@
 # VEI-RD-154: Core da sprint-16.0 apos sincronizacao com producao (PR #299).
 # Contem AcoesCampo, RecusaCampo e ListaCampoConsulta (PRs #292/#293).
 # Refixar no SHA da main quando a Sprint 16 for promovida.
-aff3a5de1d2bf7bc45beeba8b668642970622ef5
+# VEI-RD-141c: aab415f767 e o merge da PR Core #300 em sprint-16.0 (merge commit).
+# Traz CheckingColagemCampo e a migration AddCheckingCampo.
+aab415f7676fc40bda633bd9dc503693c840055d

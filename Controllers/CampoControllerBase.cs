@@ -34,6 +34,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 RecusaCampo.ForaDeColagem => "A ordem não está na etapa de colagem.",
                 RecusaCampo.PecaInexistente => "A peça não pertence a esta ordem.",
                 RecusaCampo.PecaNaoColada => "A colagem desta peça ainda não foi marcada.",
+                RecusaCampo.CheckingIndisponivel => "O checking desta peça não está disponível. Avise a exibidora.",
                 IdClienteReutilizado => "Este identificador já foi usado em outra ação.",
                 _ => "A ação de campo foi recusada."
             }
