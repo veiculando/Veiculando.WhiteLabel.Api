@@ -65,6 +65,15 @@ public class UploadPipelineTests
         store.Files.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Copia_de_foto_substituida_nunca_vira_lixo_na_reconciliacao()
+    {
+        // Sem referência no banco de propósito: o reconciliador apaga o que não
+        // tem referência, e esta consulta não pode nem chegar ao banco.
+        var key = $"tenant-1/{WlUploadKey.HistoricoPeca}/2/wl-0123456789abcdef0123456789abcdef.jpg";
+        (await new WlUploadReferences().ExistsAsync(key, default)).Should().BeTrue();
+    }
+
     [Theory]
     [InlineData("tenant-1/pecas/2/../../foto.jpg")]
     [InlineData("https://storage/arquivo.jpg")]

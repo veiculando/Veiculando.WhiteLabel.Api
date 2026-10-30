@@ -1,5 +1,7 @@
 using System;
 using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -135,6 +137,67 @@ END");
             using var otherFactory = new WlApiFactory(_db, 825);
             using var otherClient = otherFactory.ClienteAnonimo();
             (await otherClient.GetAsync("/api/wl/app/inventory/P-APP-824-A/photo")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        }
+
+        [Fact]
+        public async Task Foto_cadastrada_pelo_Core_e_entregue_pelo_BFF_mesmo_com_nome_em_maiusculas()
+        {
+            const int afiliada = 830;
+            var localId = await Seed.LocalAsync(afiliada, "LOC830A");
+            var pecaId = await Seed.PecaAsync(localId, "P-APP-830-A");
+            using (var ctx = new VeiculandoDataContext())
+                await ctx.Database.ExecuteSqlCommandAsync("UPDATE Peca SET Foto = @p0 WHERE Id = @p1", "peca_SJCAUR2_1_2.jpg", pecaId);
+
+            using var factory = new WlApiFactory(_db, afiliada);
+            var bytes = new byte[] { 0xff, 0xd8, 0xff, 0xd9 };
+            // O FileServer só tem o arquivo em minúsculas, como no Linux de produção.
+            factory.FileServer.Responder = url => url.EndsWith("conteudo/pecas/fotos/peca_sjcaur2_1_2.jpg")
+                ? new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(bytes) { Headers = { ContentType = new MediaTypeHeaderValue("image/jpeg") } }
+                }
+                : new HttpResponseMessage(HttpStatusCode.NotFound);
+            using var client = factory.ClienteAnonimo();
+
+            var item = await client.GetFromJsonAsync<InventoryItem>("/api/wl/app/inventory/P-APP-830-A");
+            item.ImageUrl.Should().Be("/api/wl/app/inventory/P-APP-830-A/photo");
+
+            var photo = await client.GetAsync(item.ImageUrl);
+            photo.StatusCode.Should().Be(HttpStatusCode.OK);
+            photo.Content.Headers.ContentType.MediaType.Should().Be("image/jpeg");
+            (await photo.Content.ReadAsByteArrayAsync()).Should().Equal(bytes);
+
+            // Outra exibidora não alcança a peça, então nem pergunta ao FileServer.
+            using var otherFactory = new WlApiFactory(_db, 831);
+            using var otherClient = otherFactory.ClienteAnonimo();
+            (await otherClient.GetAsync("/api/wl/app/inventory/P-APP-830-A/photo")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+            otherFactory.FileServer.Rotas.Should().BeEmpty();
+
+            factory.FileServer.Responder = _ => new HttpResponseMessage(HttpStatusCode.InternalServerError);
+            (await client.GetAsync(item.ImageUrl)).StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        }
+
+        [Theory]
+        [InlineData("NULL")]
+        [InlineData("../segredo.jpg")]
+        [InlineData("pasta/foto.jpg")]
+        [InlineData("foto.pdf")]
+        public async Task Nome_de_foto_legada_invalido_nao_vira_imageUrl_nem_chamada_ao_FileServer(string nome)
+        {
+            const int afiliada = 832;
+            var codigo = $"P-APP-832-{Math.Abs(nome.GetHashCode()) % 100000}";
+            var localId = await Seed.LocalAsync(afiliada, $"L832{Math.Abs(nome.GetHashCode()) % 100000}");
+            var pecaId = await Seed.PecaAsync(localId, codigo);
+            using (var ctx = new VeiculandoDataContext())
+                await ctx.Database.ExecuteSqlCommandAsync("UPDATE Peca SET Foto = @p0 WHERE Id = @p1", nome, pecaId);
+
+            using var factory = new WlApiFactory(_db, afiliada);
+            using var client = factory.ClienteAnonimo();
+
+            var item = await client.GetFromJsonAsync<InventoryItem>($"/api/wl/app/inventory/{codigo}");
+            item.ImageUrl.Should().BeNull();
+            (await client.GetAsync($"/api/wl/app/inventory/{codigo}/photo")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+            factory.FileServer.Rotas.Should().BeEmpty();
         }
 
         private sealed record InventoryItem(string Code, decimal Price, bool Available, bool Recommended, string ImageUrl, decimal TablePrice, object Road);

@@ -1,11 +1,17 @@
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Data.Entity;
 using System.Threading.Tasks;
 using FluentAssertions;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.PixelFormats;
+using Veiculando.WhiteLabel.Api.Services;
 using Veiculando.WhiteLabel.Api.Tests.Infrastructure;
 using Xunit;
 
@@ -26,8 +32,45 @@ public class UploadsIntegrationTests
         return form;
     }
 
+    private static readonly byte[] Jpg = GerarJpg(Color.Blue);
+    private static readonly byte[] OutroJpg = GerarJpg(Color.Red);
+
+    private static byte[] GerarJpg(Color cor)
+    {
+        using var imagem = new Image<Rgb24>(8, 8, cor.ToPixel<Rgb24>());
+        using var saida = new MemoryStream();
+        imagem.SaveAsJpeg(saida);
+        return saida.ToArray();
+    }
+
+    private static byte[] GerarPngTransparente()
+    {
+        using var imagem = new Image<Rgba32>(8, 8, new Rgba32(0, 0, 0, 0));
+        using var saida = new MemoryStream();
+        imagem.SaveAsPng(saida);
+        return saida.ToArray();
+    }
+
+    private static MultipartFormDataContent PhotoJpg(string name = "../../Foto.JPG", byte[] conteudo = null)
+    {
+        var form = new MultipartFormDataContent();
+        var bytes = new ByteArrayContent(conteudo ?? Jpg);
+        bytes.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
+        form.Add(bytes, "foto", name);
+        return form;
+    }
+
+    private static MultipartFormDataContent PhotoPng(byte[] conteudo)
+    {
+        var form = new MultipartFormDataContent();
+        var bytes = new ByteArrayContent(conteudo);
+        bytes.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+        form.Add(bytes, "foto", "foto.png");
+        return form;
+    }
+
     [Fact]
-    public async Task Peca_persiste_foto_no_storage_e_referencia_no_banco_sem_vazar_tenant()
+    public async Task Peca_grava_foto_no_fileserver_com_o_nome_do_core_sem_vazar_tenant()
     {
         const int tenant = 7901;
         await Seed.OperadorAsync(tenant, "upload7901@teste.local", new[] { "PecaGerenciar" });
@@ -36,28 +79,273 @@ public class UploadsIntegrationTests
         using var factory = new WlApiFactory(_db, tenant);
         using var client = await factory.ClienteAutenticadoAsync("upload7901@teste.local", Seed.SenhaPadrao);
         var route = $"/api/wl/pecas/locais/{local}/pecas/{peca}/foto";
-        using var form = Photo();
+        using var form = PhotoJpg();
         (await client.PostAsync(route, form)).StatusCode.Should().Be(HttpStatusCode.OK);
-        factory.Uploads.Files.Should().ContainSingle();
+
+        // Uma foto só por peça: o mesmo arquivo e o mesmo nome que o Core grava
+        // (`{Codigo}.jpg` em minúsculas), nada no storage privado do WL.
+        factory.FileServer.FotosPeca.Keys.Should().ContainSingle().Which.Should().Be("up7901.jpg");
+        factory.Uploads.Files.Should().BeEmpty();
+        (await FotoNoBancoAsync(peca)).Should().Be("up7901.jpg");
+
         var fotos = await client.GetFromJsonAsync<JsonElement[]>(route + "s");
         fotos.Should().ContainSingle();
-        fotos[0].GetProperty("sha256").GetString().Should().HaveLength(64);
-        fotos[0].GetProperty("fileName").GetString().Should().MatchRegex("^wl-[a-f0-9]{32}\\.png$");
+        fotos[0].GetProperty("fileName").GetString().Should().Be("up7901.jpg");
         var download = fotos[0].GetProperty("downloadUrl").GetString();
-        (await client.GetByteArrayAsync(download)).Length.Should().BeGreaterThan(8);
+        (await client.GetByteArrayAsync(download)).Should().Equal(Jpg);
 
         await Seed.OperadorAsync(7902, "upload7902@teste.local", new[] { "PecaGerenciar" });
         using var otherFactory = new WlApiFactory(_db, 7902);
         using var other = await otherFactory.ClienteAutenticadoAsync("upload7902@teste.local", Seed.SenhaPadrao);
         (await other.GetAsync(download)).StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await other.GetAsync(route + "s")).StatusCode.Should().Be(HttpStatusCode.NotFound);
-        using var otherPhoto = Photo();
+        using var otherPhoto = PhotoJpg();
         (await other.PostAsync(route, otherPhoto)).StatusCode.Should().Be(HttpStatusCode.NotFound);
-        otherFactory.Uploads.Files.Should().BeEmpty();
+        otherFactory.FileServer.FotosPeca.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task Falha_storage_nao_persiste_referencia_e_permite_retry_sem_falso_sucesso()
+    public async Task Png_vira_jpg_com_fundo_branco_e_o_original_fica_guardado()
+    {
+        const int tenant = 7905;
+        await Seed.OperadorAsync(tenant, "png7905@teste.local", new[] { "PecaGerenciar" });
+        var local = await Seed.LocalAsync(tenant, "UL7905");
+        var peca = await Seed.PecaAsync(local, "UP7905");
+        using var factory = new WlApiFactory(_db, tenant);
+        using var client = await factory.ClienteAutenticadoAsync("png7905@teste.local", Seed.SenhaPadrao);
+        var original = GerarPngTransparente();
+        using var png = PhotoPng(original);
+        (await client.PostAsync($"/api/wl/pecas/locais/{local}/pecas/{peca}/foto", png)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        (await FotoNoBancoAsync(peca)).Should().Be("up7905.jpg");
+        using var gravada = Image.Load<Rgb24>(factory.FileServer.FotosPeca["up7905.jpg"], out var formato);
+        formato.Should().BeOfType<JpegFormat>();
+        gravada[0, 0].R.Should().BeGreaterThan(250);
+        gravada[0, 0].G.Should().BeGreaterThan(250);
+        gravada[0, 0].B.Should().BeGreaterThan(250);
+
+        var copia = factory.Uploads.Files.Should().ContainSingle().Which;
+        copia.Key.Should().StartWith($"tenant-{tenant}/{WlUploadKey.HistoricoPeca}/{peca}/").And.EndWith(".png");
+        copia.Value.Bytes.Should().Equal(original);
+        copia.Value.Pending.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Arquivo_invalido_nao_toca_na_foto_que_ja_existe()
+    {
+        const int tenant = 7906;
+        await Seed.OperadorAsync(tenant, "invalido7906@teste.local", new[] { "PecaGerenciar" });
+        var local = await Seed.LocalAsync(tenant, "UL7906");
+        var peca = await Seed.PecaAsync(local, "UP7906");
+        using var factory = new WlApiFactory(_db, tenant);
+        using var client = await factory.ClienteAutenticadoAsync("invalido7906@teste.local", Seed.SenhaPadrao);
+        var route = $"/api/wl/pecas/locais/{local}/pecas/{peca}/foto";
+        using (var form = PhotoJpg()) (await client.PostAsync(route, form)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Cabeçalho de JPG, conteúdo que não é imagem: passa pelos magic bytes.
+        byte[] falso = { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0xFF, 0xD9 };
+        using var invalido = PhotoJpg(conteudo: falso);
+        (await client.PostAsync(route, invalido)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        factory.FileServer.FotosPeca["up7906.jpg"].Should().Equal(Jpg);
+        factory.Uploads.Files.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Troca_guarda_a_foto_anterior_antes_de_sobrescrever()
+    {
+        const int tenant = 7907;
+        await Seed.OperadorAsync(tenant, "troca7907@teste.local", new[] { "PecaGerenciar" });
+        var local = await Seed.LocalAsync(tenant, "UL7907");
+        var peca = await Seed.PecaAsync(local, "UP7907");
+        using var factory = new WlApiFactory(_db, tenant);
+        using var client = await factory.ClienteAutenticadoAsync("troca7907@teste.local", Seed.SenhaPadrao);
+        var route = $"/api/wl/pecas/locais/{local}/pecas/{peca}/foto";
+        using (var form = PhotoJpg()) (await client.PostAsync(route, form)).StatusCode.Should().Be(HttpStatusCode.OK);
+        factory.Uploads.Files.Should().BeEmpty();
+
+        using var nova = PhotoJpg(conteudo: OutroJpg);
+        (await client.PostAsync(route, nova)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        factory.FileServer.FotosPeca["up7907.jpg"].Should().Equal(OutroJpg);
+        var copia = factory.Uploads.Files.Should().ContainSingle().Which;
+        copia.Key.Should().StartWith($"tenant-{tenant}/{WlUploadKey.HistoricoPeca}/{peca}/");
+        copia.Value.Bytes.Should().Equal(Jpg);
+    }
+
+    [Fact]
+    public async Task Sem_copia_confirmada_a_foto_nao_e_sobrescrita()
+    {
+        const int tenant = 7908;
+        await Seed.OperadorAsync(tenant, "copia7908@teste.local", new[] { "PecaGerenciar" });
+        var local = await Seed.LocalAsync(tenant, "UL7908");
+        var peca = await Seed.PecaAsync(local, "UP7908");
+        using var factory = new WlApiFactory(_db, tenant);
+        using var client = await factory.ClienteAutenticadoAsync("copia7908@teste.local", Seed.SenhaPadrao);
+        var route = $"/api/wl/pecas/locais/{local}/pecas/{peca}/foto";
+        using (var form = PhotoJpg()) (await client.PostAsync(route, form)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        factory.Uploads.FailPut = true;
+        using var nova = PhotoJpg(conteudo: OutroJpg);
+        (await client.PostAsync(route, nova)).StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        factory.FileServer.FotosPeca["up7908.jpg"].Should().Equal(Jpg);
+    }
+
+    [Fact]
+    public async Task Conflito_com_outra_alteracao_da_peca_nao_desfaz_a_troca()
+    {
+        const int tenant = 7909;
+        await Seed.OperadorAsync(tenant, "banco7909@teste.local", new[] { "PecaGerenciar" });
+        var local = await Seed.LocalAsync(tenant, "UL7909");
+        var peca = await Seed.PecaAsync(local, "UP7909");
+        using var factory = new WlApiFactory(_db, tenant);
+        using var client = await factory.ClienteAutenticadoAsync("banco7909@teste.local", Seed.SenhaPadrao);
+        var route = $"/api/wl/pecas/locais/{local}/pecas/{peca}/foto";
+        using (var form = PhotoJpg()) (await client.PostAsync(route, form)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Outra operação altera a peça entre o envio e o SaveChanges: concorrência real.
+        factory.FileServer.AoGravarFoto = () =>
+        {
+            factory.FileServer.AoGravarFoto = null;
+            using var ctx = new Veiculando.Data.Contexts.VeiculandoDataContext();
+            ctx.Database.ExecuteSqlCommand("UPDATE Peca SET Descricao = 'alterada' WHERE Id = @p0", peca);
+        };
+        using var nova = PhotoJpg(conteudo: OutroJpg);
+        (await client.PostAsync(route, nova)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        factory.FileServer.FotosPeca["up7909.jpg"].Should().Equal(OutroJpg);
+        using var ctxFinal = new Veiculando.Data.Contexts.VeiculandoDataContext();
+        (await ctxFinal.Database.SqlQuery<string>("SELECT Descricao FROM Peca WHERE Id = @p0", peca).SingleAsync()).Should().Be("alterada");
+    }
+
+    /// <summary>Faz todo UPDATE da peça falhar até o retorno ser descartado.</summary>
+    private static async Task<IDisposable> BancoRecusaAsync(int peca)
+    {
+        var nome = $"CK_Teste_Peca_{peca}";
+        using var ctx = new Veiculando.Data.Contexts.VeiculandoDataContext();
+        await ctx.Database.ExecuteSqlCommandAsync(
+            $"ALTER TABLE Peca WITH NOCHECK ADD CONSTRAINT {nome} CHECK (Id <> {peca} OR FonteTimestamp IS NULL)");
+        return new Desfazer(() =>
+        {
+            using var limpeza = new Veiculando.Data.Contexts.VeiculandoDataContext();
+            limpeza.Database.ExecuteSqlCommand($"ALTER TABLE Peca DROP CONSTRAINT {nome}");
+        });
+    }
+
+    private sealed class Desfazer : IDisposable
+    {
+        private readonly Action _acao;
+        public Desfazer(Action acao) => _acao = acao;
+        public void Dispose() => _acao();
+    }
+
+    [Fact]
+    public async Task Falha_no_banco_depois_do_envio_restaura_a_foto_anterior()
+    {
+        const int tenant = 7910;
+        await Seed.OperadorAsync(tenant, "banco7910@teste.local", new[] { "PecaGerenciar" });
+        var local = await Seed.LocalAsync(tenant, "UL7910");
+        var peca = await Seed.PecaAsync(local, "UP7910");
+        using var factory = new WlApiFactory(_db, tenant);
+        using var client = await factory.ClienteAutenticadoAsync("banco7910@teste.local", Seed.SenhaPadrao);
+        var route = $"/api/wl/pecas/locais/{local}/pecas/{peca}/foto";
+        using (var form = PhotoJpg()) (await client.PostAsync(route, form)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using (await BancoRecusaAsync(peca))
+        {
+            using var nova = PhotoJpg(conteudo: OutroJpg);
+            (await client.PostAsync(route, nova)).StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        }
+
+        factory.FileServer.FotosPeca["up7910.jpg"].Should().Equal(Jpg);
+        factory.Uploads.Files.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Restauracao_nao_sobrescreve_gravacao_de_outra_origem()
+    {
+        const int tenant = 7911;
+        await Seed.OperadorAsync(tenant, "core7911@teste.local", new[] { "PecaGerenciar" });
+        var local = await Seed.LocalAsync(tenant, "UL7911");
+        var peca = await Seed.PecaAsync(local, "UP7911");
+        using var factory = new WlApiFactory(_db, tenant);
+        using var client = await factory.ClienteAutenticadoAsync("core7911@teste.local", Seed.SenhaPadrao);
+        var route = $"/api/wl/pecas/locais/{local}/pecas/{peca}/foto";
+        using (var form = PhotoJpg()) (await client.PostAsync(route, form)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // O Core grava no mesmo arquivo logo depois do envio do WL.
+        var doCore = GerarJpg(Color.Green);
+        factory.FileServer.AoGravarFoto = () =>
+        {
+            factory.FileServer.AoGravarFoto = null;
+            factory.FileServer.FotosPeca["up7911.jpg"] = doCore;
+        };
+        using (await BancoRecusaAsync(peca))
+        {
+            using var nova = PhotoJpg(conteudo: OutroJpg);
+            (await client.PostAsync(route, nova)).StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        }
+
+        factory.FileServer.FotosPeca["up7911.jpg"].Should().Equal(doCore);
+    }
+
+    [Fact]
+    public async Task Trocas_simultaneas_nao_se_desfazem_e_nenhuma_foto_se_perde()
+    {
+        const int tenant = 7912;
+        await Seed.OperadorAsync(tenant, "paralelo7912@teste.local", new[] { "PecaGerenciar" });
+        var local = await Seed.LocalAsync(tenant, "UL7912");
+        var peca = await Seed.PecaAsync(local, "UP7912");
+        using var factory = new WlApiFactory(_db, tenant);
+        using var client = await factory.ClienteAutenticadoAsync("paralelo7912@teste.local", Seed.SenhaPadrao);
+        var route = $"/api/wl/pecas/locais/{local}/pecas/{peca}/foto";
+        using (var form = PhotoJpg()) (await client.PostAsync(route, form)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var a = PhotoJpg(conteudo: OutroJpg);
+        var verde = GerarJpg(Color.Green);
+        using var b = PhotoJpg(conteudo: verde);
+        var respostas = await Task.WhenAll(client.PostAsync(route, a), client.PostAsync(route, b));
+
+        respostas.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.OK);
+        var final = factory.FileServer.FotosPeca["up7912.jpg"];
+        (final.AsSpan().SequenceEqual(OutroJpg) || final.AsSpan().SequenceEqual(verde)).Should().BeTrue();
+        // A primeira foto e a que perdeu a corrida ficam guardadas.
+        factory.Uploads.Files.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task Foto_antiga_acima_do_limite_de_leitura_ainda_pode_ser_trocada()
+    {
+        const int tenant = 7913;
+        await Seed.OperadorAsync(tenant, "grande7913@teste.local", new[] { "PecaGerenciar" });
+        var local = await Seed.LocalAsync(tenant, "UL7913");
+        var peca = await Seed.PecaAsync(local, "UP7913");
+        using var factory = new WlApiFactory(_db, tenant);
+        using var client = await factory.ClienteAutenticadoAsync("grande7913@teste.local", Seed.SenhaPadrao);
+        factory.FileServer.FotosPeca["up7913.jpg"] = new byte[20 * 1024 * 1024];
+
+        using var nova = PhotoJpg();
+        (await client.PostAsync($"/api/wl/pecas/locais/{local}/pecas/{peca}/foto", nova)).StatusCode.Should().Be(HttpStatusCode.OK);
+        factory.Uploads.Files.Should().ContainSingle().Which.Value.Bytes.Length.Should().Be(20 * 1024 * 1024);
+    }
+
+    [Fact]
+    public async Task Timeout_do_fileserver_responde_503_sem_gravar_nada()
+    {
+        const int tenant = 7914;
+        await Seed.OperadorAsync(tenant, "timeout7914@teste.local", new[] { "PecaGerenciar" });
+        var local = await Seed.LocalAsync(tenant, "UL7914");
+        var peca = await Seed.PecaAsync(local, "UP7914");
+        using var factory = new WlApiFactory(_db, tenant);
+        using var client = await factory.ClienteAutenticadoAsync("timeout7914@teste.local", Seed.SenhaPadrao);
+        factory.FileServer.Responder = _ => throw new TaskCanceledException("timeout do HttpClient");
+
+        using var nova = PhotoJpg();
+        (await client.PostAsync($"/api/wl/pecas/locais/{local}/pecas/{peca}/foto", nova)).StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await FotoNoBancoAsync(peca)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Falha_do_fileserver_nao_persiste_referencia_e_permite_retry_sem_falso_sucesso()
     {
         const int tenant = 7903;
         await Seed.OperadorAsync(tenant, "retry7903@teste.local", new[] { "PecaGerenciar" });
@@ -66,14 +354,21 @@ public class UploadsIntegrationTests
         using var factory = new WlApiFactory(_db, tenant);
         using var client = await factory.ClienteAutenticadoAsync("retry7903@teste.local", Seed.SenhaPadrao);
         var route = $"/api/wl/pecas/locais/{local}/pecas/{peca}/foto";
-        factory.Uploads.FailPut = true;
-        using var form = Photo();
+        factory.FileServer.FalharUploadFoto = true;
+        using var form = PhotoJpg();
         (await client.PostAsync(route, form)).StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await FotoNoBancoAsync(peca)).Should().BeNull();
         (await client.GetFromJsonAsync<JsonElement[]>(route + "s")).Should().BeEmpty();
-        factory.Uploads.FailPut = false;
-        using var retry = Photo();
+        factory.FileServer.FalharUploadFoto = false;
+        using var retry = PhotoJpg();
         (await client.PostAsync(route, retry)).StatusCode.Should().Be(HttpStatusCode.OK);
         (await client.GetFromJsonAsync<JsonElement[]>(route + "s")).Should().ContainSingle();
+    }
+
+    private static async Task<string> FotoNoBancoAsync(int pecaId)
+    {
+        using var ctx = new Veiculando.Data.Contexts.VeiculandoDataContext();
+        return await ctx.Database.SqlQuery<string>("SELECT Foto FROM Peca WHERE Id = @p0", pecaId).SingleAsync();
     }
 
     [Fact]
