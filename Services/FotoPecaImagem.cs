@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
@@ -47,7 +48,7 @@ namespace Veiculando.WhiteLabel.Api.Services
                 png.SaveAsJpeg(saida, new JpegEncoder { Quality = QualidadeJpg });
                 return new FotoPecaPreparada(saida.ToArray(), true);
             }
-            catch (ImageFormatException) { return null; }
+            catch (Exception ex) when (ex is ImageFormatException or ImageProcessingException or NotSupportedException) { return null; }
         }
     }
 }

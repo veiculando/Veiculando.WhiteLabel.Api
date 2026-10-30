@@ -151,6 +151,7 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             services.AddSingleton<AppLoginAttemptGuard>();
             services.AddSingleton<IWlUploadStorage, AzureWlUploadStorage>();
             services.AddScoped<WlUploadPipeline>();
+            services.AddSingleton<FotoPecaTrava>();
             services.AddScoped<WlUploadReferences>();
             services.AddHostedService<WlUploadReconciler>();
 

@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.Azure.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Veiculando.Domain.Entities;
 using Veiculando.Domain.Enums;
 using Veiculando.Data.Contexts;
@@ -30,9 +31,12 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         private readonly IWlUploadStorage _storage;
         private readonly VeiculandoDataContext _db;
         private readonly IFotoPecaFileServer _fotoFileServer;
+        private readonly ILogger<AppInventoryController> _logger;
 
-        public AppInventoryController(ITenantQueries tenant, IWlUploadStorage storage, VeiculandoDataContext db, IFotoPecaFileServer fotoFileServer)
+        public AppInventoryController(ITenantQueries tenant, IWlUploadStorage storage, VeiculandoDataContext db, IFotoPecaFileServer fotoFileServer,
+            ILogger<AppInventoryController> logger)
         {
+            _logger = logger;
             _tenant = tenant;
             _storage = storage;
             _db = db;
@@ -179,7 +183,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             {
                 FotoPecaArquivo arquivo;
                 try { arquivo = await _fotoFileServer.ObterAsync(peca.Foto?.ArquivoNome, ct); }
-                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return StatusCode(503); }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _logger.LogError(ex, "WL_FOTO_PECA_READ_FAILED tenant={Tenant} peca={Codigo}", _tenant.AfiliadaId, peca.Codigo);
+                    return StatusCode(503);
+                }
                 if (arquivo == null) return NotFound();
                 Response.Headers.CacheControl = "public, max-age=300";
                 Response.Headers["X-Content-Type-Options"] = "nosniff";

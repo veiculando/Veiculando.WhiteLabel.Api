@@ -36,12 +36,13 @@ public sealed class UploadsController : WlCoreProxyControllerBase
     private readonly ISeedAccountResolver _seed;
     private readonly ILogger<UploadsController> _logger;
     private readonly IFotoPecaFileServer _fotoFileServer;
+    private readonly FotoPecaTrava _fotoTrava;
 
     public UploadsController(VeiculandoDataContext db, ITenantQueries tenant, IFileValidationService validation,
         IWlUploadStorage storage, WlUploadPipeline pipeline, WlUploadReferences references,
-        ISeedAccountResolver seed, ILogger<UploadsController> logger, IFotoPecaFileServer fotoFileServer)
-        => (_db, _tenant, _validation, _storage, _pipeline, _references, _seed, _logger, _fotoFileServer) =
-            (db, tenant, validation, storage, pipeline, references, seed, logger, fotoFileServer);
+        ISeedAccountResolver seed, ILogger<UploadsController> logger, IFotoPecaFileServer fotoFileServer, FotoPecaTrava fotoTrava)
+        => (_db, _tenant, _validation, _storage, _pipeline, _references, _seed, _logger, _fotoFileServer, _fotoTrava) =
+            (db, tenant, validation, storage, pipeline, references, seed, logger, fotoFileServer, fotoTrava);
 
     [HttpPost("pecas/locais/{idLocal}/pecas/{pecaId}/foto")]
     [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
@@ -69,21 +70,25 @@ public sealed class UploadsController : WlCoreProxyControllerBase
             if (preparada == null) return BadRequest(new { message = "O arquivo não é uma foto JPG ou PNG válida." });
             if (preparada.Jpg.Length > limite) return StatusCode(413, new { message = "Arquivo maior que o limite permitido." });
 
+            using var trava = await _fotoTrava.AdquirirAsync(peca.Id, ct);
+            if (trava == null) return Conflict(new { message = "Outra troca de foto desta peça está em andamento. Tente novamente em instantes." });
+            await _db.Entry(peca).ReloadAsync(ct);
+
             // O FileServer não guarda versões: sem a cópia confirmada, nada é sobrescrito.
             var anterior = await _fotoFileServer.ObterParaCopiaAsync(nome, ct);
             if (anterior != null) await GuardarCopiaAsync(peca.Id, anterior.Conteudo, anterior.ContentType, ct);
             if (preparada.Convertida) await GuardarCopiaAsync(peca.Id, original, "image/png", ct);
 
+            var enviado = false;
             try
             {
                 await _fotoFileServer.EnviarAsync(peca.Codigo, preparada.Jpg, ct);
-                peca.AlterarFoto(nome);
-                peca.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, null, WlUsuarioId);
-                await _db.SaveChangesAsync(ct);
+                enviado = true;
+                await GravarFotoAsync(peca, nome, ct);
             }
             catch
             {
-                await RestaurarFotoAsync(peca.Codigo, anterior);
+                await RestaurarFotoAsync(peca.Codigo, anterior, preparada.Jpg, enviado);
                 throw;
             }
             var hash = Convert.ToHexString(SHA256.HashData(preparada.Jpg)).ToLowerInvariant();
@@ -93,7 +98,7 @@ public sealed class UploadsController : WlCoreProxyControllerBase
         {
             return Conflict(new { message = "O registro foi alterado por outra operação. Recarregue antes de reenviar." });
         }
-        catch (Exception ex) when (ex is not OperationCanceledException) { return StorageError(ex); }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return StorageError(ex); }
     }
 
     private async Task GuardarCopiaAsync(int pecaId, byte[] conteudo, string contentType, CancellationToken ct)
@@ -111,13 +116,50 @@ public sealed class UploadsController : WlCoreProxyControllerBase
         }
     }
 
-    /// <summary>Devolve ao FileServer o arquivo substituído quando a troca não se completa.</summary>
-    private async Task RestaurarFotoAsync(string codigoPeca, FotoPecaArquivo anterior)
+    /// <summary>
+    /// O arquivo já foi trocado, então um conflito com outra alteração da peça (por
+    /// exemplo, um cadastro no Core) não desfaz a troca: recarrega e grava de novo.
+    /// </summary>
+    private async Task GravarFotoAsync(Peca peca, string nome, CancellationToken ct)
     {
+        for (var tentativa = 1; ; tentativa++)
+        {
+            peca.AlterarFoto(nome);
+            peca.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, null, WlUsuarioId);
+            try
+            {
+                await _db.SaveChangesAsync(ct);
+                return;
+            }
+            catch (DbUpdateConcurrencyException) when (tentativa == 1)
+            {
+                await _db.Entry(peca).ReloadAsync(ct);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Devolve ao FileServer o arquivo substituído quando a troca não se completa, a
+    /// menos que outra gravação já o tenha trocado depois desta.
+    /// </summary>
+    private async Task RestaurarFotoAsync(string codigoPeca, FotoPecaArquivo anterior, byte[] enviada, bool enviado)
+    {
+        // Sem foto anterior não há o que devolver, e o FileServer não tem rota para apagar.
         if (anterior == null) return;
         // O cliente pode ter desconectado. A restauração tem prazo próprio.
         using var prazo = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        try { await _fotoFileServer.EnviarAsync(codigoPeca, anterior.Conteudo, prazo.Token); }
+        try
+        {
+            var nome = FileServerFotoPeca.NomeDaPeca(codigoPeca);
+            var atual = await _fotoFileServer.ObterParaCopiaAsync(nome, prazo.Token);
+            if (atual != null && atual.Conteudo.AsSpan().SequenceEqual(anterior.Conteudo)) return;
+            if (enviado && atual != null && !atual.Conteudo.AsSpan().SequenceEqual(enviada))
+            {
+                _logger.LogWarning("WL_FOTO_PECA_RESTORE_SKIPPED tenant={Tenant} peca={Codigo}: arquivo alterado por outra gravação", _tenant.AfiliadaId, codigoPeca);
+                return;
+            }
+            await _fotoFileServer.EnviarAsync(codigoPeca, anterior.Conteudo, prazo.Token);
+        }
         catch (Exception error)
         {
             // A cópia continua em `pecas-historico`, de onde a foto pode ser recuperada.
@@ -213,14 +255,14 @@ public sealed class UploadsController : WlCoreProxyControllerBase
             // de baixo só atende nomes `wl-*` de uploads anteriores ao padrão único.
             FotoPecaArquivo arquivo;
             try { arquivo = await _fotoFileServer.ObterAsync(name, ct); }
-            catch (Exception ex) when (ex is not OperationCanceledException) { return StorageError(ex); }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return StorageError(ex); }
             if (arquivo == null) return Ok(Array.Empty<object>());
             return Ok(new[] { new { FileName = name, arquivo.ContentType, Size = (long)arquivo.Conteudo.Length,
                 Sha256 = (string)null, CreatedAt = (DateTimeOffset?)null, downloadUrl, status = (string)null } });
         }
         var key = Key("pecas", pecaId, name);
         try { return Ok(new[] { Descriptor(await _storage.InfoAsync(key, ct), downloadUrl) }); }
-        catch (Exception ex) when (ex is not OperationCanceledException) { return StorageError(ex); }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return StorageError(ex); }
     }
 
     [HttpGet("checking/item/{idItemPI}/fotos")]
@@ -243,7 +285,7 @@ public sealed class UploadsController : WlCoreProxyControllerBase
             }
             return Ok(result);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException) { return StorageError(ex); }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return StorageError(ex); }
     }
 
     [HttpGet("pecas/locais/{idLocal}/pecas/{pecaId}/foto")]
@@ -258,7 +300,7 @@ public sealed class UploadsController : WlCoreProxyControllerBase
 
         FotoPecaArquivo arquivo;
         try { arquivo = await _fotoFileServer.ObterAsync(peca.Foto.ArquivoNome, ct); }
-        catch (Exception ex) when (ex is not OperationCanceledException) { return StorageError(ex); }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return StorageError(ex); }
         if (arquivo == null) return NotFound();
         Response.Headers.CacheControl = "private, no-store";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -288,7 +330,7 @@ public sealed class UploadsController : WlCoreProxyControllerBase
             Response.Headers["X-Content-Type-Options"] = "nosniff";
             return File(await _storage.ReadAsync(key, ct), file.ContentType, file.FileName);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException) { return StorageError(ex); }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return StorageError(ex); }
     }
 
     private bool FotoValida(IFormFile file, long maxBytes, out string error)
@@ -326,7 +368,7 @@ public sealed class UploadsController : WlCoreProxyControllerBase
         {
             return Conflict(new { message = "O registro foi alterado por outra operação. Recarregue antes de reenviar." });
         }
-        catch (Exception ex) when (ex is not OperationCanceledException) { return StorageError(ex); }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return StorageError(ex); }
     }
 
     private IActionResult StorageError(Exception error)

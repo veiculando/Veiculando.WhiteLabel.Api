@@ -57,6 +57,12 @@ namespace Veiculando.WhiteLabel.Api.Services
     {
         private const long TamanhoMaximo = 15 * 1024 * 1024;
 
+        /// <summary>Maior que o da leitura: a rota antiga do Core não limita o arquivo, e a troca não pode travar nele.</summary>
+        private const long TamanhoMaximoCopia = 64 * 1024 * 1024;
+
+        /// <summary>Com <c>ResponseHeadersRead</c>, o timeout do HttpClient não cobre o corpo.</summary>
+        private static readonly TimeSpan PrazoLeitura = TimeSpan.FromSeconds(30);
+
         private static readonly Regex NomeSeguro = new(
             @"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,200}\.(jpe?g|png)$",
             RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
@@ -85,19 +91,22 @@ namespace Veiculando.WhiteLabel.Api.Services
         private async Task<FotoPecaArquivo?> LerAsync(string arquivoNome, bool estrito, CancellationToken ct)
         {
             var nome = FileHelper.NormalizeFileName(arquivoNome);
+            var tamanhoMaximo = estrito ? TamanhoMaximoCopia : TamanhoMaximo;
+            using var prazo = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            prazo.CancelAfter(PrazoLeitura);
             using var resposta = await _http.GetAsync(
-                $"conteudo/pecas/fotos/{Uri.EscapeDataString(nome)}", HttpCompletionOption.ResponseHeadersRead, ct);
+                $"conteudo/pecas/fotos/{Uri.EscapeDataString(nome)}", HttpCompletionOption.ResponseHeadersRead, prazo.Token);
 
             if (resposta.StatusCode == HttpStatusCode.NotFound) return null;
             resposta.EnsureSuccessStatusCode();
 
             var tipo = resposta.Content.Headers.ContentType?.MediaType;
             var aceitavel = (tipo == "image/jpeg" || tipo == "image/png")
-                && !(resposta.Content.Headers.ContentLength > TamanhoMaximo);
+                && !(resposta.Content.Headers.ContentLength > tamanhoMaximo);
             if (aceitavel)
             {
-                var bytes = await resposta.Content.ReadAsByteArrayAsync(ct);
-                if (bytes.Length <= TamanhoMaximo) return new FotoPecaArquivo(bytes, tipo);
+                var bytes = await resposta.Content.ReadAsByteArrayAsync(prazo.Token);
+                if (bytes.Length <= tamanhoMaximo) return new FotoPecaArquivo(bytes, tipo);
             }
             if (estrito) throw new InvalidOperationException($"A foto {nome} existe, mas não pôde ser copiada.");
             return null;
