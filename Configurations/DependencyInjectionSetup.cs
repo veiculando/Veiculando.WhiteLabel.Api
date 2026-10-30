@@ -140,7 +140,7 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             {
                 client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
             });
-            services.AddHttpClient<IFotoPecaLegadaSource, FileServerFotoPecaLegadaSource>(client =>
+            services.AddHttpClient<IFotoPecaFileServer, FileServerFotoPeca>(client =>
             {
                 client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
                 client.Timeout = TimeSpan.FromSeconds(15);

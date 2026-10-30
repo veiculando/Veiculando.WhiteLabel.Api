@@ -35,13 +35,13 @@ public sealed class UploadsController : WlCoreProxyControllerBase
     private readonly WlUploadReferences _references;
     private readonly ISeedAccountResolver _seed;
     private readonly ILogger<UploadsController> _logger;
-    private readonly IFotoPecaLegadaSource _fotoLegada;
+    private readonly IFotoPecaFileServer _fotoFileServer;
 
     public UploadsController(VeiculandoDataContext db, ITenantQueries tenant, IFileValidationService validation,
         IWlUploadStorage storage, WlUploadPipeline pipeline, WlUploadReferences references,
-        ISeedAccountResolver seed, ILogger<UploadsController> logger, IFotoPecaLegadaSource fotoLegada)
-        => (_db, _tenant, _validation, _storage, _pipeline, _references, _seed, _logger, _fotoLegada) =
-            (db, tenant, validation, storage, pipeline, references, seed, logger, fotoLegada);
+        ISeedAccountResolver seed, ILogger<UploadsController> logger, IFotoPecaFileServer fotoFileServer)
+        => (_db, _tenant, _validation, _storage, _pipeline, _references, _seed, _logger, _fotoFileServer) =
+            (db, tenant, validation, storage, pipeline, references, seed, logger, fotoFileServer);
 
     [HttpPost("pecas/locais/{idLocal}/pecas/{pecaId}/foto")]
     [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
@@ -52,13 +52,45 @@ public sealed class UploadsController : WlCoreProxyControllerBase
         var peca = await _tenant.Pecas.Include(p => p.Local).SingleOrDefaultAsync(p => p.Id == pecaId && p.IdLocal == idLocal
             && p.StatusExibicao != StatusExibicaoEnum.Deletado && p.Local.StatusExibicao != StatusExibicaoEnum.Deletado, ct);
         if (peca == null) return NotFound(new { message = "Peça não encontrada neste local." });
-        if (!FotoValida(foto, 10 * 1024 * 1024, out var error)) return BadRequest(new { message = error });
-        return await ExecutarUpload(foto, "pecas", pecaId, 10 * 1024 * 1024, async file =>
+        // Uma foto só por peça: grava no FileServer com o nome e a regra do Core
+        // (só JPG, `{Codigo}.jpg` em minúsculas), para Core e WL verem a mesma.
+        const long limite = 10 * 1024 * 1024 - 1;
+        if (!FotoValida(foto, limite, out var error)) return BadRequest(new { message = error });
+        if (foto.ContentType != "image/jpeg") return BadRequest(new { message = "Envie uma foto JPG." });
+        if (!FileServerFotoPeca.NomeValido(FileServerFotoPeca.NomeDaPeca(peca.Codigo)))
+            return UnprocessableEntity(new { message = "O código desta peça não permite gravar a foto." });
+        if (WlUsuarioId is not > 0) return Forbid();
+        try
         {
-            peca.AlterarFoto(file.FileName);
+            var jpg = await LerAteLimite(foto, limite, ct);
+            if (jpg == null) return StatusCode(413, new { message = "Arquivo maior que o limite permitido." });
+            if (jpg.Length != foto.Length || jpg.Length == 0) return BadRequest(new { message = "Upload incompleto. Selecione o arquivo e tente novamente." });
+            var hash = Convert.ToHexString(SHA256.HashData(jpg)).ToLowerInvariant();
+            var name = await _fotoFileServer.EnviarAsync(peca.Codigo, jpg, ct);
+            peca.AlterarFoto(name);
             peca.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, null, WlUsuarioId);
             await _db.SaveChangesAsync(ct);
-        }, ct);
+            return Ok(new { message = "Foto salva. Recarregue a lista para conferir.", fileName = name, sha256 = hash, size = jpg.Length });
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { message = "O registro foi alterado por outra operação. Recarregue antes de reenviar." });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return StorageError(ex); }
+    }
+
+    private static async Task<byte[]> LerAteLimite(IFormFile foto, long limit, CancellationToken ct)
+    {
+        using var body = new MemoryStream();
+        using var source = foto.OpenReadStream();
+        var buffer = new byte[81920];
+        int count;
+        while ((count = await source.ReadAsync(buffer, ct)) > 0)
+        {
+            if (body.Length + count > limit) return null;
+            await body.WriteAsync(buffer.AsMemory(0, count), ct);
+        }
+        return body.ToArray();
     }
 
     [HttpPost("checking/enviar-foto/{idItemPI}")]
@@ -131,12 +163,13 @@ public sealed class UploadsController : WlCoreProxyControllerBase
         var downloadUrl = $"/api/wl/pecas/locais/{idLocal}/pecas/{pecaId}/foto";
         if (string.IsNullOrEmpty(name) || !System.Text.RegularExpressions.Regex.IsMatch(name, @"^wl-[a-f0-9]{32}\.(jpg|png)$"))
         {
-            // Foto cadastrada pelo Core: a mesma peça, servida do FileServer pelo BFF.
-            FotoPecaLegada legada;
-            try { legada = await _fotoLegada.ObterAsync(name, ct); }
+            // Foto da peça no FileServer (a mesma do Core), servida pelo BFF. O ramo
+            // de baixo só atende nomes `wl-*` de uploads anteriores ao padrão único.
+            FotoPecaArquivo arquivo;
+            try { arquivo = await _fotoFileServer.ObterAsync(name, ct); }
             catch (Exception ex) when (ex is not OperationCanceledException) { return StorageError(ex); }
-            if (legada == null) return Ok(Array.Empty<object>());
-            return Ok(new[] { new { FileName = name, legada.ContentType, Size = (long)legada.Conteudo.Length,
+            if (arquivo == null) return Ok(Array.Empty<object>());
+            return Ok(new[] { new { FileName = name, arquivo.ContentType, Size = (long)arquivo.Conteudo.Length,
                 Sha256 = (string)null, CreatedAt = (DateTimeOffset?)null, downloadUrl, status = (string)null } });
         }
         var key = Key("pecas", pecaId, name);
@@ -177,13 +210,13 @@ public sealed class UploadsController : WlCoreProxyControllerBase
         var key = Key("pecas", pecaId, peca.Foto.ArquivoNome);
         if (KeyBelongs(key, "pecas", pecaId)) return await Download(key, ct);
 
-        FotoPecaLegada legada;
-        try { legada = await _fotoLegada.ObterAsync(peca.Foto.ArquivoNome, ct); }
+        FotoPecaArquivo arquivo;
+        try { arquivo = await _fotoFileServer.ObterAsync(peca.Foto.ArquivoNome, ct); }
         catch (Exception ex) when (ex is not OperationCanceledException) { return StorageError(ex); }
-        if (legada == null) return NotFound();
+        if (arquivo == null) return NotFound();
         Response.Headers.CacheControl = "private, no-store";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
-        return File(legada.Conteudo, legada.ContentType, peca.Foto.ArquivoNome);
+        return File(arquivo.Conteudo, arquivo.ContentType, peca.Foto.ArquivoNome);
     }
 
     [HttpGet("checking/item/{idItemPI}/fotos/{fotoId}/arquivo")]
