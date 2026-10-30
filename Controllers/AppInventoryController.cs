@@ -177,7 +177,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (peca == null) return NotFound();
             if (!HasWhiteLabelPhoto(peca))
             {
-                var arquivo = await _fotoFileServer.ObterAsync(peca.Foto?.ArquivoNome, ct);
+                FotoPecaArquivo arquivo;
+                try { arquivo = await _fotoFileServer.ObterAsync(peca.Foto?.ArquivoNome, ct); }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return StatusCode(503); }
                 if (arquivo == null) return NotFound();
                 Response.Headers.CacheControl = "public, max-age=300";
                 Response.Headers["X-Content-Type-Options"] = "nosniff";

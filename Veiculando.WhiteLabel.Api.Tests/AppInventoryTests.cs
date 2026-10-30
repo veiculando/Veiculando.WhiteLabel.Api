@@ -172,6 +172,9 @@ END");
             using var otherClient = otherFactory.ClienteAnonimo();
             (await otherClient.GetAsync("/api/wl/app/inventory/P-APP-830-A/photo")).StatusCode.Should().Be(HttpStatusCode.NotFound);
             otherFactory.FileServer.Rotas.Should().BeEmpty();
+
+            factory.FileServer.Responder = _ => new HttpResponseMessage(HttpStatusCode.InternalServerError);
+            (await client.GetAsync(item.ImageUrl)).StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         }
 
         [Theory]
