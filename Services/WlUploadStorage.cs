@@ -110,10 +110,13 @@ public sealed class AzureWlUploadStorage : IWlUploadStorage
 
 public sealed record WlUploadKey(int TenantId, string Kind, int ResourceId, string FileName)
 {
+    /// <summary>Fotos de peça substituídas e PNGs originais, guardados antes da troca.</summary>
+    public const string HistoricoPeca = "pecas-historico";
+
     public static WlUploadKey Parse(string key)
     {
         var match = System.Text.RegularExpressions.Regex.Match(key ?? "",
-            @"^tenant-([1-9][0-9]*)/(pecas|checking|kyc)/([1-9][0-9]*)/(wl-[a-f0-9]{32}\.(?:jpg|png|pdf))$");
+            @"^tenant-([1-9][0-9]*)/(pecas|pecas-historico|checking|kyc)/([1-9][0-9]*)/(wl-[a-f0-9]{32}\.(?:jpg|png|pdf))$");
         if (!match.Success || !int.TryParse(match.Groups[1].Value, out var tenant) || !int.TryParse(match.Groups[3].Value, out var resource))
             throw new ArgumentException("Referência de upload inválida.");
         if (match.Groups[2].Value != "kyc" && match.Groups[4].Value.EndsWith(".pdf", StringComparison.Ordinal))

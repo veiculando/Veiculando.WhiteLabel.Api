@@ -36,6 +36,15 @@ namespace Veiculando.WhiteLabel.Api.Services
         Task<FotoPecaArquivo?> ObterAsync(string arquivoNome, CancellationToken ct);
 
         /// <summary>
+        /// Lê o arquivo que uma troca vai sobrescrever. Diferente de
+        /// <see cref="ObterAsync"/>, só devolve <c>null</c> quando o arquivo não
+        /// existe: qualquer outro problema lança, para a troca não seguir sem cópia.
+        /// </summary>
+        /// <exception cref="HttpRequestException">O FileServer não respondeu.</exception>
+        /// <exception cref="InvalidOperationException">Arquivo existe, mas não pôde ser copiado.</exception>
+        Task<FotoPecaArquivo?> ObterParaCopiaAsync(string arquivoNome, CancellationToken ct);
+
+        /// <summary>
         /// Grava a foto JPG no FileServer pela rota que o Core usa
         /// (<c>upload/peca-foto</c>) e devolve o nome a gravar em <c>Peca.Foto</c>.
         /// </summary>
@@ -67,10 +76,14 @@ namespace Veiculando.WhiteLabel.Api.Services
         public static string NomeDaPeca(string codigoPeca) =>
             FileHelper.NormalizeFileName($"{codigoPeca}.jpg");
 
-        public async Task<FotoPecaArquivo?> ObterAsync(string arquivoNome, CancellationToken ct)
-        {
-            if (!NomeValido(arquivoNome)) return null;
+        public Task<FotoPecaArquivo?> ObterAsync(string arquivoNome, CancellationToken ct) =>
+            NomeValido(arquivoNome) ? LerAsync(arquivoNome, false, ct) : Task.FromResult<FotoPecaArquivo?>(null);
 
+        public Task<FotoPecaArquivo?> ObterParaCopiaAsync(string arquivoNome, CancellationToken ct) =>
+            LerAsync(arquivoNome, true, ct);
+
+        private async Task<FotoPecaArquivo?> LerAsync(string arquivoNome, bool estrito, CancellationToken ct)
+        {
             var nome = FileHelper.NormalizeFileName(arquivoNome);
             using var resposta = await _http.GetAsync(
                 $"conteudo/pecas/fotos/{Uri.EscapeDataString(nome)}", HttpCompletionOption.ResponseHeadersRead, ct);
@@ -79,11 +92,15 @@ namespace Veiculando.WhiteLabel.Api.Services
             resposta.EnsureSuccessStatusCode();
 
             var tipo = resposta.Content.Headers.ContentType?.MediaType;
-            if (tipo != "image/jpeg" && tipo != "image/png") return null;
-            if (resposta.Content.Headers.ContentLength > TamanhoMaximo) return null;
-
-            var bytes = await resposta.Content.ReadAsByteArrayAsync(ct);
-            return bytes.Length > TamanhoMaximo ? null : new FotoPecaArquivo(bytes, tipo);
+            var aceitavel = (tipo == "image/jpeg" || tipo == "image/png")
+                && !(resposta.Content.Headers.ContentLength > TamanhoMaximo);
+            if (aceitavel)
+            {
+                var bytes = await resposta.Content.ReadAsByteArrayAsync(ct);
+                if (bytes.Length <= TamanhoMaximo) return new FotoPecaArquivo(bytes, tipo);
+            }
+            if (estrito) throw new InvalidOperationException($"A foto {nome} existe, mas não pôde ser copiada.");
+            return null;
         }
 
         public async Task<string> EnviarAsync(string codigoPeca, byte[] jpg, CancellationToken ct)

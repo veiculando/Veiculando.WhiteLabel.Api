@@ -18,6 +18,8 @@ public sealed class WlUploadReferences
     public async Task<bool> ExistsAsync(string key, CancellationToken ct)
     {
         var resource = WlUploadKey.Parse(key);
+        // Cópia de foto substituída não tem referência no banco e nunca é lixo.
+        if (resource.Kind == WlUploadKey.HistoricoPeca) return true;
         using var db = new VeiculandoDataContext();
         if (resource.Kind == "kyc")
             return await db.WlAppDocumentos.AnyAsync(d => d.StorageKey == key && d.Onboarding.AfiliadaId == resource.TenantId && d.Onboarding.UsuarioId == resource.ResourceId, ct);

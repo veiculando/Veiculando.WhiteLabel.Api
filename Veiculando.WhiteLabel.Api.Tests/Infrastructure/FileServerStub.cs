@@ -36,6 +36,9 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         /// <summary>Faz <c>upload/peca-foto</c> responder 500.</summary>
         public bool FalharUploadFoto { get; set; }
 
+        /// <summary>Roda depois de gravar uma foto, para simular o que acontece em seguida.</summary>
+        public Action? AoGravarFoto { get; set; }
+
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -54,12 +57,16 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                     var nome = parte.Headers.ContentDisposition?.FileName?.Trim('"');
                     if (nome != null) FotosPeca[nome] = await parte.ReadAsByteArrayAsync(cancellationToken);
                 }
+                AoGravarFoto?.Invoke();
                 return new HttpResponseMessage(HttpStatusCode.OK);
             }
 
             const string fotos = "conteudo/pecas/fotos/";
             var i = url.IndexOf(fotos, StringComparison.Ordinal);
-            if (i >= 0 && FotosPeca.TryGetValue(Uri.UnescapeDataString(url[(i + fotos.Length)..]), out var foto))
+            if (i >= 0)
+            {
+                if (!FotosPeca.TryGetValue(Uri.UnescapeDataString(url[(i + fotos.Length)..]), out var foto))
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new ByteArrayContent(foto)
@@ -67,6 +74,7 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                         Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg") }
                     }
                 };
+            }
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {

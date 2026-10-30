@@ -52,31 +52,77 @@ public sealed class UploadsController : WlCoreProxyControllerBase
         var peca = await _tenant.Pecas.Include(p => p.Local).SingleOrDefaultAsync(p => p.Id == pecaId && p.IdLocal == idLocal
             && p.StatusExibicao != StatusExibicaoEnum.Deletado && p.Local.StatusExibicao != StatusExibicaoEnum.Deletado, ct);
         if (peca == null) return NotFound(new { message = "Peça não encontrada neste local." });
-        // Uma foto só por peça: grava no FileServer com o nome e a regra do Core
-        // (só JPG, `{Codigo}.jpg` em minúsculas), para Core e WL verem a mesma.
+        // Uma foto só por peça: grava no FileServer com o nome do Core (`{Codigo}.jpg`
+        // em minúsculas), para Core e WL verem a mesma. PNG é convertido para JPG.
         const long limite = 10 * 1024 * 1024 - 1;
         if (!FotoValida(foto, limite, out var error)) return BadRequest(new { message = error });
-        if (foto.ContentType != "image/jpeg") return BadRequest(new { message = "Envie uma foto JPG." });
-        if (!FileServerFotoPeca.NomeValido(FileServerFotoPeca.NomeDaPeca(peca.Codigo)))
+        var nome = FileServerFotoPeca.NomeDaPeca(peca.Codigo);
+        if (!FileServerFotoPeca.NomeValido(nome))
             return UnprocessableEntity(new { message = "O código desta peça não permite gravar a foto." });
         if (WlUsuarioId is not > 0) return Forbid();
         try
         {
-            var jpg = await LerAteLimite(foto, limite, ct);
-            if (jpg == null) return StatusCode(413, new { message = "Arquivo maior que o limite permitido." });
-            if (jpg.Length != foto.Length || jpg.Length == 0) return BadRequest(new { message = "Upload incompleto. Selecione o arquivo e tente novamente." });
-            var hash = Convert.ToHexString(SHA256.HashData(jpg)).ToLowerInvariant();
-            var name = await _fotoFileServer.EnviarAsync(peca.Codigo, jpg, ct);
-            peca.AlterarFoto(name);
-            peca.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, null, WlUsuarioId);
-            await _db.SaveChangesAsync(ct);
-            return Ok(new { message = "Foto salva. Recarregue a lista para conferir.", fileName = name, sha256 = hash, size = jpg.Length });
+            var original = await LerAteLimite(foto, limite, ct);
+            if (original == null) return StatusCode(413, new { message = "Arquivo maior que o limite permitido." });
+            if (original.Length != foto.Length || original.Length == 0) return BadRequest(new { message = "Upload incompleto. Selecione o arquivo e tente novamente." });
+            var preparada = FotoPecaImagem.Preparar(original);
+            if (preparada == null) return BadRequest(new { message = "O arquivo não é uma foto JPG ou PNG válida." });
+            if (preparada.Jpg.Length > limite) return StatusCode(413, new { message = "Arquivo maior que o limite permitido." });
+
+            // O FileServer não guarda versões: sem a cópia confirmada, nada é sobrescrito.
+            var anterior = await _fotoFileServer.ObterParaCopiaAsync(nome, ct);
+            if (anterior != null) await GuardarCopiaAsync(peca.Id, anterior.Conteudo, anterior.ContentType, ct);
+            if (preparada.Convertida) await GuardarCopiaAsync(peca.Id, original, "image/png", ct);
+
+            try
+            {
+                await _fotoFileServer.EnviarAsync(peca.Codigo, preparada.Jpg, ct);
+                peca.AlterarFoto(nome);
+                peca.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, null, WlUsuarioId);
+                await _db.SaveChangesAsync(ct);
+            }
+            catch
+            {
+                await RestaurarFotoAsync(peca.Codigo, anterior);
+                throw;
+            }
+            var hash = Convert.ToHexString(SHA256.HashData(preparada.Jpg)).ToLowerInvariant();
+            return Ok(new { message = "Foto salva. Recarregue a lista para conferir.", fileName = nome, sha256 = hash, size = preparada.Jpg.Length });
         }
         catch (DbUpdateConcurrencyException)
         {
             return Conflict(new { message = "O registro foi alterado por outra operação. Recarregue antes de reenviar." });
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { return StorageError(ex); }
+    }
+
+    private async Task GuardarCopiaAsync(int pecaId, byte[] conteudo, string contentType, CancellationToken ct)
+    {
+        var name = "wl-" + Guid.NewGuid().ToString("N") + (contentType == "image/png" ? ".png" : ".jpg");
+        var hash = Convert.ToHexString(SHA256.HashData(conteudo)).ToLowerInvariant();
+        var file = new WlStoredFile(Key(WlUploadKey.HistoricoPeca, pecaId, name), name, contentType, conteudo.Length, hash, DateTimeOffset.UtcNow);
+        using var body = new MemoryStream(conteudo);
+        await _storage.PutAsync(file, body, WlUsuarioId.Value, ct);
+        try { await _storage.CommitAsync(file.Key, ct); }
+        catch (Exception error)
+        {
+            // O blob já está gravado; o reconciliador conclui a marcação e não apaga cópias.
+            _logger.LogWarning(error, "WL_UPLOAD_RECONCILE_PENDING {Key}", file.Key);
+        }
+    }
+
+    /// <summary>Devolve ao FileServer o arquivo substituído quando a troca não se completa.</summary>
+    private async Task RestaurarFotoAsync(string codigoPeca, FotoPecaArquivo anterior)
+    {
+        if (anterior == null) return;
+        // O cliente pode ter desconectado. A restauração tem prazo próprio.
+        using var prazo = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        try { await _fotoFileServer.EnviarAsync(codigoPeca, anterior.Conteudo, prazo.Token); }
+        catch (Exception error)
+        {
+            // A cópia continua em `pecas-historico`, de onde a foto pode ser recuperada.
+            _logger.LogError(error, "WL_FOTO_PECA_RESTORE_FAILED tenant={Tenant} peca={Codigo}", _tenant.AfiliadaId, codigoPeca);
+        }
     }
 
     private static async Task<byte[]> LerAteLimite(IFormFile foto, long limit, CancellationToken ct)
