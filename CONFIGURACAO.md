@@ -45,7 +45,7 @@ fechada (erro explícito, nunca default silencioso).
 | `SeedAccounts__{AfiliadaId}__Email` | Conta de serviço **daquele tenant**, que escreve no Core. Sem ela, a escrita de local e peça do tenant falha com "Conta de servico nao configurada para a afiliada N". | `WL_CORE_SERVICE_EMAIL` (AUR = 13) |
 | `SeedAccounts__{AfiliadaId}__Password` | Senha dessa conta (MD5 com pepper do Core, não BCrypt). | `WL_CORE_SERVICE_PASSWORD` |
 | `CoreApiUrl` | API do Core. Em produção, `http://veiculando-api/` pela rede interna `veiculando-prd-core`. | fixo no compose |
-| `FileServerUrl` | FileServer, para o PDF de PI. Em produção, `http://veiculando-fs-api/`. Nunca chega ao browser. O nome antigo `FILE_SERVER_URL` ainda é lido. | fixo no compose |
+| `FileServerUrl` | FileServer, para o PDF de PI e a foto de peça. Em produção, `http://veiculando-fs-api/`. Nunca chega ao browser. O nome antigo `FILE_SERVER_URL` ainda é lido. | fixo no compose |
 | `ConnectionStrings__BlobStorageConnStr` | Storage **próprio** de uploads do WL (HTTPS), nunca a conexão de arquivos do Core. | `WL_UPLOADS_CONNECTION_STRING` |
 | `WlUploads__Container` | Container de uploads. Precisa começar com `wl-uploads-` e ser **privado**; o BFF recusa container público. | `WL_UPLOADS_CONTAINER` (`wl-uploads-prd`) |
 | `WlPasswordEmail__SendGridApiKey` | Convite, primeiro acesso e recuperação de senha. | `SENDGRID_API_KEY` |

@@ -1,3 +1,4 @@
+using System.Linq;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -89,6 +90,11 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
 
             builder.ConfigureAppConfiguration((_, config) =>
             {
+                // Cada factory observava os appsettings*.json com inotify; com ~470
+                // testes, o runner do CI estourava o limite de 128 instâncias.
+                foreach (var fonte in config.Sources.OfType<Microsoft.Extensions.Configuration.FileConfigurationSource>())
+                    fonte.ReloadOnChange = false;
+
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["ConnectionStrings:Veiculando"] = _connectionString,
@@ -151,6 +157,11 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                     })
                     .ConfigurePrimaryHttpMessageHandler(() => FileServer);
                 services.AddHttpClient<IWlArquivoLegado, FileServerArquivoLegado>(client =>
+                    {
+                        client.BaseAddress = new Uri("http://fileserver.invalido/");
+                    })
+                    .ConfigurePrimaryHttpMessageHandler(() => FileServer);
+                services.AddHttpClient<IFotoPecaFileServer, FileServerFotoPeca>(client =>
                     {
                         client.BaseAddress = new Uri("http://fileserver.invalido/");
                     })

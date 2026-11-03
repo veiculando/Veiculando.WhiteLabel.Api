@@ -76,7 +76,14 @@ public sealed class AnuncianteDaCasaProvisionamento
         if (afiliada == null) return (null, "Exibidora não encontrada.");
         if (afiliada.Cnpj == null || string.IsNullOrWhiteSpace(afiliada.Cnpj.Numero))
             return (null, "Informe o CNPJ da exibidora antes de habilitar a venda direta.");
-        var documento = afiliada.Cnpj.Numero;
+        // O Core guarda o CNPJ como veio do cadastro (pode ter máscara); é com ele que
+        // agência e cliente da venda direta são achados e criados. O lado WL (KYC,
+        // identidade comercial) guarda só dígitos, coluna de 14: o CNPJ mascarado da
+        // exibidora estourava a validação do EF e o resgate caía em 500.
+        var cnpjCore = afiliada.Cnpj.Numero;
+        var documento = SomenteDigitos(cnpjCore);
+        if (documento.Length != 14)
+            return (null, "O CNPJ da exibidora é inválido; corrija o cadastro antes de habilitar a venda direta.");
         // Telefone e Email são objetos complexos do EF6: nunca chegam nulos, o vazio mora no valor.
         if (string.IsNullOrWhiteSpace(afiliada.Telefone?.Numero) || string.IsNullOrWhiteSpace(afiliada.Email?.Endereco))
             return (null, "Configure e-mail e telefone da exibidora antes de habilitar a venda direta.");
@@ -120,7 +127,7 @@ public sealed class AnuncianteDaCasaProvisionamento
         var linkError = await _vendaDireta.GarantirVinculoAsync(afiliada, agency, actor, casa.Id, ct);
         if (linkError != null) return (null, linkError);
 
-        var client = await _db.Clientes.SingleOrDefaultAsync(c => c.Cnpj.Numero == documento, ct);
+        var client = await _db.Clientes.SingleOrDefaultAsync(c => c.Cnpj.Numero == cnpjCore, ct);
         if (client != null && client.StatusExibicao != StatusExibicaoEnum.Ativo)
             return (null, "O CNPJ da exibidora já pertence a um anunciante inativo no Core.");
         if (client == null)
@@ -207,6 +214,8 @@ public sealed class AnuncianteDaCasaProvisionamento
     /// </summary>
     private static string CodigoDoCliente(int afiliadaId) =>
         ("A" + afiliadaId.ToString("D5", CultureInfo.InvariantCulture)).Substring(0, Cliente.CodigoMaxLength);
+
+    private static string SomenteDigitos(string valor) => new(valor.Where(char.IsDigit).ToArray());
 
     private static string SenhaDescartada() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
 

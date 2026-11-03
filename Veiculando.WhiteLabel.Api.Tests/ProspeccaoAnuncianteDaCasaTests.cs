@@ -135,6 +135,50 @@ SET IDENTITY_INSERT Periodo OFF;",
             (await app.GetAsync("/api/wl/app/checkout/context")).StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
+        /// <summary>
+        /// Espelha a afiliada 13 (AURUM) de produção, onde o resgate falhava sempre:
+        /// sem <c>IdUsuarioCadastro</c> (o ator vem da conta de serviço), CNPJ e
+        /// telefone com máscara, IE "Isenta", sem IM e com acentos.
+        /// </summary>
+        [Fact]
+        public async Task Resgate_com_dados_reais_de_exibidora_abre_a_casa()
+        {
+            const int tenant = 8977;
+            await PrepararAfiliadaAsync(tenant, "04.889.908/0001-59");
+            await Seed.ServicoCoreAsync(tenant);
+            using (var ctx = new VeiculandoDataContext())
+            {
+                await ctx.Database.ExecuteSqlCommandAsync(@"
+UPDATE Afiliada SET IdUsuarioCadastro = NULL, Nome = N'AURUM',
+    RazaoSocial = N'CHOOSE MEDIA COMUNICAÇÃO INTEGRADA', Telefone = '(11) 4721-2000',
+    Email = 'comercial@aurumooh.com.br', Cidade = N'TAUBATÉ', Uf = 'SP',
+    InscricaoEstadual = 'Isenta', InscricaoMunicipal = NULL WHERE Id = @p0", tenant);
+            }
+            var email = await NovoOperadorAsync(tenant, "casa-real");
+
+            using var factory = new WlApiFactory(_db, tenant);
+            using var operador = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
+            using var app = factory.ClienteAnonimo();
+
+            var resgate = await ResgatarAsync(app, await EmitirSemAnuncianteAsync(operador));
+            resgate.StatusCode.Should().Be(HttpStatusCode.OK, await resgate.Content.ReadAsStringAsync());
+
+            // WL guarda só dígitos; o Core continua com o CNPJ como está no cadastro.
+            using var db = new VeiculandoDataContext();
+            var emailDaCasa = AnuncianteDaCasaProvisionamento.EmailDe(tenant);
+            var casa = await db.WlUsuariosAnunciante.SingleAsync(u =>
+                u.AfiliadaId == tenant && u.Email.Endereco == emailDaCasa);
+            casa.Cnpj.Should().Be("04889908000159");
+            (await db.WlAppOnboardings.SingleAsync(o => o.UsuarioId == casa.Id)).Documento.Should().Be("04889908000159");
+            (await db.Agencias.SingleAsync(a => a.Id == casa.AgenciaId)).Cnpj.Numero.Should().Be("04.889.908/0001-59");
+            (await db.Clientes.SingleAsync(c => c.Id == casa.ClienteId)).Cnpj.Numero.Should().Be("04.889.908/0001-59");
+
+            // Segunda sessão pega o atalho do caminho quente, sem duplicar nada.
+            var segunda = await ResgatarAsync(app, await EmitirSemAnuncianteAsync(operador));
+            segunda.StatusCode.Should().Be(HttpStatusCode.OK, await segunda.Content.ReadAsStringAsync());
+            (await db.Agencias.CountAsync(a => a.Cnpj.Numero == "04.889.908/0001-59")).Should().Be(1);
+        }
+
         [Fact]
         public async Task Anunciante_da_casa_e_provisionado_uma_vez_so_entre_sessoes()
         {
