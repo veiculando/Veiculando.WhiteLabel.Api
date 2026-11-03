@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.Azure.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Veiculando.Domain.Entities;
 using Veiculando.Domain.Enums;
 using Veiculando.Data.Contexts;
@@ -29,12 +30,17 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         private readonly ITenantQueries _tenant;
         private readonly IWlUploadStorage _storage;
         private readonly VeiculandoDataContext _db;
+        private readonly IFotoPecaFileServer _fotoFileServer;
+        private readonly ILogger<AppInventoryController> _logger;
 
-        public AppInventoryController(ITenantQueries tenant, IWlUploadStorage storage, VeiculandoDataContext db)
+        public AppInventoryController(ITenantQueries tenant, IWlUploadStorage storage, VeiculandoDataContext db, IFotoPecaFileServer fotoFileServer,
+            ILogger<AppInventoryController> logger)
         {
+            _logger = logger;
             _tenant = tenant;
             _storage = storage;
             _db = db;
+            _fotoFileServer = fotoFileServer;
         }
 
         /// <summary>
@@ -172,7 +178,21 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var peca = await _tenant.Pecas.AsNoTracking().FirstOrDefaultAsync(p =>
                 p.Codigo == code && p.StatusExibicao == StatusExibicaoEnum.Ativo &&
                 p.Local.StatusExibicao == StatusExibicaoEnum.Ativo, ct);
-            if (peca == null || !HasWhiteLabelPhoto(peca)) return NotFound();
+            if (peca == null) return NotFound();
+            if (!HasWhiteLabelPhoto(peca))
+            {
+                FotoPecaArquivo arquivo;
+                try { arquivo = await _fotoFileServer.ObterAsync(peca.Foto?.ArquivoNome, ct); }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _logger.LogError(ex, "WL_FOTO_PECA_READ_FAILED tenant={Tenant} peca={Codigo}", _tenant.AfiliadaId, peca.Codigo);
+                    return StatusCode(503);
+                }
+                if (arquivo == null) return NotFound();
+                Response.Headers.CacheControl = "public, max-age=300";
+                Response.Headers["X-Content-Type-Options"] = "nosniff";
+                return File(arquivo.Conteudo, arquivo.ContentType);
+            }
 
             var key = $"tenant-{_tenant.AfiliadaId}/pecas/{peca.Id}/{peca.Foto.ArquivoNome}";
             try
@@ -245,7 +265,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 price = peca.ValorPadrao,
                 tablePrice = peca.ValorTabela,
                 periodicity = peca.PeriodicidadePadrao?.Nome,
-                imageUrl = HasWhiteLabelPhoto(peca) ? $"/api/wl/app/inventory/{Uri.EscapeDataString(peca.Codigo)}/photo" : null,
+                imageUrl = HasWhiteLabelPhoto(peca) || FileServerFotoPeca.NomeValido(peca.Foto?.ArquivoNome) ? $"/api/wl/app/inventory/{Uri.EscapeDataString(peca.Codigo)}/photo" : null,
                 audience = local?.Publico?.Audiencia,
                 audienceMatch = audienciaMatch,
                 recommended = recomendada,

@@ -145,12 +145,19 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             {
                 client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
             });
+            services.AddHttpClient<IFotoPecaFileServer, FileServerFotoPeca>(client =>
+            {
+                client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
+                // Upload de foto de até 10 MB pela rota do Core; com 15s, rede lenta pode virar 503.
+                client.Timeout = TimeSpan.FromSeconds(60);
+            });
 
             // Validação de arquivos (magic bytes + tamanho).
             services.AddSingleton<IFileValidationService, FileValidationService>();
             services.AddSingleton<AppLoginAttemptGuard>();
             services.AddSingleton<IWlUploadStorage, AzureWlUploadStorage>();
             services.AddScoped<WlUploadPipeline>();
+            services.AddSingleton<FotoPecaTrava>();
             services.AddScoped<WlUploadReferences>();
             services.AddHostedService<WlUploadReconciler>();
 
