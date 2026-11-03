@@ -201,6 +201,6 @@
 # Traz CheckingColagemCampo e a migration AddCheckingCampo.
 # VEI-RD-143: dc13c3755e e o merge da PR Core #301 em sprint-16.0 (merge commit).
 # Traz CheckingCampoAutor e a migration AddCheckingCampoAutor.
-# VEI-RD-154g: pin TEMPORARIO em aa50376 (head da PR Core #302, HoraCampo).
-# RE-PIN OBRIGATORIO no merge commit da #302.
-aa50376dcf1cb56d02a4ac192049aaffa036a9e6
+# VEI-RD-154g: 0efc8c0b1f e o merge da PR Core #302 em sprint-16.0 (merge commit).
+# Traz HoraCampo e a migration AddHoraAparelhoAcaoCampo.
+0efc8c0b1fe0cc46631659fc771867ab9f28833d
