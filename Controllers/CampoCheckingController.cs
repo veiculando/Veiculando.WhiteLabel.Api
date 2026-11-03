@@ -63,6 +63,8 @@ public sealed class CampoCheckingController : CampoControllerBase
     [RequestSizeLimit(LimiteFoto + 1024 * 1024)]
     public async Task<IActionResult> Registrar(int id, int idPeca, [FromForm] CampoCheckingPedido pedido, CancellationToken ct)
     {
+        // Fora da janela de HoraCampo, vale esta hora no lugar da do aparelho.
+        var recebido = DateTimeOffset.UtcNow;
         if (pedido.IdCliente == Guid.Empty)
             return BadRequest(new { message = "Informe o identificador da ação." });
         if (!await CampoOrdensController.Visiveis(_queries, AfiliadaId, new FiltroListaCampo(AfiliadaId, OperadorId))
@@ -82,7 +84,7 @@ public sealed class CampoCheckingController : CampoControllerBase
         // devolve checking_indisponivel depois de todas as outras recusas.
         var ordemAtual = await _db.OrdensServico.AsNoTracking().Include(o => o.Pecas).SingleAsync(o => o.Id == id, ct);
         var previa = CheckingColagemCampo.Executar(ordemAtual, null, null, null, new ComandoCheckingCampo(idCliente, OperadorId,
-            idPeca, pedido.Hora.Value, pedido.Latitude.Value, pedido.Longitude.Value, null, null, null, null, 0), null);
+            idPeca, pedido.Hora.Value, pedido.Latitude.Value, pedido.Longitude.Value, null, null, null, null, 0, recebido), null);
         if (previa.CodigoRecusa != RecusaCampo.CheckingIndisponivel)
             return RecusarCampo(previa.CodigoRecusa);
 
@@ -121,7 +123,7 @@ public sealed class CampoCheckingController : CampoControllerBase
             pedido.Foto.ContentType, corpo.Length, hash, DateTimeOffset.UtcNow);
         var comando = new ComandoCheckingCampo(idCliente, OperadorId, idPeca, pedido.Hora.Value, pedido.Latitude.Value,
             pedido.Longitude.Value, pedido.Modelo, pedido.Sistema, pedido.VersaoApp,
-            WlUploadReferences.Prefix + arquivo.Key, checked((int)arquivo.Size));
+            WlUploadReferences.Prefix + arquivo.Key, checked((int)arquivo.Size), recebido);
 
         try
         {

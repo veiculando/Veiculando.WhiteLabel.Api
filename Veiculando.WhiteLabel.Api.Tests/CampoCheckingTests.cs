@@ -24,7 +24,9 @@ namespace Veiculando.WhiteLabel.Api.Tests;
 public class CampoCheckingTests
 {
     private const int Afiliada = 9873;
-    private static readonly DateTimeOffset Hora = new(2026, 10, 28, 16, 4, 59, TimeSpan.FromHours(-3));
+    // Dentro da janela de HoraCampo (30 dias): relativa ao dia do teste, em segundos inteiros.
+    private static readonly DateTimeOffset Hora = DateTimeOffset.FromUnixTimeSeconds(
+        DateTimeOffset.UtcNow.AddHours(-2).ToUnixTimeSeconds()).ToOffset(TimeSpan.FromHours(-3));
     private readonly SqlServerFixture _db;
     public CampoCheckingTests(SqlServerFixture db) => _db = db;
 
