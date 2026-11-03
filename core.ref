@@ -201,6 +201,8 @@
 # Traz CheckingColagemCampo e a migration AddCheckingCampo.
 # VEI-RD-143: dc13c3755e e o merge da PR Core #301 em sprint-16.0 (merge commit).
 # Traz CheckingCampoAutor e a migration AddCheckingCampoAutor.
+# VEI-SUP-33: 2a862b4c50 e o merge da PR Core #308 (sync main -> sprint-16.0).
+# Traz a foto de peca do FileServer (#305, #307); contem dc13c3755e.
 # VEI-RD-154g: 0efc8c0b1f e o merge da PR Core #302 em sprint-16.0 (merge commit).
-# Traz HoraCampo e a migration AddHoraAparelhoAcaoCampo.
+# Traz HoraCampo e a migration AddHoraAparelhoAcaoCampo; contem 2a862b4c50.
 0efc8c0b1fe0cc46631659fc771867ab9f28833d
