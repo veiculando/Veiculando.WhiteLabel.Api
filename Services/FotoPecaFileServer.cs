@@ -63,6 +63,13 @@ namespace Veiculando.WhiteLabel.Api.Services
         /// <summary>Com <c>ResponseHeadersRead</c>, o timeout do HttpClient não cobre o corpo.</summary>
         private static readonly TimeSpan PrazoLeitura = TimeSpan.FromSeconds(30);
 
+        /// <summary>
+        /// Prazo para o FileServer começar a responder uma leitura. O timeout do
+        /// HttpClient é maior por causa do upload; sem este prazo, o <c>/photo</c> do
+        /// App esperaria até <see cref="PrazoLeitura"/> com o FileServer fora do ar.
+        /// </summary>
+        private static readonly TimeSpan PrazoCabecalho = TimeSpan.FromSeconds(15);
+
         private static readonly Regex NomeSeguro = new(
             @"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,200}\.(jpe?g|png)$",
             RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
@@ -94,8 +101,10 @@ namespace Veiculando.WhiteLabel.Api.Services
             var tamanhoMaximo = estrito ? TamanhoMaximoCopia : TamanhoMaximo;
             using var prazo = CancellationTokenSource.CreateLinkedTokenSource(ct);
             prazo.CancelAfter(PrazoLeitura);
+            using var cabecalho = CancellationTokenSource.CreateLinkedTokenSource(prazo.Token);
+            cabecalho.CancelAfter(PrazoCabecalho);
             using var resposta = await _http.GetAsync(
-                $"conteudo/pecas/fotos/{Uri.EscapeDataString(nome)}", HttpCompletionOption.ResponseHeadersRead, prazo.Token);
+                $"conteudo/pecas/fotos/{Uri.EscapeDataString(nome)}", HttpCompletionOption.ResponseHeadersRead, cabecalho.Token);
 
             if (resposta.StatusCode == HttpStatusCode.NotFound) return null;
             resposta.EnsureSuccessStatusCode();

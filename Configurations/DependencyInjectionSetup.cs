@@ -143,7 +143,8 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             services.AddHttpClient<IFotoPecaFileServer, FileServerFotoPeca>(client =>
             {
                 client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
-                client.Timeout = TimeSpan.FromSeconds(15);
+                // Upload de foto de até 10 MB pela rota do Core; com 15s, rede lenta pode virar 503.
+                client.Timeout = TimeSpan.FromSeconds(60);
             });
 
             // Validação de arquivos (magic bytes + tamanho).

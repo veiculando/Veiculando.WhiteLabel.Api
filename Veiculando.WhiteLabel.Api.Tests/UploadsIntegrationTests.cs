@@ -35,6 +35,9 @@ public class UploadsIntegrationTests
     private static readonly byte[] Jpg = GerarJpg(Color.Blue);
     private static readonly byte[] OutroJpg = GerarJpg(Color.Red);
 
+    /// <summary>O JPG que o BFF grava no FileServer: recodificado, sem metadados.</summary>
+    private static byte[] Gravado(byte[] jpg) => FotoPecaImagem.Preparar(jpg).Jpg;
+
     private static byte[] GerarJpg(Color cor)
     {
         using var imagem = new Image<Rgb24>(8, 8, cor.ToPixel<Rgb24>());
@@ -92,7 +95,7 @@ public class UploadsIntegrationTests
         fotos.Should().ContainSingle();
         fotos[0].GetProperty("fileName").GetString().Should().Be("up7901.jpg");
         var download = fotos[0].GetProperty("downloadUrl").GetString();
-        (await client.GetByteArrayAsync(download)).Should().Equal(Jpg);
+        (await client.GetByteArrayAsync(download)).Should().Equal(Gravado(Jpg));
 
         await Seed.OperadorAsync(7902, "upload7902@teste.local", new[] { "PecaGerenciar" });
         using var otherFactory = new WlApiFactory(_db, 7902);
@@ -146,7 +149,7 @@ public class UploadsIntegrationTests
         byte[] falso = { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0xFF, 0xD9 };
         using var invalido = PhotoJpg(conteudo: falso);
         (await client.PostAsync(route, invalido)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        factory.FileServer.FotosPeca["up7906.jpg"].Should().Equal(Jpg);
+        factory.FileServer.FotosPeca["up7906.jpg"].Should().Equal(Gravado(Jpg));
         factory.Uploads.Files.Should().BeEmpty();
     }
 
@@ -166,10 +169,10 @@ public class UploadsIntegrationTests
         using var nova = PhotoJpg(conteudo: OutroJpg);
         (await client.PostAsync(route, nova)).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        factory.FileServer.FotosPeca["up7907.jpg"].Should().Equal(OutroJpg);
+        factory.FileServer.FotosPeca["up7907.jpg"].Should().Equal(Gravado(OutroJpg));
         var copia = factory.Uploads.Files.Should().ContainSingle().Which;
         copia.Key.Should().StartWith($"tenant-{tenant}/{WlUploadKey.HistoricoPeca}/{peca}/");
-        copia.Value.Bytes.Should().Equal(Jpg);
+        copia.Value.Bytes.Should().Equal(Gravado(Jpg));
     }
 
     [Fact]
@@ -187,7 +190,7 @@ public class UploadsIntegrationTests
         factory.Uploads.FailPut = true;
         using var nova = PhotoJpg(conteudo: OutroJpg);
         (await client.PostAsync(route, nova)).StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        factory.FileServer.FotosPeca["up7908.jpg"].Should().Equal(Jpg);
+        factory.FileServer.FotosPeca["up7908.jpg"].Should().Equal(Gravado(Jpg));
     }
 
     [Fact]
@@ -212,7 +215,7 @@ public class UploadsIntegrationTests
         using var nova = PhotoJpg(conteudo: OutroJpg);
         (await client.PostAsync(route, nova)).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        factory.FileServer.FotosPeca["up7909.jpg"].Should().Equal(OutroJpg);
+        factory.FileServer.FotosPeca["up7909.jpg"].Should().Equal(Gravado(OutroJpg));
         using var ctxFinal = new Veiculando.Data.Contexts.VeiculandoDataContext();
         (await ctxFinal.Database.SqlQuery<string>("SELECT Descricao FROM Peca WHERE Id = @p0", peca).SingleAsync()).Should().Be("alterada");
     }
@@ -256,7 +259,7 @@ public class UploadsIntegrationTests
             (await client.PostAsync(route, nova)).StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         }
 
-        factory.FileServer.FotosPeca["up7910.jpg"].Should().Equal(Jpg);
+        factory.FileServer.FotosPeca["up7910.jpg"].Should().Equal(Gravado(Jpg));
         factory.Uploads.Files.Should().ContainSingle();
     }
 
@@ -307,7 +310,7 @@ public class UploadsIntegrationTests
 
         respostas.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.OK);
         var final = factory.FileServer.FotosPeca["up7912.jpg"];
-        (final.AsSpan().SequenceEqual(OutroJpg) || final.AsSpan().SequenceEqual(verde)).Should().BeTrue();
+        (final.AsSpan().SequenceEqual(Gravado(OutroJpg)) || final.AsSpan().SequenceEqual(Gravado(verde))).Should().BeTrue();
         // A primeira foto e a que perdeu a corrida ficam guardadas.
         factory.Uploads.Files.Should().HaveCount(2);
     }

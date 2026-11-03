@@ -77,7 +77,9 @@ public sealed class UploadsController : WlCoreProxyControllerBase
             // O FileServer não guarda versões: sem a cópia confirmada, nada é sobrescrito.
             var anterior = await _fotoFileServer.ObterParaCopiaAsync(nome, ct);
             if (anterior != null) await GuardarCopiaAsync(peca.Id, anterior.Conteudo, anterior.ContentType, ct);
-            if (preparada.Convertida) await GuardarCopiaAsync(peca.Id, original, "image/png", ct);
+            // PNG convertido ou foto reduzida: o original enviado fica no histórico
+            // privado, com formato e resolução cheios.
+            if (preparada.GuardarOriginal) await GuardarCopiaAsync(peca.Id, original, preparada.ContentTypeOriginal, ct);
 
             var enviado = false;
             try
