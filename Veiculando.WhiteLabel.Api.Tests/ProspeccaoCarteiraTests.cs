@@ -39,7 +39,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
         private sealed record Login(string Token);
         internal sealed record Cadastro(Guid Id, int ClienteId, string Status, string Origem);
 
-        private static async Task PrepararAfiliadaAsync(int afiliadaId)
+        internal static async Task PrepararAfiliadaAsync(int afiliadaId)
         {
             var local = await Seed.LocalAsync(afiliadaId, $"CRT{afiliadaId}");
             var peca = await Seed.PecaAsync(local, $"P-CRT-{afiliadaId}");
@@ -66,10 +66,11 @@ UPDATE Afiliada SET Cnpj = @p1, IdUsuarioCadastro = 1, RazaoSocial = @p2, Cidade
 
         private static string Mascara(string c) => $"{c[..2]}.{c[2..5]}.{c[5..8]}/{c[8..12]}-{c[12..]}";
 
-        private static async Task<(HttpClient App, int VendedoraId)> AbrirCarteiraAsync(WlApiFactory factory, int tenant, string prefixo)
+        internal static async Task<(HttpClient App, int VendedoraId)> AbrirCarteiraAsync(WlApiFactory factory, int tenant, string prefixo,
+            params string[] permissoesExtras)
         {
             var email = $"{prefixo}{Guid.NewGuid():N}"[..20] + "@exemplo.com";
-            await Seed.OperadorAsync(tenant, email, new[] { "PedidoCriar" });
+            await Seed.OperadorAsync(tenant, email, new[] { "PedidoCriar" }.Concat(permissoesExtras).ToArray());
             var operador = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
             var emitida = await operador.PostAsJsonAsync("/api/wl/prospeccao/sessao", new { anuncianteId = (int?)null });
             emitida.StatusCode.Should().Be(HttpStatusCode.OK, await emitida.Content.ReadAsStringAsync());
@@ -134,7 +135,7 @@ UPDATE Afiliada SET Cnpj = @p1, IdUsuarioCadastro = 1, RazaoSocial = @p2, Cidade
             await ctx.SaveChangesAsync();
         }
 
-        private static async Task<JsonElement> ContextoAsync(HttpClient app)
+        internal static async Task<JsonElement> ContextoAsync(HttpClient app)
         {
             var r = await app.GetAsync("/api/wl/app/checkout/context");
             r.StatusCode.Should().Be(HttpStatusCode.OK, await r.Content.ReadAsStringAsync());
