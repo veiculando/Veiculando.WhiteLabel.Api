@@ -240,5 +240,26 @@ SET IDENTITY_INSERT Periodo OFF;", tenant, $"CRT{tenant}");
             (await gestor.SendAsync(remover)).StatusCode.Should().Be(HttpStatusCode.OK);
             (await ContextoAsync(ana)).GetProperty("clients").GetArrayLength().Should().Be(0);
         }
+
+        [Fact]
+        public async Task Sem_ClienteGerenciar_nao_analisa_mesmo_sem_ser_quem_enviou()
+        {
+            // P7 (rev. 3): quem aprova é quem tem a permissão, não um login específico.
+            const int tenant = 8995;
+            await PrepararAfiliadaAsync(tenant);
+            using var factory = new WlApiFactory(_db, tenant);
+            var email = $"rev-sem{Guid.NewGuid():N}"[..20] + "@exemplo.com";
+            await Seed.OperadorAsync(tenant, email, new[] { "PedidoCriar", "FinanceiroVisualizar" });
+            using var semPermissao = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
+            var (ana, _) = await AbrirCarteiraAsync(factory, tenant, "rev-ana");
+            var c = await CadastrarAsync(ana, Cnpj(tenant, 1));
+            await EnviarComDocumentosAsync(ana, c.Id);
+
+            (await semPermissao.GetAsync("/api/wl/kyc/app/carteira")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            (await semPermissao.PostAsync($"/api/wl/kyc/app/carteira/{c.Id}/aprovar", null)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            (await semPermissao.PostAsJsonAsync($"/api/wl/kyc/app/carteira/{c.Id}/reprovar", new { reason = "x" })).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            using var db = new VeiculandoDataContext();
+            (await db.WlCarteiraClientes.SingleAsync(x => x.Id == c.Id)).Status.Should().Be(WlCarteiraStatus.PendenteAnalise);
+        }
     }
 }
