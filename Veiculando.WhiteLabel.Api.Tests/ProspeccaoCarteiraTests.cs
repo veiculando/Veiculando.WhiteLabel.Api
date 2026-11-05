@@ -305,6 +305,109 @@ UPDATE Afiliada SET Cnpj = @p1, IdUsuarioCadastro = 1, RazaoSocial = @p2, Cidade
                 .Modo.Should().Be(ModoSessaoApp.Comum, "login comum do anunciante segue igual");
         }
 
+        private static async Task<int> ClienteDaExibidoraAsync(int tenant, string cnpj)
+        {
+            using var ctx = new VeiculandoDataContext();
+            var afiliada = await ctx.Afiliadas.Include(a => a.UsuarioCadastro).SingleAsync(a => a.Id == tenant);
+            var cliente = new Cliente($"M{tenant}", "Mercado", "Mercado Ltda",
+                new Endereco("Centro", "Rua B", "20", null, null, new Cep("12000-000")), "Taubaté", "SP",
+                new Telefone("1233334444"), new Cnpj(Mascara(cnpj)), null, null, "Taubaté", null, null, null,
+                string.Empty, 0m, afiliada.UsuarioCadastro);
+            ctx.Clientes.Add(cliente);
+            ctx.AfiliadaClientes.Add(new AfiliadaCliente(afiliada, cliente, afiliada.UsuarioCadastro));
+            await ctx.SaveChangesAsync();
+            return cliente.Id;
+        }
+
+        [Fact]
+        public async Task Solicitacao_so_dispensa_documentos_quando_o_cliente_tem_KYC_aprovado_na_exibidora()
+        {
+            const int tenant = 8996;
+            await PrepararAfiliadaAsync(tenant);
+            var cnpj = Cnpj(tenant, 1);
+            await ClienteDaExibidoraAsync(tenant, cnpj);
+            using var factory = new WlApiFactory(_db, tenant);
+            var (ana, _) = await AbrirCarteiraAsync(factory, tenant, "kyc-ana");
+            var c = await CadastrarAsync(ana, cnpj);
+            c.Origem.Should().Be(nameof(WlCarteiraOrigem.Solicitacao));
+
+            (await ana.PostAsync($"/api/wl/app/prospeccao/carteira/{c.Id}/enviar", null)).StatusCode
+                .Should().NotBe(HttpStatusCode.OK, "sem KYC aprovado a solicitação também exige os documentos");
+
+            using (var ctx = new VeiculandoDataContext())
+            {
+                var usuario = new WlUsuarioAnunciante($"kyc{tenant}@exemplo.com", "hash", tenant);
+                ctx.WlUsuariosAnunciante.Add(usuario);
+                var onboarding = new WlAppOnboarding(usuario);
+                onboarding.SalvarRascunho("ad", cnpj, "{}", 4);
+                onboarding.ReivindicarDocumento(cnpj);
+                onboarding.Documentos.Add(new WlAppDocumento(onboarding, "contrato.pdf", $"kyc/{tenant}/contrato", "application/pdf", 10, "contrato_social"));
+                onboarding.Enviar();
+                onboarding.Transicionar(WlAppKycStatus.EmAnalise, null);
+                onboarding.Transicionar(WlAppKycStatus.Aprovado, null);
+                ctx.WlAppOnboardings.Add(onboarding);
+                await ctx.SaveChangesAsync();
+            }
+            var enviado = await ana.PostAsync($"/api/wl/app/prospeccao/carteira/{c.Id}/enviar", null);
+            enviado.StatusCode.Should().Be(HttpStatusCode.OK, await enviado.Content.ReadAsStringAsync());
+            using var db = new VeiculandoDataContext();
+            (await db.WlCarteiraClientes.SingleAsync(x => x.Id == c.Id)).Status.Should().Be(WlCarteiraStatus.PendenteAnalise);
+        }
+
+        [Fact]
+        public async Task Vendedora_nao_cota_campanha_de_cliente_da_carteira_de_outra()
+        {
+            const int tenant = 8997;
+            await PrepararAfiliadaAsync(tenant);
+            using var factory = new WlApiFactory(_db, tenant);
+            var (ana, _) = await AbrirCarteiraAsync(factory, tenant, "cot-ana");
+            var (bia, _) = await AbrirCarteiraAsync(factory, tenant, "cot-bia");
+            var c = await CadastrarAsync(ana, Cnpj(tenant, 1));
+            await EnviarComDocumentosAsync(ana, c.Id);
+            await AprovarAsync(tenant, c.Id);
+            var criada = await ana.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns", new
+            {
+                name = "Campanha cot Ana", product = "Pão", clientId = c.ClienteId,
+                startDate = DateTime.UtcNow.Date.AddDays(1), endDate = DateTime.UtcNow.Date.AddDays(8)
+            });
+            criada.StatusCode.Should().Be(HttpStatusCode.Created, await criada.Content.ReadAsStringAsync());
+            int campanhaId, pecaId;
+            using (var lookup = new VeiculandoDataContext())
+            {
+                campanhaId = (await lookup.Campanhas.SingleAsync(x => x.Nome == "Campanha cot Ana" && x.IdCliente == c.ClienteId)).Id;
+                pecaId = await lookup.Database.SqlQuery<int>("SELECT TOP 1 Id FROM Peca WHERE Codigo = @p0", $"P-CRT-{tenant}").SingleAsync();
+            }
+
+            var cotacao = await bia.PostAsJsonAsync("/api/wl/app/checkout/quote",
+                new { pieceIds = new[] { pecaId }, campaignId = campanhaId, periodCode = $"CRT-{tenant}" });
+            cotacao.StatusCode.Should().Be(HttpStatusCode.NotFound, "a campanha é da carteira da Ana");
+        }
+
+        [Fact]
+        public async Task A_propria_exibidora_nao_aparece_como_cliente_na_prospeccao()
+        {
+            const int tenant = 8998;
+            await PrepararAfiliadaAsync(tenant);
+            using var factory = new WlApiFactory(_db, tenant);
+            var (ana, _) = await AbrirCarteiraAsync(factory, tenant, "casa-ana");
+            int? clienteDaCasa;
+            using (var ctx = new VeiculandoDataContext())
+            {
+                var emailDaCasa = AnuncianteDaCasaProvisionamento.EmailDe(tenant);
+                clienteDaCasa = (await ctx.WlUsuariosAnunciante.SingleAsync(u => u.AfiliadaId == tenant && u.Email.Endereco == emailDaCasa)).ClienteId;
+            }
+            clienteDaCasa.Should().NotBeNull("a casa é a casca técnica da sessão");
+
+            (await ContextoAsync(ana)).GetProperty("clients").EnumerateArray()
+                .Select(x => x.GetProperty("id").GetInt32()).Should().NotContain(clienteDaCasa.Value);
+            var daCasa = await ana.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns", new
+            {
+                name = "Campanha casa", product = "Pão", clientId = clienteDaCasa.Value,
+                startDate = DateTime.UtcNow.Date.AddDays(1), endDate = DateTime.UtcNow.Date.AddDays(8)
+            });
+            daCasa.IsSuccessStatusCode.Should().BeFalse(await daCasa.Content.ReadAsStringAsync());
+        }
+
         private sealed class TenantFixo : ITenantContext
         {
             public TenantFixo(int afiliadaId) => AfiliadaId = afiliadaId;
