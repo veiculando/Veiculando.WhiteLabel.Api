@@ -62,7 +62,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
             var fila = await FilaAsync(gestor);
             var item = fila.EnumerateArray().Single();
             item.GetProperty("origem").GetString().Should().Be(nameof(WlCarteiraOrigem.Cadastro));
-            item.GetProperty("vendedora").GetString().Should().StartWith("rev-ana");
+            item.GetProperty("vendedora").GetString().Should().Be("Vendedora rev-ana", "nome cadastrado, não o e-mail (VEI-RD-160)");
             var detalhe = JsonDocument.Parse(await gestor.GetStringAsync($"/api/wl/kyc/app/carteira/{rascunho.Id}")).RootElement;
             var documentos = detalhe.GetProperty("documentos").EnumerateArray().ToList();
             documentos.Should().HaveCount(2);
@@ -206,6 +206,7 @@ SET IDENTITY_INSERT Periodo OFF;", tenant, $"CRT{tenant}");
             relatorio.GetProperty("totalPedidos").GetInt32().Should().Be(1);
             var linha = relatorio.GetProperty("pedidos").EnumerateArray().Single();
             linha.GetProperty("vendedorId").GetInt32().Should().Be(anaId);
+            linha.GetProperty("vendedora").GetString().Should().StartWith("Vendedora ", "nome cadastrado, não o e-mail (VEI-RD-160)");
             linha.GetProperty("cnpjCliente").GetString().Should().Be(Cnpj(tenant, 1));
             var porBia = JsonDocument.Parse(await gestor.GetStringAsync($"/api/wl/relatorios/pedidos-por-vendedora?vendedorId={biaId}")).RootElement;
             porBia.GetProperty("totalPedidos").GetInt32().Should().Be(0);

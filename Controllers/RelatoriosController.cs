@@ -258,8 +258,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 })
                 .ToListAsync();
             var ids = vendedoraPorPedido.Values.Distinct().ToList();
-            var emails = await _tenant.Usuarios.Where(u => ids.Contains(u.Id))
-                .Select(u => new { u.Id, Email = u.Email.Endereco }).ToDictionaryAsync(u => u.Id, u => u.Email);
+            var emails = await NomesUsuarioWl.ResolverAsync(_tenant, ids.Select(i => (int?)i), System.Threading.CancellationToken.None);
 
             var linhas = pedidos
                 .Select(p =>

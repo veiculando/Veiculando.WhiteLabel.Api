@@ -262,8 +262,8 @@ public sealed class AppCarteiraController : ControllerBase
 
     private async Task<string> NomeVendedoraAsync(int? vendedorId, CancellationToken ct)
     {
-        var email = await _tenant.Usuarios.Where(u => u.Id == vendedorId).Select(u => u.Email.Endereco).FirstOrDefaultAsync(ct);
-        return string.IsNullOrWhiteSpace(email) ? "outra vendedora" : email;
+        var nome = await NomesUsuarioWl.ResolverAsync(_tenant, vendedorId, ct);
+        return string.IsNullOrWhiteSpace(nome) ? "outra vendedora" : nome;
     }
 
     public sealed class CadastroClienteRequest

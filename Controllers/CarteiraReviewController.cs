@@ -61,14 +61,14 @@ public sealed class CarteiraReviewController : ControllerBase
             .Select(c => new
             {
                 c.Id, c.ClienteId, c.Status, c.Origem, c.VendedorId, c.SolicitanteId, c.Motivo, c.AtualizadoEm,
-                cliente = _db.Clientes.Where(x => x.Id == c.ClienteId).Select(x => new { x.Nome, x.RazaoSocial, cnpj = x.Cnpj.Numero }).FirstOrDefault(),
-                vendedora = _tenant.Usuarios.Where(u => u.Id == c.VendedorId).Select(u => u.Email.Endereco).FirstOrDefault()
+                cliente = _db.Clientes.Where(x => x.Id == c.ClienteId).Select(x => new { x.Nome, x.RazaoSocial, cnpj = x.Cnpj.Numero }).FirstOrDefault()
             })
             .ToListAsync(ct);
+        var nomes = await NomesUsuarioWl.ResolverAsync(_tenant, itens.Select(c => c.VendedorId), ct);
         return Ok(itens.Select(c => new
         {
             id = c.Id, clienteId = c.ClienteId, status = c.Status.ToString(), origem = c.Origem.ToString(),
-            vendedorId = c.VendedorId, vendedora = c.vendedora, motivo = c.Motivo, atualizadoEm = c.AtualizadoEm,
+            vendedorId = c.VendedorId, vendedora = c.VendedorId.HasValue && nomes.TryGetValue(c.VendedorId.Value, out var n) ? n : null, motivo = c.Motivo, atualizadoEm = c.AtualizadoEm,
             nome = c.cliente?.Nome, razaoSocial = c.cliente?.RazaoSocial, cnpj = CarteiraProspeccao.Digitos(c.cliente?.cnpj)
         }));
     }
@@ -82,9 +82,8 @@ public sealed class CarteiraReviewController : ControllerBase
         var cliente = await _db.Clientes.AsNoTracking().Where(x => x.Id == c.ClienteId)
             .Select(x => new { x.Nome, x.RazaoSocial, cnpj = x.Cnpj.Numero, x.Cidade, x.Uf }).SingleAsync(ct);
         var usuarios = c.Historico.Select(e => e.UsuarioId).Concat(new[] { c.VendedorId ?? 0, c.SolicitanteId }).Distinct().ToList();
-        var emails = await _tenant.Usuarios.Where(u => usuarios.Contains(u.Id))
-            .Select(u => new { u.Id, email = u.Email.Endereco }).ToDictionaryAsync(u => u.Id, u => u.email, ct);
-        string Email(int? uid) => uid.HasValue && emails.TryGetValue(uid.Value, out var e) ? e : null;
+        var nomes = await NomesUsuarioWl.ResolverAsync(_tenant, usuarios.Select(u => (int?)u), ct);
+        string Email(int? uid) => uid.HasValue && nomes.TryGetValue(uid.Value, out var e) ? e : null;
         return Ok(new
         {
             id = c.Id, clienteId = c.ClienteId, status = c.Status.ToString(), origem = c.Origem.ToString(), motivo = c.Motivo,
@@ -180,8 +179,8 @@ public sealed class CarteiraReviewController : ControllerBase
     public async Task<IActionResult> Vendedoras(CancellationToken ct) =>
         Ok(await _tenant.UsuariosAfiliada.AsNoTracking()
             .Where(u => u.StatusExibicao == StatusExibicaoEnum.Ativo && u.DataExclusao == null)
-            .OrderBy(u => u.Email.Endereco)
-            .Select(u => new { id = u.Id, email = u.Email.Endereco })
+            .OrderBy(u => u.Nome ?? u.Email.Endereco)
+            .Select(u => new { id = u.Id, nome = u.Nome, email = u.Email.Endereco })
             .ToListAsync(ct));
 
     [HttpPost("{id:guid}/responsavel")]

@@ -70,7 +70,7 @@ UPDATE Afiliada SET Cnpj = @p1, IdUsuarioCadastro = 1, RazaoSocial = @p2, Cidade
             params string[] permissoesExtras)
         {
             var email = $"{prefixo}{Guid.NewGuid():N}"[..20] + "@exemplo.com";
-            await Seed.OperadorAsync(tenant, email, new[] { "PedidoCriar" }.Concat(permissoesExtras).ToArray());
+            await Seed.OperadorAsync(tenant, email, new[] { "PedidoCriar" }.Concat(permissoesExtras).ToArray(), nome: "Vendedora " + prefixo);
             var operador = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
             var emitida = await operador.PostAsJsonAsync("/api/wl/prospeccao/sessao", new { anuncianteId = (int?)null });
             emitida.StatusCode.Should().Be(HttpStatusCode.OK, await emitida.Content.ReadAsStringAsync());
@@ -240,7 +240,7 @@ UPDATE Afiliada SET Cnpj = @p1, IdUsuarioCadastro = 1, RazaoSocial = @p2, Cidade
             var daBia = await bia.PostAsJsonAsync("/api/wl/app/prospeccao/carteira", Dados(cnpj));
             daBia.StatusCode.Should().Be(HttpStatusCode.Conflict);
             var corpo = await daBia.Content.ReadAsStringAsync();
-            corpo.Should().Contain("other_seller").And.Contain("crt-ana");
+            corpo.Should().Contain("other_seller").And.Contain("atendido por Vendedora crt-ana", "a equipe reconhece a vendedora pelo nome (VEI-RD-160)").And.NotContain("@exemplo.com");
 
             var deNovo = await ana.PostAsJsonAsync("/api/wl/app/prospeccao/carteira", Dados(cnpj));
             deNovo.StatusCode.Should().Be(HttpStatusCode.Conflict);
