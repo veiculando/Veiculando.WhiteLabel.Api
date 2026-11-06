@@ -13,6 +13,7 @@ using Veiculando.Domain.Entities;
 using Veiculando.Domain.Entities.WhiteLabel;
 using Veiculando.Domain.Enums;
 using Veiculando.WhiteLabel.Api.Middleware;
+using Veiculando.WhiteLabel.Api.Services;
 
 namespace Veiculando.WhiteLabel.Api.Controllers
 {
@@ -26,11 +27,13 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     {
         private readonly VeiculandoDataContext _db;
         private readonly ITenantQueries _tenant;
+        private readonly CarteiraProspeccao _carteira;
 
-        public AppCheckoutContextController(VeiculandoDataContext db, ITenantQueries tenant)
+        public AppCheckoutContextController(VeiculandoDataContext db, ITenantQueries tenant, CarteiraProspeccao carteira)
         {
             _db = db;
             _tenant = tenant;
+            _carteira = carteira;
         }
 
         [HttpGet]
@@ -44,6 +47,10 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 return StatusCode(403, new { message = "A aprovação do cadastro é necessária para escolher o contexto da compra." });
             var buyer = await _tenant.UsuariosAnunciante.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId, ct);
             if (buyer == null) return Unauthorized();
+            // VEI-RD-157 (I1): decidido antes do ramo por TipoConta, senão a Prospecção cai no "ad" da casa.
+            var sessao = await _carteira.ResolverAsync(User, buyer, ct);
+            if (sessao.Modo == ModoSessaoApp.Recusada)
+                return StatusCode(403, new { message = SessaoApp.MensagemRecusada });
             if ((onboarding.TipoConta == "ad" || onboarding.TipoConta == "ag") &&
                 (!buyer.AgenciaId.HasValue || !await _db.AfiliadaAgencias.AsNoTracking().AnyAsync(link =>
                     link.IdAfiliada == _tenant.AfiliadaId && link.IdAgencia == buyer.AgenciaId.Value &&
@@ -57,7 +64,17 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                             x.Cliente.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId &&
                                 v.Status == StatusVinculoEnum.Ativo) &&
                             x.Status != StatusCampanhaEnum.Cancelada && x.Status != StatusCampanhaEnum.Aprovada);
-            if (onboarding.TipoConta == "ag" && buyer.AgenciaId.HasValue)
+            IQueryable<int> liberados = null;
+            if (sessao.Modo == ModoSessaoApp.Carteira)
+            {
+                if (!buyer.AgenciaId.HasValue)
+                    return StatusCode(403, new { message = "Identidade comercial ainda não provisionada." });
+                // Só a carteira aprovada da vendedora; a própria exibidora (cliente da casa) fica de fora.
+                liberados = _carteira.ClientesLiberados(sessao.VendedorId, buyer.AgenciaId.Value);
+                query = query.Where(x => x.IdAgencia == buyer.AgenciaId.Value && liberados.Contains(x.IdCliente) &&
+                    x.AnuncianteResponsavel.Email.Endereco == buyer.Email.Endereco);
+            }
+            else if (onboarding.TipoConta == "ag" && buyer.AgenciaId.HasValue)
                 query = query.Where(x => x.IdAgencia == buyer.AgenciaId.Value &&
                     x.AnuncianteResponsavel.Email.Endereco == buyer.Email.Endereco);
             else if (onboarding.TipoConta == "ad" && buyer.ClienteId.HasValue && buyer.AgenciaId.HasValue)
@@ -71,7 +88,10 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 .Select(x => new { x.Id, x.Codigo, x.Nome, x.DataInicioPrevisto, x.DataFimPrevisto })
                 .ToListAsync(ct);
 
-            var clients = onboarding.TipoConta == "ag" && buyer.AgenciaId.HasValue
+            var clients = liberados != null
+                ? await _db.Clientes.AsNoTracking().Where(c => liberados.Contains(c.Id)).OrderBy(c => c.Nome)
+                    .Select(c => new { id = c.Id, name = c.Nome }).ToListAsync(ct)
+                : onboarding.TipoConta == "ag" && buyer.AgenciaId.HasValue
                 ? await _db.AgenciaClientes.AsNoTracking()
                     .Where(link => link.IdAgencia == buyer.AgenciaId.Value &&
                         link.StatusExibicao == StatusExibicaoEnum.Ativo &&
@@ -128,12 +148,24 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var buyer = await _tenant.UsuariosAnunciante.AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == userId, ct);
             if (buyer == null) return Unauthorized();
-            if (onboarding.TipoConta == "ag" && (!buyer.AgenciaId.HasValue || !request.ClientId.HasValue))
+            var sessao = await _carteira.ResolverAsync(User, buyer, ct);
+            if (sessao.Modo == ModoSessaoApp.Recusada)
+                return StatusCode(403, new { message = SessaoApp.MensagemRecusada });
+            var carteira = sessao.Modo == ModoSessaoApp.Carteira;
+            if (carteira)
+            {
+                if (!buyer.AgenciaId.HasValue || !request.ClientId.HasValue)
+                    return BadRequest(new { message = "Selecione um cliente da sua carteira." });
+                if (!await _carteira.ClientesLiberados(sessao.VendedorId, buyer.AgenciaId.Value)
+                        .AnyAsync(id => id == request.ClientId.Value, ct))
+                    return StatusCode(403, new { message = "Este cliente não está liberado na sua carteira." });
+            }
+            else if (onboarding.TipoConta == "ag" && (!buyer.AgenciaId.HasValue || !request.ClientId.HasValue))
                 return BadRequest(new { message = "Selecione um anunciante representado por esta agência." });
             if (onboarding.TipoConta == "ad" && (!buyer.ClienteId.HasValue || !buyer.AgenciaId.HasValue))
                 return Conflict(new { message = "Identidade de venda direta ainda não provisionada." });
 
-            var desiredClientId = onboarding.TipoConta == "ag" ? request.ClientId : buyer.ClienteId;
+            var desiredClientId = carteira || onboarding.TipoConta == "ag" ? request.ClientId : buyer.ClienteId;
             var client = await _db.Clientes.Include(x => x.AgenciasContratadas)
                 .SingleOrDefaultAsync(x =>
                     (onboarding.TipoConta == "pj" ? x.Cnpj.Numero == onboarding.Documento : x.Id == desiredClientId) &&
