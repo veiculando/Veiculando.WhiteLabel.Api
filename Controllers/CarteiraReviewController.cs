@@ -256,29 +256,11 @@ public sealed class CarteiraReviewController : ControllerBase
         return null;
     }
 
-    /// <summary>
-    /// O Cliente nasceu do cadastro da vendedora e não é usado em mais nada: nenhum outro
-    /// vínculo ativo com exibidora, nenhum contrato ativo com agência e nenhuma campanha.
-    /// Só esse cliente pode ser inativado na reprovação (VEI-SUP-39).
-    /// </summary>
-    private async Task<bool> SoDaCarteiraAsync(WlCarteiraCliente carteira, CancellationToken ct)
-    {
-        if (carteira.Origem != WlCarteiraOrigem.Cadastro) return false;
-        var id = carteira.ClienteId;
-        return !await _db.AfiliadaClientes.AnyAsync(v => v.IdCliente == id && v.IdAfiliada != carteira.AfiliadaId &&
-                   v.Status == StatusVinculoEnum.Ativo, ct)
-            && !await _db.AgenciaClientes.AnyAsync(l => l.IdCliente == id && l.StatusExibicao == StatusExibicaoEnum.Ativo, ct)
-            && !await _db.Campanhas.AnyAsync(c => c.IdCliente == id, ct);
-    }
+    private Task<bool> SoDaCarteiraAsync(WlCarteiraCliente carteira, CancellationToken ct) =>
+        CarteiraClienteCore.SoDaCarteiraAsync(_db, carteira, ct);
 
-    /// <summary>
-    /// O Cliente do Core não expõe Inativar/Aprovar (são protegidos em EntityDefBase); o
-    /// UPDATE é restrito à coluna de status e roda na transação da decisão.
-    /// </summary>
     private Task AlterarStatusClienteAsync(int clienteId, StatusExibicaoEnum status, CancellationToken ct) =>
-        _db.Database.ExecuteSqlCommandAsync(
-            "UPDATE dbo.Cliente SET StatusExibicao = @p0, DataAtualizacao = GETDATE() WHERE Id = @p1",
-            ct, (int)status, clienteId);
+        CarteiraClienteCore.AlterarStatusAsync(_db, clienteId, status, ct);
 
     private Task<WlCarteiraCliente> CarregarAsync(Guid id, CancellationToken ct) =>
         _db.WlCarteiraClientes.Include(c => c.Documentos)
