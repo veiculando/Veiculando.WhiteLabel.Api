@@ -44,7 +44,8 @@ public static class CarteiraClienteCore
 }
 
 /// <summary>
-/// VEI-RD-161: rascunho da carteira que a vendedora nunca enviou não deixa Cliente ativo no Core.
+/// VEI-RD-161: rascunho da carteira que a vendedora nunca enviou (ou cadastro com ajustes pedidos
+/// que ela abandonou, VEI-SUP-40) não deixa Cliente ativo no Core.
 /// O vínculo com a exibidora já nasce inativo; aqui só o Cliente é inativado. A retomada e a
 /// aprovação reativam como na reprovação (VEI-SUP-39).
 /// </summary>
@@ -69,7 +70,8 @@ public sealed class CarteiraRascunhoLimpeza
         var limite = agoraUtc.AddDays(-_dias);
         using var db = new VeiculandoDataContext();
         var candidatas = await db.WlCarteiraClientes.AsNoTracking()
-            .Where(c => c.Status == WlCarteiraStatus.Rascunho && c.Origem == WlCarteiraOrigem.Cadastro && c.AtualizadoEm < limite)
+            .Where(c => (c.Status == WlCarteiraStatus.Rascunho || c.Status == WlCarteiraStatus.AjustesSolicitados) &&
+                c.Origem == WlCarteiraOrigem.Cadastro && c.AtualizadoEm < limite)
             .Join(db.Clientes.Where(x => x.StatusExibicao == StatusExibicaoEnum.Ativo), c => c.ClienteId, x => x.Id, (c, x) => c.Id)
             .ToListAsync(ct);
 
@@ -79,7 +81,8 @@ public sealed class CarteiraRascunhoLimpeza
             using var transaction = db.Database.BeginTransaction();
             // Relê dentro da transação: a vendedora pode ter enviado ou outra ter retomado.
             var carteira = await db.WlCarteiraClientes.AsNoTracking().SingleAsync(c => c.Id == id, ct);
-            if (carteira.Status != WlCarteiraStatus.Rascunho || carteira.AtualizadoEm >= limite ||
+            if ((carteira.Status != WlCarteiraStatus.Rascunho && carteira.Status != WlCarteiraStatus.AjustesSolicitados) ||
+                carteira.AtualizadoEm >= limite ||
                 !await CarteiraClienteCore.SoDaCarteiraAsync(db, carteira, ct))
                 continue;
             await CarteiraClienteCore.AlterarStatusAsync(db, carteira.ClienteId, StatusExibicaoEnum.Inativo, ct);

@@ -11,6 +11,7 @@ using FluentAssertions;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Entities;
 using Veiculando.Domain.Entities.WhiteLabel;
+using Veiculando.Domain.Enums;
 using Veiculando.Domain.ValueObjects;
 using Veiculando.WhiteLabel.Api.Tests.Infrastructure;
 using Xunit;
@@ -60,7 +61,35 @@ public sealed class AppKycCodigoClienteTests
         (await verify.Clientes.CountAsync(c => c.Cnpj.Numero == cnpj || c.Cnpj.Numero == "37.096.900/0001-94")).Should().Be(1);
     }
 
-    private async Task<(HttpResponseMessage Approval, string Email)> AprovarKycAdAsync(int tenant, string cnpj, string cnpjCoreComMascara)
+    [Fact]
+    public async Task Aprovacao_ad_reativa_cliente_inativado_pela_carteira()
+    {
+        // VEI-SUP-40: a vendedora cadastrou o CNPJ, o cadastro foi reprovado (cliente inativado);
+        // depois a própria empresa passa pelo KYC. A aprovação reaproveita o cliente, sem 409.
+        const int tenant = 8964;
+        var cnpj = ProspeccaoCarteiraTests.Cnpj(tenant, 7);
+        int clienteId = 0;
+        var (approval, _) = await AprovarKycAdAsync(tenant, cnpj, null, async (db, afiliada) =>
+        {
+            var cliente = new Cliente("WSUP40", "Da Carteira", "Da Carteira Ltda",
+                new Endereco("Centro", "Rua C", "3", null, null, new Cep("01001-000")), "São Paulo", "SP",
+                new Telefone("11999999999"), new Cnpj(cnpj), null, null, "São Paulo", null, null, null,
+                string.Empty, 0m, afiliada.UsuarioCadastro);
+            db.Clientes.Add(cliente);
+            await db.SaveChangesAsync();
+            clienteId = cliente.Id;
+            db.WlCarteiraClientes.Add(new WlCarteiraCliente(tenant, cliente.Id, 999, WlCarteiraOrigem.Cadastro));
+            await db.SaveChangesAsync();
+            await db.Database.ExecuteSqlCommandAsync("UPDATE Cliente SET StatusExibicao = 0 WHERE Id = @p0", cliente.Id);
+        });
+        approval.StatusCode.Should().Be(HttpStatusCode.OK, await approval.Content.ReadAsStringAsync());
+        using var verify = new VeiculandoDataContext();
+        (await verify.Clientes.SingleAsync(c => c.Id == clienteId)).StatusExibicao.Should().Be(StatusExibicaoEnum.Ativo);
+        (await verify.Clientes.CountAsync(c => c.Cnpj.Numero == cnpj)).Should().Be(1);
+    }
+
+    private async Task<(HttpResponseMessage Approval, string Email)> AprovarKycAdAsync(int tenant, string cnpj, string cnpjCoreComMascara,
+        Func<VeiculandoDataContext, Afiliada, Task> preparar = null)
     {
         var email = $"app-kyc-{tenant}@exemplo.com";
         var local = await Seed.LocalAsync(tenant, $"KY{tenant}");
@@ -88,6 +117,8 @@ IF NOT EXISTS (SELECT 1 FROM PerfilUsuario WHERE Codigo = 'UsuarioAnunciante')
                     string.Empty, 0m, afiliada.UsuarioCadastro));
             }
             await setup.SaveChangesAsync();
+            if (preparar != null)
+                await preparar(setup, await setup.Afiliadas.Include(a => a.UsuarioCadastro).SingleAsync(a => a.Id == tenant));
         }
 
         using var factory = new WlApiFactory(_db, tenant);

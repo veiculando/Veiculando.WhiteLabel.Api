@@ -83,17 +83,17 @@ public sealed class CarteiraReviewController : ControllerBase
             .Select(x => new { x.Nome, x.RazaoSocial, cnpj = x.Cnpj.Numero, x.Cidade, x.Uf }).SingleAsync(ct);
         var usuarios = c.Historico.Select(e => e.UsuarioId).Concat(new[] { c.VendedorId ?? 0, c.SolicitanteId }).Distinct().ToList();
         var nomes = await NomesUsuarioWl.ResolverAsync(_tenant, usuarios.Select(u => (int?)u), ct);
-        string Email(int? uid) => uid.HasValue && nomes.TryGetValue(uid.Value, out var e) ? e : null;
+        string Nome(int? uid) => uid.HasValue && nomes.TryGetValue(uid.Value, out var e) ? e : null;
         return Ok(new
         {
             id = c.Id, clienteId = c.ClienteId, status = c.Status.ToString(), origem = c.Origem.ToString(), motivo = c.Motivo,
-            vendedorId = c.VendedorId, vendedora = Email(c.VendedorId), solicitante = Email(c.SolicitanteId),
+            vendedorId = c.VendedorId, vendedora = Nome(c.VendedorId), solicitante = Nome(c.SolicitanteId),
             cliente = new { cliente.Nome, cliente.RazaoSocial, cnpj = CarteiraProspeccao.Digitos(cliente.cnpj), cliente.Cidade, cliente.Uf },
             documentos = c.Documentos.Where(d => d.Ativo).Select(d => new { d.Id, d.Tipo, d.Nome, d.ContentType, d.Tamanho }),
             historico = c.Historico.OrderBy(e => e.Em).Select(e => new
             {
-                evento = e.Evento.ToString(), usuario = Email(e.UsuarioId), vendedoraDe = Email(e.VendedorDe),
-                vendedoraPara = Email(e.VendedorPara), statusDe = e.StatusDe?.ToString(), statusPara = e.StatusPara.ToString(), e.Motivo, e.Em
+                evento = e.Evento.ToString(), usuario = Nome(e.UsuarioId), vendedoraDe = Nome(e.VendedorDe),
+                vendedoraPara = Nome(e.VendedorPara), statusDe = e.StatusDe?.ToString(), statusPara = e.StatusPara.ToString(), e.Motivo, e.Em
             })
         });
     }

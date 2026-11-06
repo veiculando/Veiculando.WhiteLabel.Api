@@ -193,7 +193,17 @@ public sealed class AppKycReviewController : ControllerBase
                 .OrderByDescending(c => c.StatusExibicao == StatusExibicaoEnum.Ativo).ThenBy(c => c.Id)
                 .FirstOrDefaultAsync(ct);
             if (client != null && client.StatusExibicao != StatusExibicaoEnum.Ativo)
-                return Conflict(new { message = "Este CNPJ já pertence a um anunciante inativo no Core." });
+            {
+                // VEI-SUP-40: cliente inativado pela carteira (cadastro reprovado ou abandonado) e sem
+                // outro uso volta a valer quando a própria empresa passa pelo KYC.
+                var clienteId = client.Id;
+                var daCarteira = await _db.WlCarteiraClientes.AsNoTracking().FirstOrDefaultAsync(c =>
+                    c.AfiliadaId == afiliada.Id && c.ClienteId == clienteId && c.Status != WlCarteiraStatus.Aprovado, ct);
+                if (daCarteira == null || !await CarteiraClienteCore.SoDaCarteiraAsync(_db, daCarteira, ct))
+                    return Conflict(new { message = "Este CNPJ já pertence a um anunciante inativo no Core." });
+                await CarteiraClienteCore.AlterarStatusAsync(_db, clienteId, StatusExibicaoEnum.Ativo, ct);
+                await _db.Entry(client).ReloadAsync(ct);
+            }
             if (client == null)
             {
                 // VEI-SUP-37: o código do Cliente precisa começar com letra; os dígitos do CNPJ

@@ -144,6 +144,10 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (User.FindFirstValue("WlPerfil") != "Anunciante" ||
                 !int.TryParse(User.FindFirstValue("WlAnuncianteId"), out var id))
                 return Unauthorized();
+            // VEI-SUP-40: a sessão renovada seria comum, sem a vendedora e sem a trilha da
+            // Prospecção. Expirou: a vendedora abre a Prospecção de novo pelo painel.
+            if (User.FindFirstValue("Prospeccao") == "true")
+                return Unauthorized(new { message = "Sessão de prospecção expirada. Abra a Prospecção de novo pelo painel." });
 
             var usuario = await _tenant.UsuariosAnunciante.AsNoTracking().FirstOrDefaultAsync(u =>
                 u.Id == id &&

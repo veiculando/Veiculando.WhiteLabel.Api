@@ -127,7 +127,11 @@ public sealed class AnuncianteDaCasaProvisionamento
         var linkError = await _vendaDireta.GarantirVinculoAsync(afiliada, agency, actor, casa.Id, ct);
         if (linkError != null) return (null, linkError);
 
-        var client = await _db.Clientes.SingleOrDefaultAsync(c => c.Cnpj.Numero == cnpjCore, ct);
+        // VEI-SUP-40: por dígitos, como no KYC (VEI-SUP-37): o Core guarda com ou sem máscara.
+        var client = await _db.Clientes
+            .Where(c => c.Cnpj.Numero.Replace(".", "").Replace("/", "").Replace("-", "").Replace(" ", "") == documento)
+            .OrderByDescending(c => c.StatusExibicao == StatusExibicaoEnum.Ativo).ThenBy(c => c.Id)
+            .FirstOrDefaultAsync(ct);
         if (client != null && client.StatusExibicao != StatusExibicaoEnum.Ativo)
             return (null, "O CNPJ da exibidora já pertence a um anunciante inativo no Core.");
         if (client == null)

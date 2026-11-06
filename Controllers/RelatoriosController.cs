@@ -222,8 +222,17 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             string Cliente, string CnpjCliente, string Campanha, string Periodo, decimal ValorBruto,
             decimal ValorLiquidoAnunciante, string Status);
 
-        private static DateTime Inicio(DateTime? de) => (de ?? new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1)).Date;
-        private static DateTime Fim(DateTime? ate) => (ate ?? DateTime.UtcNow).Date;
+        // VEI-SUP-40: o período é o dia de Brasília; os eventos são gravados em UTC.
+        private static readonly TimeZoneInfo Brasilia = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
+        private static DateTime Hoje() => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, Brasilia).Date;
+        private static DateTime Inicio(DateTime? de) => (de ?? new DateTime(Hoje().Year, Hoje().Month, 1)).Date;
+        private static DateTime Fim(DateTime? ate) => (ate ?? Hoje()).Date;
+        private static DateTime Utc(DateTime diaLocal) =>
+            TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(diaLocal, DateTimeKind.Unspecified), Brasilia);
+
+        /// <summary>Pedido que não conta para a vendedora (base de comissão): cancelado, revisado ou simulação.</summary>
+        private static readonly StatusPedidoEnum[] ForaDoRelatorio =
+            { StatusPedidoEnum.Cancelado, StatusPedidoEnum.Revisado, StatusPedidoEnum.Simulacao };
 
         private async Task<(List<LinhaVendedora> Linhas, string Erro)> LinhasPorVendedoraAsync(DateTime? de, DateTime? ate, int? vendedorId)
         {
@@ -232,8 +241,10 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (fimExclusivo <= inicio) return (null, "A data final deve ser igual ou posterior à inicial.");
             if ((fimExclusivo - inicio).TotalDays > 366) return (null, "Escolha um intervalo de até um ano.");
 
+            var inicioUtc = Utc(inicio);
+            var fimUtc = Utc(fimExclusivo);
             var eventos = await _tenant.ProspeccaoEventos.AsNoTracking()
-                .Where(e => e.Evento == WlProspeccaoEventoTipo.PedidoCriado && e.OcorridoEm >= inicio && e.OcorridoEm < fimExclusivo &&
+                .Where(e => e.Evento == WlProspeccaoEventoTipo.PedidoCriado && e.OcorridoEm >= inicioUtc && e.OcorridoEm < fimUtc &&
                     (vendedorId == null || e.OperadorId == vendedorId))
                 .Select(e => new { e.OperadorId, e.CodigosPedido })
                 .ToListAsync();
@@ -249,7 +260,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             var codigosPedido = vendedoraPorPedido.Keys.ToList();
             var pedidos = await _db.Pedidos.AsNoTracking()
-                .Where(p => codigosPedido.Contains(p.Codigo))
+                .Where(p => codigosPedido.Contains(p.Codigo) && !ForaDoRelatorio.Contains(p.Status))
                 .Select(p => new
                 {
                     p.Codigo, p.DataCadastro, p.Status, p.ValorTotalBruto, p.ValorLiquidoAnunciante,
