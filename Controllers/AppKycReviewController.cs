@@ -132,7 +132,7 @@ public sealed class AppKycReviewController : ControllerBase
 
     [HttpPost("{id:guid}/approve")]
     [EnableRateLimiting(Startup.RateLimitEscrita)]
-    public async Task<IActionResult> Approve(Guid id, CancellationToken ct)
+    public async Task<IActionResult> Approve(Guid id, [FromServices] CarteiraProspeccao carteira, CancellationToken ct)
     {
         if (!int.TryParse(User.FindFirstValue("WlUsuarioId"), out var operatorId)) return Unauthorized();
         using var transaction = _db.Database.BeginTransaction(IsolationLevel.Serializable);
@@ -187,12 +187,18 @@ public sealed class AppKycReviewController : ControllerBase
             var (directAgency, directError) = await _vendaDireta.GarantirAgenciaAsync(afiliada, actor, ct);
             if (directError != null) return Conflict(new { message = directError });
             agency = directAgency;
-            client = await _db.Clientes.SingleOrDefaultAsync(c => c.Cnpj.Numero == onboarding.Documento, ct);
+            // VEI-SUP-37: o Core grava o CNPJ com ou sem máscara; a comparação é por dígitos,
+            // senão o cliente existente não é achado e a aprovação tenta criar um duplicado.
+            client = await carteira.ClientesPorCnpj(onboarding.Documento)
+                .OrderByDescending(c => c.StatusExibicao == StatusExibicaoEnum.Ativo).ThenBy(c => c.Id)
+                .FirstOrDefaultAsync(ct);
             if (client != null && client.StatusExibicao != StatusExibicaoEnum.Ativo)
                 return Conflict(new { message = "Este CNPJ já pertence a um anunciante inativo no Core." });
             if (client == null)
             {
-                client = new Cliente(onboarding.Documento.Substring(0, Cliente.CodigoMaxLength),
+                // VEI-SUP-37: o código do Cliente precisa começar com letra; os dígitos do CNPJ
+                // nunca passavam na validação do Core. Mesmo gerador da carteira ("W" + 5).
+                client = new Cliente(await carteira.NovoCodigoClienteAsync(ct),
                     business.TradeName, business.LegalName, Address(business), business.City, business.State,
                     new Telefone(business.Phone), new Cnpj(onboarding.Documento), business.StateTaxId,
                     business.MunicipalTaxId, business.City, null, null, null, string.Empty, 0m, actor);
