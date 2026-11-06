@@ -94,7 +94,14 @@ public sealed class AppCarteiraController : ControllerBase
         if (request == null || !WlAppDocuments.Valid(cnpj, "pj"))
             return BadRequest(new { message = "Informe um CNPJ válido." });
 
-        using var transaction = _db.Database.BeginTransaction(IsolationLevel.Serializable);
+        // VEI-SUP-40: trava de aplicação por exibidora em vez de Serializable. A busca do CNPJ
+        // por dígitos varre Cliente; em Serializable, dois cadastros simultâneos travavam um ao
+        // outro (deadlock e 500) e o Core ficava sem gravar Cliente durante a transação.
+        using var transaction = _db.Database.BeginTransaction();
+        await _db.Database.ExecuteSqlCommandAsync(
+            "DECLARE @r int; EXEC @r = sp_getapplock @Resource = @p0, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 15000; " +
+            "IF @r < 0 THROW 50040, 'Cadastro da carteira ocupado; tente de novo.', 1;",
+            ct, $"wl-carteira-cadastro-{_tenant.AfiliadaId}");
         var agora = DateTime.UtcNow;
         var existentes = await _carteira.ClientesPorCnpj(cnpj).Select(c => c.Id).ToListAsync(ct);
         WlCarteiraCliente carteira;
@@ -106,11 +113,14 @@ public sealed class AppCarteiraController : ControllerBase
             var clienteId = carteira?.ClienteId ?? existentes[0];
             var vinculoAtivo = await _db.AfiliadaClientes.AnyAsync(v => v.IdAfiliada == _tenant.AfiliadaId &&
                 v.IdCliente == clienteId && v.Status == StatusVinculoEnum.Ativo, ct);
-            var origem = vinculoAtivo ? WlCarteiraOrigem.Solicitacao : WlCarteiraOrigem.Cadastro;
+            // VEI-SUP-40: "Cadastro" só para o cliente que a carteira criou. CNPJ que já existia no
+            // Core (de outra exibidora ou sem vínculo) é solicitação e nunca é inativado pela carteira.
+            var origem = vinculoAtivo || carteira == null ? WlCarteiraOrigem.Solicitacao : carteira.Origem;
 
             if (carteira != null)
             {
-                if (carteira.VendedorId == vendedora)
+                // VEI-SUP-40: a própria vendedora pode refazer o cadastro reprovado.
+                if (carteira.VendedorId == vendedora && carteira.Status != WlCarteiraStatus.Reprovado)
                     return Conflict(new { code = "own_client", message = "Este cliente já está na sua carteira.", carteiraId = carteira.Id, status = carteira.Status.ToString() });
                 if (!carteira.PodeSerRetomado(agora))
                     return Conflict(new { code = "other_seller", message = $"Este cliente já é atendido por {await NomeVendedoraAsync(carteira.VendedorId, ct)}." });

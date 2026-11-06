@@ -333,6 +333,97 @@ SET IDENTITY_INSERT Periodo OFF;", tenant, $"CRT{tenant}");
             csv.StatusCode.Should().Be(HttpStatusCode.OK);
             var texto = await csv.Content.ReadAsStringAsync();
             texto.Should().Contain("VendedoraId;Vendedora;Pedido;DataPedido;Cliente;CnpjCliente").And.Contain(Cnpj(tenant, 1));
+
+            // VEI-SUP-40: pedido cancelado sai da base de comissão.
+            using (var db = new VeiculandoDataContext())
+                await db.Database.ExecuteSqlCommandAsync("UPDATE Pedido SET Status = -1 WHERE Codigo = @p0", linha.GetProperty("pedido").GetString());
+            JsonDocument.Parse(await gestor.GetStringAsync("/api/wl/relatorios/pedidos-por-vendedora")).RootElement
+                .GetProperty("totalPedidos").GetInt32().Should().Be(0, "pedido cancelado não conta para a vendedora");
+        }
+
+        [Fact]
+        public async Task Vendedora_refaz_o_proprio_cadastro_reprovado()
+        {
+            const int tenant = 8953;
+            await PrepararAfiliadaAsync(tenant);
+            using var factory = new WlApiFactory(_db, tenant);
+            using var gestor = await GestorAsync(factory, tenant);
+            var (ana, _) = await AbrirCarteiraAsync(factory, tenant, "sup40-own");
+            var c = await CadastrarAsync(ana, Cnpj(tenant, 1));
+            await EnviarComDocumentosAsync(ana, c.Id);
+            (await gestor.PostAsJsonAsync($"/api/wl/kyc/app/carteira/{c.Id}/reprovar", new { reason = "Documento ilegível" }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var refeito = await CadastrarAsync(ana, Cnpj(tenant, 1));
+            refeito.Id.Should().Be(c.Id);
+            refeito.Status.Should().Be(nameof(WlCarteiraStatus.Rascunho));
+            refeito.Origem.Should().Be(nameof(WlCarteiraOrigem.Cadastro));
+        }
+
+        [Fact]
+        public async Task Cnpj_que_ja_existia_no_core_vira_solicitacao_e_nao_e_inativado()
+        {
+            const int tenant = 8954;
+            await PrepararAfiliadaAsync(tenant);
+            var cnpj = Cnpj(tenant, 1);
+            int clienteId;
+            using (var db = new VeiculandoDataContext())
+            {
+                var afiliada = await db.Afiliadas.Include(a => a.UsuarioCadastro).SingleAsync(a => a.Id == tenant);
+                var cliente = new Veiculando.Domain.Entities.Cliente($"K{tenant % 10000}", "Cliente Antigo", "Cliente Antigo Ltda",
+                    new Veiculando.Domain.ValueObjects.Endereco("Centro", "Rua B", "20", null, null, new Veiculando.Domain.ValueObjects.Cep("01001-000")),
+                    "São Paulo", "SP", new Veiculando.Domain.ValueObjects.Telefone("11999999999"), new Veiculando.Domain.ValueObjects.Cnpj(cnpj),
+                    null, null, "São Paulo", null, null, null, string.Empty, 0m, afiliada.UsuarioCadastro);
+                db.Clientes.Add(cliente);
+                await db.SaveChangesAsync();
+                clienteId = cliente.Id;
+            }
+            using var factory = new WlApiFactory(_db, tenant);
+            using var gestor = await GestorAsync(factory, tenant);
+            var (ana, _) = await AbrirCarteiraAsync(factory, tenant, "sup40-sol");
+
+            var c = await CadastrarAsync(ana, cnpj);
+            c.ClienteId.Should().Be(clienteId);
+            c.Origem.Should().Be(nameof(WlCarteiraOrigem.Solicitacao), "o cliente já existia no Core");
+            await EnviarComDocumentosAsync(ana, c.Id);
+            (await gestor.PostAsJsonAsync($"/api/wl/kyc/app/carteira/{c.Id}/reprovar", new { reason = "Não é dela" }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+            (await StatusClienteAsync(clienteId)).Should().Be(StatusExibicaoEnum.Ativo);
+        }
+
+        [Fact]
+        public async Task Sessao_da_prospeccao_nao_renova_e_cai_quando_a_vendedora_e_excluida()
+        {
+            const int tenant = 8955;
+            await PrepararAfiliadaAsync(tenant);
+            using var factory = new WlApiFactory(_db, tenant);
+            var (ana, anaId) = await AbrirCarteiraAsync(factory, tenant, "sup40-ses");
+            (await ana.GetAsync("/api/wl/app/prospeccao/carteira")).StatusCode.Should().Be(HttpStatusCode.OK);
+
+            (await ana.PostAsync("/api/wl/app/auth/refresh", null)).StatusCode
+                .Should().Be(HttpStatusCode.Unauthorized, "renovar viraria uma sessão comum, sem a vendedora");
+
+            using (var db = new VeiculandoDataContext())
+                await db.Database.ExecuteSqlCommandAsync("UPDATE WL_Usuario SET DataExclusao = GETUTCDATE() WHERE Id = @p0", anaId);
+            (await ana.GetAsync("/api/wl/app/prospeccao/carteira")).StatusCode
+                .Should().Be(HttpStatusCode.Forbidden, "vendedora excluída perde a sessão na hora");
+        }
+
+        [Fact]
+        public async Task Limpeza_inativa_cadastro_abandonado_com_ajustes_pedidos()
+        {
+            const int tenant = 8956;
+            await PrepararAfiliadaAsync(tenant);
+            using var factory = new WlApiFactory(_db, tenant);
+            using var gestor = await GestorAsync(factory, tenant);
+            var (ana, _) = await AbrirCarteiraAsync(factory, tenant, "sup40-aju");
+            var c = await CadastrarAsync(ana, Cnpj(tenant, 1));
+            await EnviarComDocumentosAsync(ana, c.Id);
+            (await gestor.PostAsJsonAsync($"/api/wl/kyc/app/carteira/{c.Id}/ajustes", new { reason = "Falta página" }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+            await EnvelhecerAsync(c.Id, CarteiraRascunhoLimpeza.DiasPadrao + 1);
+            await LimparRascunhosAsync();
+            (await StatusClienteAsync(c.ClienteId)).Should().Be(StatusExibicaoEnum.Inativo);
         }
 
         [Fact]

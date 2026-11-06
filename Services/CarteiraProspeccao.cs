@@ -65,6 +65,13 @@ public sealed class CarteiraProspeccao
             e.AppSessaoId == sessaoId && e.Evento == WlProspeccaoEventoTipo.Resgatada, ct);
         if (resgate == null || comprador == null || resgate.AnuncianteId != comprador.Id) return SessaoApp.Recusada;
 
+        // VEI-SUP-40: quem abriu a Prospecção ainda pode vender. Excluída ou sem PedidoCriar
+        // perde a sessão na hora, não quando o token expira.
+        var operadorId = resgate.OperadorId;
+        if (!await _tenant.Usuarios.AnyAsync(u => u.Id == operadorId && u.DataExclusao == null &&
+                u.StatusExibicao == StatusExibicaoEnum.Ativo && u.PermissoesRaw.Contains("PedidoCriar"), ct))
+            return SessaoApp.Recusada;
+
         // Prospecção aberta já com um anunciante escolhido continua como antes.
         if (!casa) return SessaoApp.Comum;
         return new SessaoApp(ModoSessaoApp.Carteira, resgate.OperadorId);
