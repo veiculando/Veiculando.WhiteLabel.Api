@@ -203,6 +203,71 @@ namespace Veiculando.WhiteLabel.Api.Tests
                 .Should().Be(StatusExibicaoEnum.Ativo, "o cliente já existia antes da carteira");
         }
 
+        private static Task<int> LimparRascunhosAsync() =>
+            new CarteiraRascunhoLimpeza(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<CarteiraRascunhoLimpeza>.Instance).ExecutarAsync(DateTime.UtcNow, default);
+
+        private static async Task EnvelhecerAsync(Guid carteiraId, int dias)
+        {
+            using var db = new VeiculandoDataContext();
+            await db.Database.ExecuteSqlCommandAsync(
+                "UPDATE WL_CarteiraCliente SET AtualizadoEm = DATEADD(day, -@p0, GETUTCDATE()) WHERE Id = @p1", dias, carteiraId);
+        }
+
+        private static async Task<StatusExibicaoEnum> StatusClienteAsync(int clienteId)
+        {
+            using var db = new VeiculandoDataContext();
+            return (await db.Clientes.SingleAsync(x => x.Id == clienteId)).StatusExibicao;
+        }
+
+        [Fact]
+        public async Task Rascunho_abandonado_inativa_o_cliente_e_a_retomada_aprovada_reativa()
+        {
+            const int tenant = 8962;
+            await PrepararAfiliadaAsync(tenant);
+            using var factory = new WlApiFactory(_db, tenant);
+            using var gestor = await GestorAsync(factory, tenant);
+            var (ana, _) = await AbrirCarteiraAsync(factory, tenant, "rasc-ana");
+            var (bia, _) = await AbrirCarteiraAsync(factory, tenant, "rasc-bia");
+            var cnpj = Cnpj(tenant, 1);
+
+            var c = await CadastrarAsync(ana, cnpj);
+            await EnvelhecerAsync(c.Id, CarteiraRascunhoLimpeza.DiasPadrao + 1);
+            await LimparRascunhosAsync();
+            (await StatusClienteAsync(c.ClienteId)).Should()
+                .Be(StatusExibicaoEnum.Inativo, "rascunho nunca enviado não deixa cliente ativo no Core (VEI-RD-161)");
+
+            // Outra vendedora retoma o rascunho abandonado; aprovado, o cliente volta a valer.
+            var retomado = await CadastrarAsync(bia, cnpj);
+            retomado.Id.Should().Be(c.Id);
+            retomado.Origem.Should().Be(nameof(WlCarteiraOrigem.Cadastro));
+            await EnviarComDocumentosAsync(bia, c.Id);
+            var aprovado = await gestor.PostAsync($"/api/wl/kyc/app/carteira/{c.Id}/aprovar", null);
+            aprovado.StatusCode.Should().Be(HttpStatusCode.OK, await aprovado.Content.ReadAsStringAsync());
+            (await StatusClienteAsync(c.ClienteId)).Should().Be(StatusExibicaoEnum.Ativo);
+        }
+
+        [Fact]
+        public async Task Limpeza_nao_inativa_rascunho_recente_nem_cliente_que_ja_era_da_exibidora()
+        {
+            const int tenant = 8963;
+            await PrepararAfiliadaAsync(tenant);
+            var cnpjSolicitacao = Cnpj(tenant, 2);
+            var clienteDaExibidora = await ClienteDaExibidoraAsync(tenant, cnpjSolicitacao);
+            using var factory = new WlApiFactory(_db, tenant);
+            var (ana, _) = await AbrirCarteiraAsync(factory, tenant, "rasc-rec");
+
+            var recente = await CadastrarAsync(ana, Cnpj(tenant, 1));
+            await EnvelhecerAsync(recente.Id, CarteiraRascunhoLimpeza.DiasPadrao - 1);
+            var solicitacao = await CadastrarAsync(ana, cnpjSolicitacao);
+            solicitacao.Origem.Should().Be(nameof(WlCarteiraOrigem.Solicitacao));
+            await EnvelhecerAsync(solicitacao.Id, CarteiraRascunhoLimpeza.DiasPadrao + 30);
+
+            await LimparRascunhosAsync();
+            (await StatusClienteAsync(recente.ClienteId)).Should().Be(StatusExibicaoEnum.Ativo, "o rascunho ainda está no prazo");
+            (await StatusClienteAsync(clienteDaExibidora)).Should().Be(StatusExibicaoEnum.Ativo, "o cliente já existia antes da carteira");
+        }
+
         [Fact]
         public async Task Troca_de_responsavel_move_o_cliente_e_o_relatorio_mantem_o_pedido_com_quem_vendeu()
         {
