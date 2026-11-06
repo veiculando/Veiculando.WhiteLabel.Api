@@ -151,6 +151,59 @@ namespace Veiculando.WhiteLabel.Api.Tests
         }
 
         [Fact]
+        public async Task Reprovacao_inativa_o_cliente_criado_pela_vendedora_e_a_retomada_aprovada_reativa()
+        {
+            const int tenant = 8966;
+            await PrepararAfiliadaAsync(tenant);
+            using var factory = new WlApiFactory(_db, tenant);
+            using var gestor = await GestorAsync(factory, tenant);
+            var (ana, _) = await AbrirCarteiraAsync(factory, tenant, "inat-ana");
+            var (bia, _) = await AbrirCarteiraAsync(factory, tenant, "inat-bia");
+            var cnpj = Cnpj(tenant, 1);
+
+            var c = await CadastrarAsync(ana, cnpj);
+            await EnviarComDocumentosAsync(ana, c.Id);
+            (await gestor.PostAsJsonAsync($"/api/wl/kyc/app/carteira/{c.Id}/reprovar", new { reason = "Documentos falsos" }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+            using (var db = new VeiculandoDataContext())
+                (await db.Clientes.SingleAsync(x => x.Id == c.ClienteId)).StatusExibicao
+                    .Should().Be(StatusExibicaoEnum.Inativo, "cliente que só existia por esse cadastro não fica ativo no Core (VEI-SUP-39)");
+
+            // Outra vendedora retoma o reprovado; aprovado, o cliente volta a valer.
+            var retomado = await CadastrarAsync(bia, cnpj);
+            retomado.Id.Should().Be(c.Id);
+            retomado.ClienteId.Should().Be(c.ClienteId);
+            await EnviarComDocumentosAsync(bia, c.Id);
+            var aprovado = await gestor.PostAsync($"/api/wl/kyc/app/carteira/{c.Id}/aprovar", null);
+            aprovado.StatusCode.Should().Be(HttpStatusCode.OK, await aprovado.Content.ReadAsStringAsync());
+            using (var db = new VeiculandoDataContext())
+                (await db.Clientes.SingleAsync(x => x.Id == c.ClienteId)).StatusExibicao.Should().Be(StatusExibicaoEnum.Ativo);
+            (await ContextoAsync(bia)).GetProperty("clients").EnumerateArray()
+                .Select(x => x.GetProperty("id").GetInt32()).Should().Equal(c.ClienteId);
+        }
+
+        [Fact]
+        public async Task Reprovacao_nao_inativa_cliente_que_ja_era_da_exibidora()
+        {
+            const int tenant = 8965;
+            await PrepararAfiliadaAsync(tenant);
+            var cnpj = Cnpj(tenant, 1);
+            var clienteId = await ClienteDaExibidoraAsync(tenant, cnpj);
+            using var factory = new WlApiFactory(_db, tenant);
+            using var gestor = await GestorAsync(factory, tenant);
+            var (ana, _) = await AbrirCarteiraAsync(factory, tenant, "inat-sol");
+
+            var c = await CadastrarAsync(ana, cnpj);
+            c.Origem.Should().Be(nameof(WlCarteiraOrigem.Solicitacao));
+            await EnviarComDocumentosAsync(ana, c.Id);
+            (await gestor.PostAsJsonAsync($"/api/wl/kyc/app/carteira/{c.Id}/reprovar", new { reason = "Não é dela" }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+            using var db = new VeiculandoDataContext();
+            (await db.Clientes.SingleAsync(x => x.Id == clienteId)).StatusExibicao
+                .Should().Be(StatusExibicaoEnum.Ativo, "o cliente já existia antes da carteira");
+        }
+
+        [Fact]
         public async Task Troca_de_responsavel_move_o_cliente_e_o_relatorio_mantem_o_pedido_com_quem_vendeu()
         {
             const int tenant = 8993;
