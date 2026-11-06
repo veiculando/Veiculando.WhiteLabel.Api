@@ -133,6 +133,12 @@ public sealed class CarteiraReviewController : ControllerBase
         if (erroVinculo != null) return Conflict(new { message = erroVinculo });
 
         var cliente = await _db.Clientes.SingleAsync(c => c.Id == carteira.ClienteId, ct);
+        if (cliente.StatusExibicao == StatusExibicaoEnum.Inativo && await SoDaCarteiraAsync(carteira, ct))
+        {
+            // VEI-SUP-39: inativado numa reprovação anterior e retomado; aprovado, volta a valer.
+            await AlterarStatusClienteAsync(cliente.Id, StatusExibicaoEnum.Ativo, ct);
+            await _db.Entry(cliente).ReloadAsync(ct);
+        }
         if (cliente.StatusExibicao != StatusExibicaoEnum.Ativo)
             return Conflict(new { message = "O cliente está inativo no Core." });
         var vinculo = await _db.AfiliadaClientes.SingleOrDefaultAsync(v => v.IdAfiliada == afiliada.Id && v.IdCliente == cliente.Id, ct);
@@ -171,7 +177,12 @@ public sealed class CarteiraReviewController : ControllerBase
     [HttpPost("{id:guid}/reprovar")]
     [EnableRateLimiting(Startup.RateLimitEscrita)]
     public Task<IActionResult> Reprovar(Guid id, [FromBody] Motivo request, CancellationToken ct) =>
-        DecidirAsync(id, request?.Reason, null, (c, op, m) => c.Reprovar(op, m), ct);
+        DecidirAsync(id, request?.Reason, null, (c, op, m) => c.Reprovar(op, m), ct, async c =>
+        {
+            // VEI-SUP-39: cliente que só existia por este cadastro não fica ativo no Core.
+            if (await SoDaCarteiraAsync(c, ct))
+                await AlterarStatusClienteAsync(c.ClienteId, StatusExibicaoEnum.Inativo, ct);
+        });
 
     /// <summary>Vendedoras que podem receber carteira: usuários ativos da exibidora.</summary>
     [HttpGet("vendedoras")]
@@ -218,7 +229,7 @@ public sealed class CarteiraReviewController : ControllerBase
     }
 
     private async Task<IActionResult> DecidirAsync(Guid id, string motivo, WlCarteiraStatus? exigido,
-        Action<WlCarteiraCliente, int, string> decidir, CancellationToken ct)
+        Action<WlCarteiraCliente, int, string> decidir, CancellationToken ct, Func<WlCarteiraCliente, Task> depois = null)
     {
         if (!TryOperador(out var operador)) return Unauthorized();
         if (string.IsNullOrWhiteSpace(motivo)) return BadRequest(new { message = "Informe o motivo da decisão." });
@@ -228,7 +239,10 @@ public sealed class CarteiraReviewController : ControllerBase
         if (recusa != null) return recusa;
         try { decidir(carteira, operador, motivo); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        using var transaction = _db.Database.BeginTransaction();
         await _db.SaveChangesAsync(ct);
+        if (depois != null) await depois(carteira);
+        transaction.Commit();
         return Ok(new { id = carteira.Id, status = carteira.Status.ToString() });
     }
 
@@ -241,6 +255,30 @@ public sealed class CarteiraReviewController : ControllerBase
             return Conflict(new { message = "Operação inválida para o estado atual do cadastro." });
         return null;
     }
+
+    /// <summary>
+    /// O Cliente nasceu do cadastro da vendedora e não é usado em mais nada: nenhum outro
+    /// vínculo ativo com exibidora, nenhum contrato ativo com agência e nenhuma campanha.
+    /// Só esse cliente pode ser inativado na reprovação (VEI-SUP-39).
+    /// </summary>
+    private async Task<bool> SoDaCarteiraAsync(WlCarteiraCliente carteira, CancellationToken ct)
+    {
+        if (carteira.Origem != WlCarteiraOrigem.Cadastro) return false;
+        var id = carteira.ClienteId;
+        return !await _db.AfiliadaClientes.AnyAsync(v => v.IdCliente == id && v.IdAfiliada != carteira.AfiliadaId &&
+                   v.Status == StatusVinculoEnum.Ativo, ct)
+            && !await _db.AgenciaClientes.AnyAsync(l => l.IdCliente == id && l.StatusExibicao == StatusExibicaoEnum.Ativo, ct)
+            && !await _db.Campanhas.AnyAsync(c => c.IdCliente == id, ct);
+    }
+
+    /// <summary>
+    /// O Cliente do Core não expõe Inativar/Aprovar (são protegidos em EntityDefBase); o
+    /// UPDATE é restrito à coluna de status e roda na transação da decisão.
+    /// </summary>
+    private Task AlterarStatusClienteAsync(int clienteId, StatusExibicaoEnum status, CancellationToken ct) =>
+        _db.Database.ExecuteSqlCommandAsync(
+            "UPDATE dbo.Cliente SET StatusExibicao = @p0, DataAtualizacao = GETDATE() WHERE Id = @p1",
+            ct, (int)status, clienteId);
 
     private Task<WlCarteiraCliente> CarregarAsync(Guid id, CancellationToken ct) =>
         _db.WlCarteiraClientes.Include(c => c.Documentos)

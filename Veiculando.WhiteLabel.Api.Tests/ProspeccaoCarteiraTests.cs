@@ -322,7 +322,7 @@ UPDATE Afiliada SET Cnpj = @p1, IdUsuarioCadastro = 1, RazaoSocial = @p2, Cidade
                 .Modo.Should().Be(ModoSessaoApp.Comum, "login comum do anunciante segue igual");
         }
 
-        private static async Task<int> ClienteDaExibidoraAsync(int tenant, string cnpj)
+        internal static async Task<int> ClienteDaExibidoraAsync(int tenant, string cnpj)
         {
             using var ctx = new VeiculandoDataContext();
             var afiliada = await ctx.Afiliadas.Include(a => a.UsuarioCadastro).SingleAsync(a => a.Id == tenant);
