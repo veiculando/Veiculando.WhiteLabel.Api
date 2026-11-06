@@ -106,7 +106,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
         [Authorize]
         [HttpGet("me")]
-        public async Task<IActionResult> Me()
+        public async Task<IActionResult> Me([FromServices] CarteiraProspeccao carteira, CancellationToken ct)
         {
             if (User.FindFirstValue("WlPerfil") != "Anunciante" ||
                 !int.TryParse(User.FindFirstValue("WlAnuncianteId"), out var id))
@@ -115,10 +115,22 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var usuario = await _tenant.UsuariosAnunciante.AsNoTracking().FirstOrDefaultAsync(u =>
                 u.Id == id &&
                 u.StatusExibicao == StatusExibicaoEnum.Ativo &&
-                u.StatusConvite == StatusConviteWlEnum.Aceito);
+                u.StatusConvite == StatusConviteWlEnum.Aceito, ct);
             if (usuario == null) return Unauthorized();
 
-            return Ok(await LerPerfilAsync(usuario));
+            var perfil = await LerPerfilAsync(usuario);
+            // VEI-SUP-38: na Prospecção o JWT é do anunciante da casa (casa.N@...), mas quem
+            // está usando o App é a vendedora. O perfil mostra ela; o resto do perfil fica igual.
+            var sessao = await carteira.ResolverAsync(User, usuario, ct);
+            if (sessao.Modo == ModoSessaoApp.Carteira)
+            {
+                var email = await _tenant.Usuarios.Where(u => u.Id == sessao.VendedorId)
+                    .Select(u => u.Email.Endereco).FirstOrDefaultAsync(ct);
+                var nome = await NomesUsuarioWl.ResolverAsync(_tenant, sessao.VendedorId, ct);
+                if (!string.IsNullOrWhiteSpace(email))
+                    perfil = perfil with { Name = nome ?? email, Email = email };
+            }
+            return Ok(perfil);
         }
 
         /// <summary>

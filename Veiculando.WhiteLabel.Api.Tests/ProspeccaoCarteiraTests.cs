@@ -143,6 +143,23 @@ UPDATE Afiliada SET Cnpj = @p1, IdUsuarioCadastro = 1, RazaoSocial = @p2, Cidade
         }
 
         [Fact]
+        public async Task Perfil_do_App_na_Prospeccao_mostra_a_vendedora_e_nao_o_anunciante_da_casa()
+        {
+            const int tenant = 8970;
+            await PrepararAfiliadaAsync(tenant);
+            using var factory = new WlApiFactory(_db, tenant);
+            var (app, _) = await AbrirCarteiraAsync(factory, tenant, "me-ana");
+
+            var r = await app.GetAsync("/api/wl/app/auth/me");
+            r.StatusCode.Should().Be(HttpStatusCode.OK, await r.Content.ReadAsStringAsync());
+            var me = JsonDocument.Parse(await r.Content.ReadAsStringAsync()).RootElement;
+            me.GetProperty("name").GetString().Should().Be("Vendedora me-ana", "o perfil é de quem usa o App (VEI-SUP-38)");
+            me.GetProperty("email").GetString().Should().StartWith("me-ana").And.EndWith("@exemplo.com")
+                .And.NotContain("wl.veiculando.invalid");
+            me.GetProperty("kycStatus").GetString().Should().Be("approved", "o resto do perfil continua o da casa");
+        }
+
+        [Fact]
         public async Task Cadastro_nasce_em_rascunho_inativo_e_so_vai_para_analise_com_os_dois_documentos()
         {
             const int tenant = 8985;
