@@ -342,6 +342,26 @@ SET IDENTITY_INSERT Periodo OFF;", tenant, $"CRT{tenant}");
         }
 
         [Fact]
+        public async Task Cadastros_simultaneos_de_vendedoras_diferentes_nao_falham()
+        {
+            // VEI-SUP-40: em Serializable, a busca do CNPJ por varredura travava cadastros paralelos.
+            const int tenant = 8957;
+            await PrepararAfiliadaAsync(tenant);
+            using var factory = new WlApiFactory(_db, tenant);
+            var (ana, _) = await AbrirCarteiraAsync(factory, tenant, "sup40-par-a");
+            var (bia, _) = await AbrirCarteiraAsync(factory, tenant, "sup40-par-b");
+
+            for (var rodada = 0; rodada < 5; rodada++)
+            {
+                var respostas = await Task.WhenAll(
+                    ana.PostAsJsonAsync("/api/wl/app/prospeccao/carteira", Dados(Cnpj(tenant, 10 + rodada * 2))),
+                    bia.PostAsJsonAsync("/api/wl/app/prospeccao/carteira", Dados(Cnpj(tenant, 11 + rodada * 2))));
+                foreach (var r in respostas)
+                    r.StatusCode.Should().Be(HttpStatusCode.OK, await r.Content.ReadAsStringAsync());
+            }
+        }
+
+        [Fact]
         public async Task Vendedora_refaz_o_proprio_cadastro_reprovado()
         {
             const int tenant = 8953;
