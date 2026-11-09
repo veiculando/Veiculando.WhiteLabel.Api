@@ -208,18 +208,17 @@ public sealed class AppCampaignsController : ControllerBase
             comprometidos.Count == 0 ? null : comprometidos.Max(i => i.FimPeriodo)));
         if (details.Count > 0) return CampanhaAppValidacao.Erro(CampanhaAppValidacao.Mensagem, details);
 
-        // O Core não tem método de alteração de Campanha (setters privados, só o construtor
-        // valida). A edição grava pelas propriedades mapeadas, com as mesmas regras do
-        // construtor: verba <= 0 vira nula. O rowversion (TimeStamp) protege da escrita concorrente.
-        var campanha = await _db.Campanhas.SingleAsync(c => c.Id == alvo.Id, ct);
-        var entry = _db.Entry(campanha);
-        entry.Property(nameof(campanha.Nome)).CurrentValue = request.Name.Trim();
-        entry.Property(nameof(campanha.Produto)).CurrentValue = request.Product.Trim();
-        entry.Property(nameof(campanha.Job)).CurrentValue = string.IsNullOrWhiteSpace(request.Job) ? null : request.Job.Trim();
-        entry.Property(nameof(campanha.DataInicioPrevisto)).CurrentValue = request.StartDate.Date;
-        entry.Property(nameof(campanha.DataFimPrevisto)).CurrentValue = request.EndDate.Date;
-        entry.Property(nameof(campanha.Verba)).CurrentValue = request.Budget > 0 ? request.Budget : null;
-        entry.Property(nameof(campanha.DataAtualizacao)).CurrentValue = DateTime.UtcNow;
+        // Edição pelo Campanha.Update do Core (ver CampanhaEdicaoCore). O responsável continua o
+        // mesmo: o escopo já garantiu que é a identidade desta sessão. O cliente não muda.
+        var campanha = await _db.Campanhas
+            .Include(c => c.Cliente)
+            .Include(c => c.AnuncianteResponsavel.Agencia)
+            .SingleAsync(c => c.Id == alvo.Id, ct);
+        CampanhaEdicaoCore.Aplicar(campanha, campanha.AnuncianteResponsavel, request.Name.Trim(), request.Product.Trim(),
+            string.IsNullOrWhiteSpace(request.Job) ? null : request.Job.Trim(),
+            request.StartDate.Date, request.EndDate.Date, request.Budget);
+        if (!campanha.IsValid())
+            return CampanhaAppValidacao.Erro(CampanhaAppValidacao.Mensagem, campanha.Notifications.Select(n => n.Message));
         try
         {
             await _db.SaveChangesAsync(ct);

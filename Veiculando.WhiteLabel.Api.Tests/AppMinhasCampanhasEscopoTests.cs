@@ -227,6 +227,16 @@ public sealed class AppMinhasCampanhasEscopoTests
         (await app.GetAsync($"/api/wl/app/campaigns?clienteId={ids[1]}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
+    [Fact]
+    public void Edicao_usa_o_Update_do_Core()
+    {
+        // O PUT chama Campanha.Update (internal no Core) por reflexão. Se um bump do core.ref
+        // mudar a assinatura, isto quebra aqui, e não em produção na primeira edição.
+        var carregar = () => System.Runtime.CompilerServices.RuntimeHelpers
+            .RunClassConstructor(typeof(CampanhaEdicaoCore).TypeHandle);
+        carregar.Should().NotThrow();
+    }
+
     // ---- apoio ----
 
     private static object Payload(decimal? verba, string nome = "Campanha Teste", DateTime? inicio = null, DateTime? fim = null) => new
