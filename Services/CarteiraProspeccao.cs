@@ -88,14 +88,15 @@ public sealed class CarteiraProspeccao
     public IQueryable<int> ClientesLiberados(int vendedorId, int agenciaVendaDiretaId)
     {
         var afiliadaId = _tenant.AfiliadaId;
-        var agora = DateTime.UtcNow;
+        // Mesmo predicado de vigência da agência e de Minhas Campanhas (peer review B2).
+        var vigentes = _db.AgenciaClientes
+            .Where(AppCampanhasEscopo.AgenciaClienteVigente(agenciaVendaDiretaId, DateTime.UtcNow))
+            .Select(l => l.IdCliente);
         return _db.WlCarteiraClientes
             .Where(c => c.AfiliadaId == afiliadaId && c.VendedorId == vendedorId && c.Status == WlCarteiraStatus.Aprovado &&
                 _db.AfiliadaClientes.Any(v => v.IdAfiliada == afiliadaId && v.IdCliente == c.ClienteId &&
                     v.Status == StatusVinculoEnum.Ativo) &&
-                _db.AgenciaClientes.Any(l => l.IdAgencia == agenciaVendaDiretaId && l.IdCliente == c.ClienteId &&
-                    l.StatusExibicao == StatusExibicaoEnum.Ativo &&
-                    l.DataInicioContrato <= agora && l.DataExpiracaoContrato >= agora))
+                vigentes.Contains(c.ClienteId))
             .Select(c => c.ClienteId);
     }
 
