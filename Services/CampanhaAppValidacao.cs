@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Veiculando.WhiteLabel.Api.Services;
@@ -26,6 +27,9 @@ public class CampanhaAppRequest
 /// </summary>
 public static class CampanhaAppValidacao
 {
+    /// <summary>As mensagens vão para a tela em português; o container roda em cultura invariante.</summary>
+    private static readonly CultureInfo PtBr = CultureInfo.GetCultureInfo("pt-BR");
+
     public const string Mensagem = "Não foi possível salvar a campanha.";
     public const decimal VerbaMinima = 1_000m;
     public const decimal VerbaMaxima = 100_000_000m;
@@ -79,14 +83,14 @@ public static class CampanhaAppValidacao
         {
             if (request.Budget.HasValue && request.Budget.Value < comprometido.Valor)
                 details.Add($"A verba não pode ficar abaixo do valor já comprometido em pedidos nesta exibidora " +
-                            $"(mínimo R$ {comprometido.Valor:N2}).");
+                            $"(mínimo R$ {comprometido.Valor.ToString("N2", PtBr)}).");
             if (comprometido.PrimeiroDia.HasValue && request.StartDate != default &&
                 request.StartDate.Date > comprometido.PrimeiroDia.Value.Date)
-                details.Add($"O período precisa começar até {comprometido.PrimeiroDia.Value:dd/MM/yyyy}, " +
+                details.Add($"O período precisa começar até {comprometido.PrimeiroDia.Value.ToString("dd/MM/yyyy", PtBr)}, " +
                             "início do primeiro pedido da campanha.");
             if (comprometido.UltimoDia.HasValue && request.EndDate != default &&
                 request.EndDate.Date < comprometido.UltimoDia.Value.Date)
-                details.Add($"O período precisa ir até {comprometido.UltimoDia.Value:dd/MM/yyyy}, " +
+                details.Add($"O período precisa ir até {comprometido.UltimoDia.Value.ToString("dd/MM/yyyy", PtBr)}, " +
                             "fim do último pedido da campanha.");
         }
 
