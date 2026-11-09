@@ -42,6 +42,8 @@ namespace Veiculando.WhiteLabel.Api.Configurations
         // VEI-RD-106: telas de Marketing do CMS (api/wl/cms/*). Persona própria,
         // não reusa UsuarioAfiliadaGerenciar.
         public const string ConteudoGerenciar = "ConteudoGerenciar";
+        public const string SuporteGerenciar = "SuporteGerenciar";
+        internal const string ClaimHost = "WlHost";
 
         /// <summary>Lista canônica de permissões (VEI-RD-93) — espelha WlPermissoesValidas do domínio.</summary>
         public static readonly string[] Todas =
@@ -56,7 +58,8 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             ProgramacaoVisualizar,
             FinanceiroVisualizar,
             RelatorioExportar,
-            ConteudoGerenciar
+            ConteudoGerenciar,
+            SuporteGerenciar
         };
 
         public static IServiceCollection AddWlAuthorization(this IServiceCollection services)
@@ -71,8 +74,12 @@ namespace Veiculando.WhiteLabel.Api.Configurations
                     // Nome da policy == nome da permissão: evita uma tabela de
                     // tradução entre os dois que precisaria ser mantida em sincronia.
                     options.AddPolicy(permissao, policy =>
-                        policy.RequireAuthenticatedUser()
-                              .RequireClaim(ClaimPermissao, permissao));
+                    {
+                        policy.RequireAuthenticatedUser().RequireClaim(ClaimPermissao, permissao);
+                        if (permissao == SuporteGerenciar)
+                            policy.RequireAssertion(context =>
+                                int.TryParse(context.User.FindFirst("WlUsuarioId")?.Value, out var id) && id > 0);
+                    });
                 }
             });
 

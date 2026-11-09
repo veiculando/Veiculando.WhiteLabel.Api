@@ -199,4 +199,6 @@
 # commit de promocao da sprint-17.0 para a main do Core, antes do merge na master.
 # Promocao sprint-17.0 -> main (06/11/2026): 2c014ea58b e o commit de MERGE da
 # PR Core #317 em main e contem a3b266fe. SHA de `gh pr view 317 --json mergeCommit`.
-2c014ea58b486d35009789a2a142fbdfd078127a
+# VEI-RD-162: permissao SuporteGerenciar e compose do WL. Manter este SHA
+# alcancavel pela branch ate integrar o Core ou refixar no SHA integrado.
+22ea97fd11c6764c9a366f5610703dfe5261b803

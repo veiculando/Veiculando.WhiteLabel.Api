@@ -1,5 +1,8 @@
 using System;
 using System.Text;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Veiculando.WhiteLabel.Api.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
@@ -49,6 +52,25 @@ namespace Veiculando.WhiteLabel.Api.Configurations
                 .AddAuthentication("Bearer")
                 .AddJwtBearer("Bearer", options =>
                 {
+                    options.Events = new JwtBearerEvents
+                    {
+                        OnMessageReceived = context =>
+                        {
+                            if (!SnapsSupportProxyRoutes.IsProxy(context.Request.Path))
+                                return Task.CompletedTask;
+
+                            var apiKey = context.Request.Headers["X-API-Key"];
+                            var authorization = context.Request.Headers.Authorization;
+                            if (apiKey.Count > 1 || authorization.Count > 1 ||
+                                (apiKey.Count == 1 && (string.IsNullOrWhiteSpace(apiKey[0]) || apiKey[0].Contains(',') ||
+                                 (authorization.Count == 1 && authorization[0] != "Bearer " + apiKey[0]))))
+                                context.Fail("Invalid session.");
+                            else if (apiKey.Count == 1)
+                                context.Token = apiKey[0];
+
+                            return Task.CompletedTask;
+                        }
+                    };
                     options.TokenValidationParameters = new TokenValidationParameters
                     {
                         IssuerSigningKey = new SymmetricSecurityKey(key),
