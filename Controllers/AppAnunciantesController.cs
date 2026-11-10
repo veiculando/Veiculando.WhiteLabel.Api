@@ -356,7 +356,7 @@ public sealed class AppAnunciantesController : ControllerBase
 
     public class CondicoesRequest
     {
-        /// <summary>Comissão da agência, em %.</summary>
+        /// <summary>Comissão da agência em % (12 = 12%), inteiro de 0 a 30: o Core guarda fração com 2 casas.</summary>
         public decimal? ComissaoAgencia { get; set; }
         public DateTime? InicioContrato { get; set; }
         public DateTime? FimContrato { get; set; }
@@ -372,7 +372,9 @@ public sealed class AppAnunciantesController : ControllerBase
         {
             if (!ComissaoAgencia.HasValue) return "Informe a comissão da agência.";
             if (ComissaoAgencia < 0m || ComissaoAgencia > WlRepresentacao.ComissaoMaxima)
-                return "A comissão deve ficar entre 0% e 100%.";
+                return "A comissão deve ficar entre 0% e 30%.";
+            if (ComissaoAgencia != decimal.Truncate(ComissaoAgencia.Value))
+                return "A comissão deve ser um percentual inteiro.";
             var (inicio, fim) = Vigencia();
             if (fim <= inicio) return "O fim do contrato deve ser depois do início.";
             if (fim <= DateTime.UtcNow.Date) return "O contrato já estaria vencido.";

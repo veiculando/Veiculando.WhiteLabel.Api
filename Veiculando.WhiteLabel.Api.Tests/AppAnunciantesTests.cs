@@ -41,13 +41,14 @@ public sealed class AppAnunciantesTests
         (await M.JsonAsync(app, $"{Rota}/cnpj/{cnpj}")).GetProperty("situacao").GetString().Should().Be("novo");
 
         // Comissão fora da faixa e cliente novo sem dados: 400 antes de gravar.
-        (await app.PostAsJsonAsync(Rota, Pedido(cnpj, comissao: 101m))).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await app.PostAsJsonAsync(Rota, Pedido(cnpj, comissao: 31m))).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await app.PostAsJsonAsync(Rota, Pedido(cnpj, comissao: 12.5m))).StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await app.PostAsJsonAsync(Rota, new { cnpj, comissaoAgencia = 10m })).StatusCode.Should().Be(HttpStatusCode.BadRequest);
 
-        var criado = await CriarAsync(app, Pedido(cnpj, comissao: 12.5m));
+        var criado = await CriarAsync(app, Pedido(cnpj, comissao: 12m));
         criado.GetProperty("status").GetString().Should().Be("Rascunho");
         criado.GetProperty("origem").GetString().Should().Be("Cadastro");
-        criado.GetProperty("comissaoAgencia").GetDecimal().Should().Be(12.5m);
+        criado.GetProperty("comissaoAgencia").GetDecimal().Should().Be(12m);
         var id = criado.GetProperty("id").GetGuid();
         var clienteId = criado.GetProperty("clienteId").GetInt32();
 
@@ -146,6 +147,92 @@ public sealed class AppAnunciantesTests
         (await app.GetAsync(Rota)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await app.PostAsJsonAsync(Rota, Pedido(ProspeccaoCarteiraTests.Cnpj(tenant, 3)))).StatusCode
             .Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Exibidora_aprova_ajusta_reprova_e_renova_contrato_vencido()
+    {
+        const int tenant = 8939;
+        var (app, factory, agencia) = await AgenciaLogadaAsync(tenant, "an-ag-8939@exemplo.com", 9);
+        using var _f = factory;
+        await Seed.OperadorAsync(tenant, "gestor-8939@exemplo.com", new[] { "ClienteGerenciar" }, nome: "Gestora");
+        var gestor = await factory.ClienteAutenticadoAsync("gestor-8939@exemplo.com", Seed.SenhaPadrao);
+        await Seed.OperadorAsync(tenant, "sem-perm-8939@exemplo.com", new[] { "PedidoCriar" });
+        var semPermissao = await factory.ClienteAutenticadoAsync("sem-perm-8939@exemplo.com", Seed.SenhaPadrao);
+        const string Fila = "/api/wl/kyc/app/representacoes";
+
+        // 1) Cliente novo: aprovar cria o contrato com a comissão e a vigência do pedido.
+        var novo = await EnviadoAsync(app, Pedido(ProspeccaoCarteiraTests.Cnpj(tenant, 1), comissao: 12m), todos: true);
+        (await semPermissao.GetAsync(Fila)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var fila = await M.JsonAsync(gestor, Fila);
+        var item = fila.EnumerateArray().Single(i => i.GetProperty("id").GetGuid() == novo);
+        item.GetProperty("agencia").GetString().Should().Be($"Agencia {tenant}");
+        item.GetProperty("comissaoAgencia").GetDecimal().Should().Be(12m);
+        var detalhe = await M.JsonAsync(gestor, $"{Fila}/{novo}");
+        detalhe.GetProperty("solicitante").GetString().Should().Be("an-ag-8939@exemplo.com");
+        var docs = detalhe.GetProperty("documentos").EnumerateArray().ToList();
+        docs.Should().HaveCount(3);
+        var download = await gestor.GetAsync($"{Fila}/{novo}/documentos/{docs[0].GetProperty("id").GetGuid()}");
+        download.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var aprovado = await gestor.PostAsync($"{Fila}/{novo}/aprovar", null);
+        aprovado.StatusCode.Should().Be(HttpStatusCode.OK, await aprovado.Content.ReadAsStringAsync());
+        (await gestor.PostAsync($"{Fila}/{novo}/aprovar", null)).StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var clienteNovo = detalhe.GetProperty("clienteId").GetInt32();
+        using (var ctx = new VeiculandoDataContext())
+        {
+            var contrato = await ctx.AgenciaClientes.AsNoTracking().SingleAsync(l => l.IdAgencia == agencia && l.IdCliente == clienteNovo);
+            contrato.ComissaoAgencia.Should().Be(0.12m, "o Core guarda fração");
+            contrato.DataInicioContrato.Should().Be(DateTime.UtcNow.Date);
+            contrato.DataExpiracaoContrato.Should().Be(DateTime.UtcNow.Date.AddYears(2));
+            (await ctx.AfiliadaClientes.AsNoTracking().SingleAsync(v => v.IdAfiliada == tenant && v.IdCliente == clienteNovo))
+                .Status.Should().Be(StatusVinculoEnum.Ativo);
+        }
+        // Aprovado, o cliente entra na carteira da agência e o CNPJ aparece como representado.
+        (await M.JsonAsync(app, "/api/wl/app/clients")).GetProperty("clientes").EnumerateArray()
+            .Select(c => c.GetProperty("id").GetInt32()).Should().Contain(clienteNovo);
+        (await M.JsonAsync(app, $"{Rota}/cnpj/{ProspeccaoCarteiraTests.Cnpj(tenant, 1)}")).GetProperty("situacao").GetString()
+            .Should().Be("representado");
+
+        // 2) Ajustes com motivo voltam para a agência; reprovação de cadastro novo inativa o cliente.
+        var outro = await EnviadoAsync(app, Pedido(ProspeccaoCarteiraTests.Cnpj(tenant, 2)), todos: true);
+        (await gestor.PostAsJsonAsync($"{Fila}/{outro}/ajustes", new { reason = " " })).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await gestor.PostAsJsonAsync($"{Fila}/{outro}/ajustes", new { reason = "Carta sem assinatura" })).StatusCode.Should().Be(HttpStatusCode.OK);
+        var meu = (await M.JsonAsync(app, Rota)).EnumerateArray().Single(r => r.GetProperty("id").GetGuid() == outro);
+        meu.GetProperty("status").GetString().Should().Be("AjustesSolicitados");
+        meu.GetProperty("motivo").GetString().Should().Be("Carta sem assinatura");
+        (await gestor.PostAsJsonAsync($"{Fila}/{outro}/reprovar", new { reason = "CNPJ não confere" })).StatusCode.Should().Be(HttpStatusCode.OK);
+        var clienteReprovado = meu.GetProperty("clienteId").GetInt32();
+        using (var ctx = new VeiculandoDataContext())
+            (await ctx.Clientes.AsNoTracking().SingleAsync(c => c.Id == clienteReprovado)).StatusExibicao
+                .Should().Be(StatusExibicaoEnum.Inativo, "o cliente só existia por este pedido");
+
+        // 3) Contrato vencido: a agência pede de novo e a aprovação renova as condições.
+        var cnpjVencido = ProspeccaoCarteiraTests.Cnpj(tenant, 3);
+        var vencido = await M.ClienteAsync(tenant, "V8939", "Cliente Vencido", cnpjVencido);
+        await M.ContratoAsync(agencia, vencido, DateTime.UtcNow.AddDays(-1));
+        var renovacao = await EnviadoAsync(app, new { cnpj = cnpjVencido, comissaoAgencia = 7m }, todos: true);
+        (await gestor.PostAsync($"{Fila}/{renovacao}/aprovar", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var ctx = new VeiculandoDataContext())
+        {
+            var contrato = await ctx.AgenciaClientes.AsNoTracking().SingleAsync(l => l.IdAgencia == agencia && l.IdCliente == vencido);
+            contrato.ComissaoAgencia.Should().Be(0.07m);
+            contrato.DataExpiracaoContrato.Should().Be(DateTime.UtcNow.Date.AddYears(2));
+        }
+    }
+
+    private static async Task<Guid> EnviadoAsync(HttpClient app, object pedido, bool todos)
+    {
+        var id = (await CriarAsync(app, pedido)).GetProperty("id").GetGuid();
+        if (todos)
+        {
+            await AnexarOkAsync(app, id, WlRepresentacaoDocumento.TipoContratoSocial);
+            await AnexarOkAsync(app, id, WlRepresentacaoDocumento.TipoResponsavel);
+        }
+        await AnexarOkAsync(app, id, WlRepresentacaoDocumento.TipoCartaRepresentacao);
+        var r = await app.PostAsync($"{Rota}/{id}/enviar", null);
+        r.StatusCode.Should().Be(HttpStatusCode.OK, await r.Content.ReadAsStringAsync());
+        return id;
     }
 
     // ---- apoio ----
