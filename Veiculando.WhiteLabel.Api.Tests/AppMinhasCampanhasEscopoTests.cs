@@ -162,6 +162,15 @@ public sealed class AppMinhasCampanhasEscopoTests
         await DeveSer400ComDetails(await app.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns",
             new { name = "Nova", product = "Produto", startDate = DateTime.UtcNow.Date.AddDays(1),
                 endDate = DateTime.UtcNow.Date.AddDays(8), budget = 500m, clientId = vigente }));
+
+        // VEI-SUP-43: criar para o cliente de contrato vencido recusa pelo contrato,
+        // não pela falta de responsável comercial.
+        var vencido = await app.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns",
+            new { name = "Nova", product = "Produto", startDate = DateTime.UtcNow.Date.AddDays(1),
+                endDate = DateTime.UtcNow.Date.AddDays(8), budget = 5_000m, clientId = expirado });
+        vencido.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await vencido.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("message").GetString()
+            .Should().Be("O contrato com este anunciante não está vigente.");
     }
 
     [Fact]
