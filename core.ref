@@ -199,4 +199,7 @@
 # commit de promocao da sprint-17.0 para a main do Core, antes do merge na master.
 # Promocao sprint-17.0 -> main (06/11/2026): 2c014ea58b e o commit de MERGE da
 # PR Core #317 em main e contem a3b266fe. SHA de `gh pr view 317 --json mergeCommit`.
-2c014ea58b486d35009789a2a142fbdfd078127a
+# VEI-RD-67g/67h: pin TEMPORARIO em 906db272, topo da branch
+# feature/main/vei-rd-67f-solicitacao-agencia do Core (WL_Representacao). Contem
+# 2c014ea5. RE-PIN OBRIGATORIO no commit de merge da PR do Core antes do merge aqui.
+906db272e3765f69831bd84bdcffd662c78e8bbe
