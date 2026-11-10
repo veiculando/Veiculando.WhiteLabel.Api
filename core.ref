@@ -202,4 +202,5 @@
 # VEI-RD-67g/67h: pin TEMPORARIO em 906db272, topo da branch
 # feature/main/vei-rd-67f-solicitacao-agencia do Core (WL_Representacao). Contem
 # 2c014ea5. RE-PIN OBRIGATORIO no commit de merge da PR do Core antes do merge aqui.
-906db272e3765f69831bd84bdcffd662c78e8bbe
+# RE-PIN FINAL (VEI-RD-67f): 34d23ae0 e o commit de MERGE da PR Core #334 em main.
+34d23ae0656946bdb1df99df498bcf3c029209fb
