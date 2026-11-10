@@ -122,7 +122,7 @@ public sealed class AppMinhasCampanhasEscopoTests
         // GET /clients e Minhas Campanhas usam o mesmo conjunto: o expirado sai dos dois.
         var clientes = await JsonAsync(app, "/api/wl/app/clients");
         clientes.GetProperty("perfil").GetString().Should().Be("agencia");
-        clientes.GetProperty("podeAdicionarAnunciante").GetBoolean().Should().BeFalse();
+        clientes.GetProperty("podeAdicionarAnunciante").GetBoolean().Should().BeTrue("VEI-RD-67d: a agência adiciona anunciante");
         clientes.GetProperty("clientes").EnumerateArray().Select(c => c.GetProperty("id").GetInt32()).Should().Equal(vigente);
         var lista = await JsonAsync(app, "/api/wl/app/campaigns");
         lista.EnumerateArray().Select(c => c.GetProperty("codigo").GetString())
@@ -258,14 +258,14 @@ public sealed class AppMinhasCampanhasEscopoTests
 
     private static string Mascara(string c) => $"{c[..2]}.{c[2..5]}.{c[5..8]}/{c[8..12]}-{c[12..]}";
 
-    private static async Task<JsonElement> JsonAsync(HttpClient app, string url)
+    internal static async Task<JsonElement> JsonAsync(HttpClient app, string url)
     {
         var r = await app.GetAsync(url);
         r.StatusCode.Should().Be(HttpStatusCode.OK, await r.Content.ReadAsStringAsync());
         return JsonDocument.Parse(await r.Content.ReadAsStringAsync()).RootElement.Clone();
     }
 
-    private static async Task<HttpClient> LoginAsync(WlApiFactory factory, string email)
+    internal static async Task<HttpClient> LoginAsync(WlApiFactory factory, string email)
     {
         var client = factory.ClienteAnonimo();
         var response = await client.PostAsJsonAsync("/api/wl/app/auth/login", new { email, password = Seed.SenhaPadrao });
@@ -275,7 +275,7 @@ public sealed class AppMinhasCampanhasEscopoTests
         return client;
     }
 
-    private static async Task AprovarAsync(int tenant, string email, string tipo, string documento, int? agenciaId = null)
+    internal static async Task AprovarAsync(int tenant, string email, string tipo, string documento, int? agenciaId = null)
     {
         using var ctx = new VeiculandoDataContext();
         var user = await ctx.WlUsuariosAnunciante.SingleAsync(u => u.AfiliadaId == tenant && u.Email.Endereco == email);
@@ -291,7 +291,7 @@ public sealed class AppMinhasCampanhasEscopoTests
     }
 
     /// <summary>Agência com vínculo ativo na exibidora e o usuário Core responsável (mesmo e-mail do App).</summary>
-    private static async Task<(int Agencia, int Responsavel)> AgenciaAsync(int tenant, string cnpj, string email)
+    internal static async Task<(int Agencia, int Responsavel)> AgenciaAsync(int tenant, string cnpj, string email)
     {
         using var ctx = new VeiculandoDataContext();
         var agencia = await ctx.Database.SqlQuery<int>(@"
@@ -312,7 +312,7 @@ SELECT @id;", $"Responsavel {tenant}", email, agencia).SingleAsync();
         return (agencia, usuario);
     }
 
-    private static async Task<int> ClienteAsync(int tenant, string codigo, string nome, string cnpj)
+    internal static async Task<int> ClienteAsync(int tenant, string codigo, string nome, string cnpj)
     {
         using var ctx = new VeiculandoDataContext();
         return await ctx.Database.SqlQuery<int>(@"
@@ -324,7 +324,7 @@ VALUES (@p3, @id, 1, 1, GETUTCDATE(), GETUTCDATE(), GETUTCDATE(), 1);
 SELECT @id;", codigo, nome, cnpj, tenant).SingleAsync();
     }
 
-    private static async Task ContratoAsync(int agencia, int cliente, DateTime expiracao)
+    internal static async Task ContratoAsync(int agencia, int cliente, DateTime expiracao)
     {
         using var ctx = new VeiculandoDataContext();
         await ctx.Database.ExecuteSqlCommandAsync(@"
