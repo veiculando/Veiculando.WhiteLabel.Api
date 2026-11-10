@@ -30,7 +30,7 @@ internal static class SnapsSupportProxyRoutes
         chatSession = method == "POST" && Chat.IsMatch(suffix);
         return method switch
         {
-            "GET" => suffix is "/support" or "/cards" || Card.IsMatch(suffix),
+            "GET" => suffix == "/support" || Card.IsMatch(suffix),
             "POST" => suffix is "/cards" or "/support/upload" or "/support/chats" || chatSession,
             "PATCH" => Card.IsMatch(suffix) || Status.IsMatch(suffix),
             _ => false

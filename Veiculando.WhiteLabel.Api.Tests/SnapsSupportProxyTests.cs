@@ -87,7 +87,6 @@ public sealed class SnapsSupportProxyTests
 
     [Theory]
     [InlineData("GET", "/support", false)]
-    [InlineData("GET", "/cards", false)]
     [InlineData("POST", "/cards", false)]
     [InlineData("GET", Card, false)]
     [InlineData("PATCH", Card, false)]
@@ -133,6 +132,7 @@ public sealed class SnapsSupportProxyTests
     }
 
     [Theory]
+    [InlineData("GET", "/cards")]
     [InlineData("GET", "/docs")]
     [InlineData("GET", "/roadmap")]
     [InlineData("GET", "/costs/hours")]
