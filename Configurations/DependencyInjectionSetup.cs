@@ -143,6 +143,12 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             {
                 client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
             });
+            // Arte final do App (VEI-RD-166a): mesma rota upload/conteudo do Core, até 25 MB.
+            services.AddHttpClient<IArteFinalFileServer, FileServerArteFinal>(client =>
+            {
+                client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
+                client.Timeout = TimeSpan.FromSeconds(120);
+            });
             services.AddHttpClient<IFotoPecaFileServer, FileServerFotoPeca>(client =>
             {
                 client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
