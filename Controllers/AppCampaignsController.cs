@@ -35,9 +35,10 @@ public sealed class AppCampaignsController : ControllerBase
 
     private readonly VeiculandoDataContext _db;
     private readonly AppCampanhasEscopo _escopo;
+    private readonly ProducaoCampanhaApp _producao;
 
-    public AppCampaignsController(VeiculandoDataContext db, AppCampanhasEscopo escopo)
-        => (_db, _escopo) = (db, escopo);
+    public AppCampaignsController(VeiculandoDataContext db, AppCampanhasEscopo escopo, ProducaoCampanhaApp producao)
+        => (_db, _escopo, _producao) = (db, escopo, producao);
 
     /// <param name="clienteId">Cliente escolhido no gateway. Fora do conjunto da sessão → 404.</param>
     [HttpGet]
@@ -176,6 +177,43 @@ public sealed class AppCampaignsController : ControllerBase
                     : campanha.Status == StatusCampanhaEnum.Checking ? "parcial" : "indisponivel"
             }
         });
+    }
+
+    /// <summary>
+    /// Aba Produção (VEI-RD-165a): peças a produzir, por suporte e formato, só desta exibidora.
+    /// </summary>
+    /// <param name="filtro">1 aprovados (padrão); 2 aprovados e em andamento; 3 com simulações.</param>
+    [HttpGet("{code}/producao")]
+    public async Task<IActionResult> Producao(string code, [FromQuery] int filtro = 1, CancellationToken ct = default)
+    {
+        var (erro, campanha, _) = await CampanhaDaProducaoAsync(code, filtro, ct);
+        if (erro != null) return erro;
+        return Ok(await _producao.ListarAsync(campanha, filtro, ct));
+    }
+
+    /// <summary>PDF da aba Produção, gerado no BFF (o relatório do FileServer não recorta tenant).</summary>
+    [HttpGet("{code}/producao/pdf")]
+    public async Task<IActionResult> ProducaoPdf(string code, [FromQuery] int filtro = 1, CancellationToken ct = default)
+    {
+        var (erro, campanha, nome) = await CampanhaDaProducaoAsync(code, filtro, ct);
+        if (erro != null) return erro;
+        var linhas = await _producao.ListarAsync(campanha, filtro, ct);
+        return File(ProducaoCampanhaApp.GerarPdf(code, nome, filtro, linhas), "application/pdf", $"Producao-{code}.pdf");
+    }
+
+    private async Task<(IActionResult Erro, IQueryable<Domain.Entities.Campanha> Campanha, string Nome)> CampanhaDaProducaoAsync(
+        string code, int filtro, CancellationToken ct)
+    {
+        if (!TryUser(out var userId)) return (Unauthorized(), null, null);
+        if (!CodigoValido(code)) return (NotFound(new { message = NaoEncontrada }), null, null);
+        if (!ProducaoCampanhaApp.Filtros.ContainsKey(filtro))
+            return (BadRequest(new { message = "Filtro de status inválido. Use 1, 2 ou 3." }), null, null);
+        var escopo = await _escopo.ResolverAsync(User, userId, MensagemSemKyc, ct);
+        if (escopo.StatusErro.HasValue) return (Erro(escopo), null, null);
+
+        var daCampanha = escopo.MinhasCampanhas.Where(c => c.Codigo == code);
+        var nome = await daCampanha.Select(c => c.Nome).FirstOrDefaultAsync(ct);
+        return nome == null ? (NotFound(new { message = NaoEncontrada }), null, null) : (null, daCampanha, nome);
     }
 
     /// <summary>

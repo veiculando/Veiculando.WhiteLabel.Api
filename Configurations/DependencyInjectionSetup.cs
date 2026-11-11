@@ -107,6 +107,7 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             services.AddScoped<Services.AnuncianteDaCasaProvisionamento>();
             services.AddScoped<Services.CarteiraProspeccao>();
             services.AddScoped<Services.AppCampanhasEscopo>();
+            services.AddScoped<Services.ProducaoCampanhaApp>();
 
             // Segunda camada de limite do esqueci-senha, por hash do e-mail e
             // independente de IP (ver PasswordResetAttemptGuard). Singleton: o
