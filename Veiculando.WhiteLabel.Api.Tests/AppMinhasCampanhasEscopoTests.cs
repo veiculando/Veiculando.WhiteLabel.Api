@@ -342,7 +342,7 @@ INSERT AgenciaCliente (IdAgencia, IdCliente, ComissaoAgencia, DataInicioContrato
 VALUES (@p0, @p1, 0, DATEADD(year, -1, GETUTCDATE()), @p2, GETUTCDATE(), GETUTCDATE(), 1);", agencia, cliente, expiracao);
     }
 
-    private static async Task<int> CampanhaAsync(string codigo, int agencia, int responsavel, int cliente,
+    internal static async Task<int> CampanhaAsync(string codigo, int agencia, int responsavel, int cliente,
         StatusCampanhaEnum status, decimal? verba)
     {
         using var ctx = new VeiculandoDataContext();
@@ -357,7 +357,7 @@ SELECT CAST(SCOPE_IDENTITY() AS int);", agencia, responsavel, cliente, codigo, (
     }
 
     /// <summary>Pedido no período 1 do seed (hoje a hoje+14).</summary>
-    private static async Task<int> PedidoAsync(int campanha, string codigo, StatusPedidoEnum status)
+    internal static async Task<int> PedidoAsync(int campanha, string codigo, StatusPedidoEnum status)
     {
         using var ctx = new VeiculandoDataContext();
         return await ctx.Database.SqlQuery<int>(@"
@@ -370,7 +370,7 @@ VALUES (0, @p0, 1, 1, 1, @p1, @p2, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
 SELECT CAST(SCOPE_IDENTITY() AS int);", campanha, codigo, (int)status).SingleAsync();
     }
 
-    private static async Task ItemAsync(int pedido, int peca, StatusPedidoItemEnum status, decimal valor)
+    internal static async Task ItemAsync(int pedido, int peca, StatusPedidoItemEnum status, decimal valor)
     {
         using var ctx = new VeiculandoDataContext();
         await ctx.Database.ExecuteSqlCommandAsync(@"
