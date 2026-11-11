@@ -229,21 +229,9 @@ UPDATE dbo.AgenciaCliente SET ComissaoAgencia = @p0, DataInicioContrato = @p1, D
         return Ok(new { id = representacao.Id, status = representacao.Status.ToString() });
     }
 
-    /// <summary>
-    /// O cliente nasceu deste pedido e não é usado em mais nada: nenhum outro vínculo ativo,
-    /// nenhum contrato ativo com agência, nenhuma campanha e nenhuma carteira de vendedora.
-    /// </summary>
-    private async Task<bool> SoDoPedidoAsync(WlRepresentacao r, CancellationToken ct)
-    {
-        if (r.Origem != WlCarteiraOrigem.Cadastro) return false;
-        var id = r.ClienteId;
-        return !await _db.AfiliadaClientes.AnyAsync(v => v.IdCliente == id && v.IdAfiliada != r.AfiliadaId &&
-                   v.Status == StatusVinculoEnum.Ativo, ct)
-            && !await _db.AgenciaClientes.AnyAsync(l => l.IdCliente == id && l.StatusExibicao == StatusExibicaoEnum.Ativo, ct)
-            && !await _db.Campanhas.AnyAsync(c => c.IdCliente == id, ct)
-            && !await _db.WlCarteiraClientes.AnyAsync(c => c.ClienteId == id && c.Status != WlCarteiraStatus.Reprovado, ct)
-            && !await _db.WlRepresentacoes.AnyAsync(o => o.ClienteId == id && o.Id != r.Id && o.Status != WlCarteiraStatus.Reprovado, ct);
-    }
+    /// <summary>Regra única com a limpeza de rascunho (VEI-RD-167).</summary>
+    private Task<bool> SoDoPedidoAsync(WlRepresentacao r, CancellationToken ct) =>
+        RepresentacaoClienteCore.SoDoPedidoAsync(_db, r, ct);
 
     private Task<WlRepresentacao> CarregarAsync(Guid id, CancellationToken ct) =>
         _db.WlRepresentacoes.Include(r => r.Documentos)
