@@ -33,6 +33,10 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         /// <summary>Fotos de peça gravadas por <c>upload/peca-foto</c>, por nome.</summary>
         public Dictionary<string, byte[]> FotosPeca { get; } = new();
 
+        /// <summary>Arquivos gravados por <c>upload/conteudo</c>, pelo caminho salvo.</summary>
+        public Dictionary<string, byte[]> Conteudos { get; } = new();
+        /// <summary>Faz <c>upload/conteudo</c> responder 400.</summary>
+        public bool FalharUploadConteudo { get; set; }
         /// <summary>Faz <c>upload/peca-foto</c> responder 500.</summary>
         public bool FalharUploadFoto { get; set; }
 
@@ -47,6 +51,38 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
 
             if (Responder != null)
                 return Responder(url);
+
+            // Arte final (VEI-RD-166a): upload/conteudo grava com o caminho do nome do arquivo.
+            if (request.Method == HttpMethod.Post && url.EndsWith("upload/conteudo"))
+            {
+                if (FalharUploadConteudo) return new HttpResponseMessage(HttpStatusCode.BadRequest);
+                string salvo = null;
+                foreach (var parte in (MultipartFormDataContent)request.Content!)
+                {
+                    var nome = parte.Headers.ContentDisposition?.FileName?.Trim('"');
+                    if (nome == null) continue;
+                    salvo = nome.Replace(" ", "-").ToLowerInvariant();
+                    Conteudos[salvo] = await parte.ReadAsByteArrayAsync(cancellationToken);
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent($"{{\"filePath\":\"conteudo/{salvo}\",\"size\":1}}")
+                };
+            }
+            const string arte = "conteudo/arte-final/";
+            var j = url.IndexOf(arte, StringComparison.Ordinal);
+            if (j >= 0)
+            {
+                var chave = Uri.UnescapeDataString(url[(j + "conteudo/".Length)..]);
+                if (!Conteudos.TryGetValue(chave, out var bytes)) return new HttpResponseMessage(HttpStatusCode.NotFound);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(bytes)
+                    {
+                        Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf") }
+                    }
+                };
+            }
 
             // Mesma rota e mesmo campo que o FileServer do Core aceita.
             if (request.Method == HttpMethod.Post && url.EndsWith("upload/peca-foto"))

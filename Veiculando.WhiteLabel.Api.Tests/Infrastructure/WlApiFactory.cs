@@ -156,6 +156,11 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                         client.BaseAddress = new Uri("http://fileserver.invalido/");
                     })
                     .ConfigurePrimaryHttpMessageHandler(() => FileServer);
+                services.AddHttpClient<IArteFinalFileServer, FileServerArteFinal>(client =>
+                    {
+                        client.BaseAddress = new Uri("http://fileserver.invalido/");
+                    })
+                    .ConfigurePrimaryHttpMessageHandler(() => FileServer);
                 services.AddHttpClient<IFotoPecaFileServer, FileServerFotoPeca>(client =>
                     {
                         client.BaseAddress = new Uri("http://fileserver.invalido/");
