@@ -305,8 +305,8 @@ public sealed class AppClientsController : ControllerBase
         return Ok(new
         {
             perfil = escopo.Perfil,
-            // Adicionar anunciante (§10.6) é do VEI-RD-71m, fora desta entrega.
-            podeAdicionarAnunciante = false,
+            // VEI-RD-67d: só a agência adiciona anunciante (AppAnunciantesController).
+            podeAdicionarAnunciante = escopo.Perfil == "agencia",
             clientes
         });
     }
