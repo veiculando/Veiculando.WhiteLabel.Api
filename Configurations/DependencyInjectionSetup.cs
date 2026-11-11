@@ -166,6 +166,7 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             services.AddHostedService<WlUploadReconciler>();
             // VEI-RD-161: rascunho da carteira parado não deixa Cliente ativo no Core.
             services.AddScoped<CarteiraRascunhoLimpeza>();
+            services.AddScoped<RepresentacaoRascunhoLimpeza>();
             services.AddHostedService<CarteiraRascunhoAgendador>();
 
             // CMS da Aurum (VEI-RD-19). Sem Cms:SupabaseUrl e Cms:ServiceRoleKey, ou

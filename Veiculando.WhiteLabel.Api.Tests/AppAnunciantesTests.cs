@@ -12,6 +12,7 @@ using FluentAssertions;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Entities.WhiteLabel;
 using Veiculando.Domain.Enums;
+using Veiculando.WhiteLabel.Api.Services;
 using Veiculando.WhiteLabel.Api.Tests.Infrastructure;
 using Xunit;
 using M = Veiculando.WhiteLabel.Api.Tests.AppMinhasCampanhasEscopoTests;
@@ -219,6 +220,68 @@ public sealed class AppAnunciantesTests
             contrato.ComissaoAgencia.Should().Be(0.07m);
             contrato.DataExpiracaoContrato.Should().Be(DateTime.UtcNow.Date.AddYears(2));
         }
+    }
+
+    [Fact]
+    public async Task Rascunho_abandonado_inativa_o_cliente_novo_e_a_aprovacao_da_retomada_reativa()
+    {
+        const int tenant = 8946;
+        var (app, factory, _) = await AgenciaLogadaAsync(tenant, "an-ag-8946@exemplo.com", 9);
+        using var _f = factory;
+        await Seed.OperadorAsync(tenant, "gestor-8946@exemplo.com", new[] { "ClienteGerenciar" }, nome: "Gestora");
+        var gestor = await factory.ClienteAutenticadoAsync("gestor-8946@exemplo.com", Seed.SenhaPadrao);
+
+        // Abandonado há mais que o prazo, recente, e solicitação de cliente que já era da exibidora.
+        var abandonado = await CriarAsync(app, Pedido(ProspeccaoCarteiraTests.Cnpj(tenant, 1)));
+        var recente = await CriarAsync(app, Pedido(ProspeccaoCarteiraTests.Cnpj(tenant, 2)));
+        var cnpjExistente = ProspeccaoCarteiraTests.Cnpj(tenant, 3);
+        var existente = await M.ClienteAsync(tenant, "E8946", "Cliente Existente", cnpjExistente);
+        var solicitacao = await CriarAsync(app, new { cnpj = cnpjExistente, comissaoAgencia = 10m });
+        solicitacao.GetProperty("origem").GetString().Should().Be("Solicitacao");
+        await EnvelhecerAsync(abandonado.GetProperty("id").GetGuid(), RepresentacaoRascunhoLimpeza.DiasPadrao + 1);
+        await EnvelhecerAsync(recente.GetProperty("id").GetGuid(), RepresentacaoRascunhoLimpeza.DiasPadrao - 1);
+        await EnvelhecerAsync(solicitacao.GetProperty("id").GetGuid(), RepresentacaoRascunhoLimpeza.DiasPadrao + 30);
+
+        (await LimparAsync()).Should().BeGreaterThanOrEqualTo(1);
+        var clienteAbandonado = abandonado.GetProperty("clienteId").GetInt32();
+        (await StatusClienteAsync(clienteAbandonado)).Should()
+            .Be(StatusExibicaoEnum.Inativo, "pedido de cliente novo nunca enviado não deixa cliente ativo no Core (VEI-RD-167)");
+        (await StatusClienteAsync(recente.GetProperty("clienteId").GetInt32())).Should().Be(StatusExibicaoEnum.Ativo, "ainda no prazo");
+        (await StatusClienteAsync(existente)).Should().Be(StatusExibicaoEnum.Ativo, "o cliente já existia antes do pedido");
+
+        // A agência retoma o mesmo pedido; aprovado, o cliente volta a valer e entra na carteira.
+        var id = abandonado.GetProperty("id").GetGuid();
+        await AnexarOkAsync(app, id, WlRepresentacaoDocumento.TipoContratoSocial);
+        await AnexarOkAsync(app, id, WlRepresentacaoDocumento.TipoResponsavel);
+        await AnexarOkAsync(app, id, WlRepresentacaoDocumento.TipoCartaRepresentacao);
+        var enviado = await app.PostAsync($"{Rota}/{id}/enviar", null);
+        enviado.StatusCode.Should().Be(HttpStatusCode.OK, await enviado.Content.ReadAsStringAsync());
+        var aprovado = await gestor.PostAsync($"/api/wl/kyc/app/representacoes/{id}/aprovar", null);
+        aprovado.StatusCode.Should().Be(HttpStatusCode.OK, await aprovado.Content.ReadAsStringAsync());
+        (await StatusClienteAsync(clienteAbandonado)).Should().Be(StatusExibicaoEnum.Ativo);
+        (await M.JsonAsync(app, "/api/wl/app/clients")).GetProperty("clientes").EnumerateArray()
+            .Select(c => c.GetProperty("id").GetInt32()).Should().Contain(clienteAbandonado);
+
+        // Uma segunda passada não mexe em quem já foi enviado ou aprovado.
+        await LimparAsync();
+        (await StatusClienteAsync(clienteAbandonado)).Should().Be(StatusExibicaoEnum.Ativo);
+    }
+
+    private static Task<int> LimparAsync() =>
+        new RepresentacaoRascunhoLimpeza(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<RepresentacaoRascunhoLimpeza>.Instance).ExecutarAsync(DateTime.UtcNow, default);
+
+    private static async Task EnvelhecerAsync(Guid representacaoId, int dias)
+    {
+        using var db = new VeiculandoDataContext();
+        await db.Database.ExecuteSqlCommandAsync(
+            "UPDATE WL_Representacao SET AtualizadoEm = DATEADD(day, -@p0, GETUTCDATE()) WHERE Id = @p1", dias, representacaoId);
+    }
+
+    private static async Task<StatusExibicaoEnum> StatusClienteAsync(int clienteId)
+    {
+        using var db = new VeiculandoDataContext();
+        return (await db.Clientes.AsNoTracking().SingleAsync(x => x.Id == clienteId)).StatusExibicao;
     }
 
     private static async Task<Guid> EnviadoAsync(HttpClient app, object pedido, bool todos)

@@ -109,6 +109,8 @@ public sealed class CarteiraRascunhoAgendador : BackgroundService
             {
                 using var scope = _scopes.CreateScope();
                 await scope.ServiceProvider.GetRequiredService<CarteiraRascunhoLimpeza>().ExecutarAsync(DateTime.UtcNow, stoppingToken);
+                // VEI-RD-167: pedido de representação de cliente novo abandonado pela agência.
+                await scope.ServiceProvider.GetRequiredService<RepresentacaoRascunhoLimpeza>().ExecutarAsync(DateTime.UtcNow, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception error) { _logger.LogError(error, "WL_CARTEIRA_RASCUNHO_FALHOU; nova tentativa em 6 horas"); }
