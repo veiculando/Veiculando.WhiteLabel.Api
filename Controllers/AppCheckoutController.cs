@@ -86,11 +86,12 @@ public sealed class AppCheckoutController : ControllerBase
 
         var orders = BuildOrders(campaign, period, pieces, simulation: true);
         if (orders == null) return Conflict(new { message = "Não foi possível calcular a cotação com os dados comerciais atuais." });
-        var total = Money(orders.Sum(order => order.ValorTotalBruto));
-        if (total <= 0) return Conflict(new { message = "A cotação não possui valor válido." });
-
         var items = pieces.OrderBy(p => p.Id).Select(p => new QuoteItem(p.Id, p.Codigo,
             Money(orders.SelectMany(o => o.Itens).Single(i => i.IdPeca == p.Id).ValorBruto))).ToArray();
+        // VEI-SUP-42: o total é a soma dos itens já em centavos, que é o que o banco grava.
+        // Truncar a soma dos valores brutos dava 1 centavo a mais que os pedidos.
+        var total = TotalDosItens(orders);
+        if (total <= 0) return Conflict(new { message = "A cotação não possui valor válido." });
         var json = JsonSerializer.Serialize(items);
         // SQL Server datetime arredonda frações de segundo; persistir um instante
         // exato evita que a assinatura mude após ler a cotação do banco.
@@ -170,7 +171,7 @@ public sealed class AppCheckoutController : ControllerBase
             return Conflict(new { message = "Uma ou mais peças ficaram indisponíveis; solicite nova cotação." });
 
         var orders = BuildOrders(campaign, period, pieces, simulation: false);
-        if (orders == null || Money(orders.Sum(o => o.ValorTotalBruto)) != quote.ValorTotal ||
+        if (orders == null || TotalDosItens(orders) != quote.ValorTotal ||
             quotedItems.Any(i => !pieces.Any(p => p.Id == i.Id && p.Codigo == i.Code) ||
                 Money(orders.SelectMany(o => o.Itens).Single(item => item.IdPeca == i.Id).ValorBruto) != i.ServerPrice))
             return Conflict(new { message = "Preço ou disponibilidade alterados; solicite nova cotação." });
@@ -311,6 +312,10 @@ public sealed class AppCheckoutController : ControllerBase
     // Os valores do Pedido no Core são gravados em decimal(18,2) pelo EF6.
     // Alinhar a cotação à mesma escala evita assinar um total que muda ao persistir.
     private static decimal Money(decimal value) => decimal.Truncate(value * 100m) / 100m;
+
+    /// <summary>Soma dos itens em centavos (truncados, como o decimal(18,2) do PedidoItem grava).</summary>
+    internal static decimal TotalDosItens(IEnumerable<Pedido> orders) =>
+        orders.SelectMany(o => o.Itens).Sum(i => Money(i.ValorBruto));
 
     private static bool FixedEquals(string actual, string expected)
     {
