@@ -203,5 +203,4 @@
 # feature/main/vei-rd-67f-solicitacao-agencia do Core (WL_Representacao). Contem
 # 2c014ea5. RE-PIN OBRIGATORIO no commit de merge da PR do Core antes do merge aqui.
 # RE-PIN FINAL (VEI-RD-67f): 34d23ae0 e o commit de MERGE da PR Core #334 em main.
-# VEI-SUP-41: ff10fda9 e o commit de MERGE da PR Core #333 em main e contem 34d23ae0.
-ff10fda9803d33153b9c11aa97db8c8ac50c721b
+34d23ae0656946bdb1df99df498bcf3c029209fb
