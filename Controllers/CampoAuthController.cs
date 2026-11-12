@@ -226,6 +226,74 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             return Ok(RespostaEmail);
         }
 
+        private const int SenhaTamanhoMinimo = 8;
+
+        /// <summary>Conclui o convite de campo com o token do e-mail (aberto pelo app).</summary>
+        [AllowAnonymous]
+        [EnableRateLimiting(Startup.RateLimitRecuperacaoSenha)]
+        [HttpPost("primeiro-acesso/concluir")]
+        public async Task<IActionResult> ConcluirPrimeiroAcesso([FromBody] PrimeiroAcessoRequest request, CancellationToken ct)
+        {
+            const string erro = "Convite inválido, expirado ou já utilizado. Solicite um novo pelo app.";
+            var invalido = ValidarPedidoSenha(request?.Email, request?.Token, request?.NovaSenha);
+            if (invalido != null)
+                return invalido;
+
+            var email = request.Email.ToLowerInvariant().Trim();
+            var usuario = await _db.WlUsuariosOperador.FirstOrDefaultAsync(u =>
+                u.Email.Endereco == email
+                && u.AfiliadaId == _tenant.AfiliadaId
+                && u.StatusExibicao == StatusExibicaoEnum.Ativo, ct);
+            if (usuario == null || !usuario.ValidarTokenConvite(request.Token.Trim()))
+                return BadRequest(new { message = erro });
+
+            usuario.ConcluirPrimeiroAcesso(BC.HashPassword(request.NovaSenha.Trim()));
+            try { await _db.SaveChangesAsync(ct); }
+            catch (System.Data.Entity.Infrastructure.DbUpdateConcurrencyException)
+            {
+                return BadRequest(new { message = erro });
+            }
+            return Ok(new { message = "Senha criada. Entre com o seu e-mail e a nova senha." });
+        }
+
+        /// <summary>Troca a senha com o token de recuperação de campo.</summary>
+        [AllowAnonymous]
+        [EnableRateLimiting(Startup.RateLimitRecuperacaoSenha)]
+        [HttpPost("alterar-senha")]
+        public async Task<IActionResult> AlterarSenha([FromBody] AlterarSenhaRequest request, CancellationToken ct)
+        {
+            const string erro = "Link de recuperação inválido ou expirado. Peça outro pelo app.";
+            var invalido = ValidarPedidoSenha(request?.Email, request?.Token, request?.NovaSenha);
+            if (invalido != null)
+                return invalido;
+
+            var email = request.Email.ToLowerInvariant().Trim();
+            var usuario = await _db.WlUsuariosOperador.FirstOrDefaultAsync(u =>
+                u.Email.Endereco == email
+                && u.AfiliadaId == _tenant.AfiliadaId
+                && u.StatusExibicao == StatusExibicaoEnum.Ativo
+                && u.StatusConvite == StatusConviteWlEnum.Aceito, ct);
+            if (usuario == null || !usuario.ValidarTokenRecuperacao(request.Token.Trim()))
+                return BadRequest(new { message = erro });
+
+            usuario.AlterarSenha(BC.HashPassword(request.NovaSenha.Trim()));
+            try { await _db.SaveChangesAsync(ct); }
+            catch (System.Data.Entity.Infrastructure.DbUpdateConcurrencyException)
+            {
+                return BadRequest(new { message = erro });
+            }
+            return Ok(new { message = "Senha alterada. Entre com a nova senha." });
+        }
+
+        private IActionResult ValidarPedidoSenha(string email, string token, string novaSenha)
+        {
+            if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(novaSenha))
+                return BadRequest(new { message = "E-mail, token e nova senha são obrigatórios." });
+            if (novaSenha.Trim().Length < SenhaTamanhoMinimo)
+                return BadRequest(new { message = $"A senha precisa ter no mínimo {SenhaTamanhoMinimo} caracteres." });
+            return null;
+        }
+
         private LoginResponse Emitir(CampoLoginDecisao decisao, string email, string nome, int afiliadaId)
         {
             var claims = new List<Claim>

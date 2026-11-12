@@ -205,4 +205,6 @@
 # Traz a foto de peca do FileServer (#305, #307); contem dc13c3755e.
 # VEI-RD-154g: 0efc8c0b1f e o merge da PR Core #302 em sprint-16.0 (merge commit).
 # Traz HoraCampo e a migration AddHoraAparelhoAcaoCampo; contem 2a862b4c50.
-0efc8c0b1fe0cc46631659fc771867ab9f28833d
+# VEI-RD-155a: TEMPORARIO a4d3bb6c98, head da PR Core #342 (primeiro acesso e
+# troca de senha do WLUsuario_Operador). REFIXAR no merge commit da #342.
+a4d3bb6c986c3183d9aaee31c85174a8c2cf69cc
