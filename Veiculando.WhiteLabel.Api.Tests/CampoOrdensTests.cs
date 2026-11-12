@@ -282,7 +282,11 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
         pacote.GetProperty("total").GetInt32().Should().Be(2);
         var itens = pacote.GetProperty("itens").EnumerateArray().ToDictionary(o => o.GetProperty("id").GetInt32());
         itens.Keys.Should().BeEquivalentTo(new[] { pendente, iniciada });
-        itens[pendente].GetProperty("locais").GetArrayLength().Should().Be(0);
+        // Colador da pendente recebe os locais no pacote para iniciar offline (VEI-RD-132a);
+        // o detalhe online continua sem locais antes do inicio.
+        itens[pendente].GetProperty("locais")[0].GetProperty("pecas")[0].GetProperty("codigo").GetString().Should().Be("PCpac");
+        (await client.GetFromJsonAsync<JsonElement>($"/api/wl/campo/ordens/{pendente}")).GetProperty("locais")
+            .GetArrayLength().Should().Be(0);
         var pecaPacote = itens[iniciada].GetProperty("locais")[0].GetProperty("pecas")[0];
         pecaPacote.GetProperty("codigo").GetString().Should().Be("PCpac");
         pecaPacote.GetProperty("tipo").GetString().Should().NotBeNullOrEmpty();
