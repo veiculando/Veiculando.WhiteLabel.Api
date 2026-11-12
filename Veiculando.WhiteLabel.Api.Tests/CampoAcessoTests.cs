@@ -51,7 +51,7 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
     [Fact]
     public async Task Primeiro_acesso_pelo_link_do_app_cria_a_senha_e_permite_login()
     {
-        var email = $"campo-pa-{Guid.NewGuid():N}@exemplo.com";
+        var email = $"pa-{Guid.NewGuid().ToString("N")[..12]}@exemplo.com";
         await CriarOperadorWl(email, comSenha: false);
         using var factory = new WlApiFactory(_db, Afiliada);
         var client = factory.ClienteAnonimo();
@@ -81,7 +81,7 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
     [Fact]
     public async Task Esqueci_senha_pelo_link_do_app_troca_a_senha_uma_vez()
     {
-        var email = $"campo-es-{Guid.NewGuid():N}@exemplo.com";
+        var email = $"es-{Guid.NewGuid().ToString("N")[..12]}@exemplo.com";
         await CriarOperadorWl(email, comSenha: true);
         using var factory = new WlApiFactory(_db, Afiliada);
         var client = factory.ClienteAnonimo();
