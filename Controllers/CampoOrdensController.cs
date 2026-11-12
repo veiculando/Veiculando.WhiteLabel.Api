@@ -82,7 +82,9 @@ public sealed class CampoOrdensController : CampoControllerBase
         var erro = MontarFiltro(pedido, out var filtro);
         if (erro != null) return erro;
         var (ordens, total) = await Pagina(filtro, pedido, ct);
-        var itens = await Detalhes(ordens, ct);
+        // Iniciar offline (VEI-RD-132a): o colador recebe os locais da ordem pendente
+        // no pacote; o app so os mostra depois de iniciar.
+        var itens = await Detalhes(ordens, ct, locaisAntesDoInicio: true);
         return Ok(new { itens, total, tamanho = pedido.Tamanho, geradoEm = DateTimeOffset.UtcNow });
     }
 
@@ -140,9 +142,12 @@ public sealed class CampoOrdensController : CampoControllerBase
 
     // Pacote offline: as consultas sao feitas uma vez para a pagina inteira,
     // nao por ordem. O periodo anterior e consultado por periodo distinto.
-    private async Task<List<CampoOrdemDto>> Detalhes(List<OrdemServico> ordens, CancellationToken ct)
+    private async Task<List<CampoOrdemDto>> Detalhes(List<OrdemServico> ordens, CancellationToken ct,
+        bool locaisAntesDoInicio = false)
     {
-        var iniciadas = ordens.Where(o => o.DataInicio != null).ToList();
+        bool ComLocais(OrdemServico o) => o.DataInicio != null || (locaisAntesDoInicio
+            && o.Status == StatusOrdemServicoEnum.Pendente && o.EhColadorAtual(OperadorId));
+        var iniciadas = ordens.Where(ComLocais).ToList();
         var anteriores = new Dictionary<int, Periodo>();
         foreach (var periodo in iniciadas.Select(o => o.Periodo).GroupBy(p => p.Id).Select(g => g.First()))
             anteriores[periodo.Id] = await _db.Periodos.AsNoTracking()
@@ -188,7 +193,7 @@ public sealed class CampoOrdensController : CampoControllerBase
         return ordens.Select(ordem => {
             var resposta = CampoOrdensProjecao.Linha(ordem, OperadorId);
             resposta.Locais = Array.Empty<CampoLocalDto>();
-            if (ordem.DataInicio == null) return resposta;
+            if (!ComLocais(ordem)) return resposta;
             var anterior = anteriores[ordem.IdPeriodo];
             resposta.Locais = ordem.Pecas.OrderBy(p => p.Peca.Local.Codigo).ThenBy(p => p.Peca.Codigo)
                 .GroupBy(p => p.Peca.Local.Id).Select(g => {
