@@ -30,6 +30,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         private readonly VeiculandoDataContext _db;
         private readonly JwtSettings _jwtSettings;
         private readonly ITenantQueries _tenant;
+        private readonly ITenantContext _tenantContext;
         private readonly WlPublicLinks _publicLinks;
         private readonly IWlTenantResolver _tenantResolver;
         private readonly IWlPasswordEmailSender _emailSender;
@@ -57,6 +58,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             VeiculandoDataContext db,
             IOptions<JwtSettings> jwtSettings,
             ITenantQueries tenant,
+            ITenantContext tenantContext,
             WlPublicLinks publicLinks,
             IWlTenantResolver tenantResolver,
             IWlPasswordEmailSender emailSender,
@@ -66,6 +68,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             _db = db;
             _jwtSettings = jwtSettings.Value;
             _tenant = tenant;
+            _tenantContext = tenantContext;
             _publicLinks = publicLinks;
             _tenantResolver = tenantResolver;
             _emailSender = emailSender;
@@ -358,12 +361,17 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// </remarks>
         private LoginResponse EmitirSessao(WlUsuarioAfiliada usuario, int afiliadaId)
         {
-            var permissoes = usuario.ObterPermissoes();
+            var permissoes = usuario.ObterPermissoes()
+                .Select(perm => string.Equals(perm, AuthorizationSetup.SuporteGerenciar, StringComparison.OrdinalIgnoreCase)
+                    ? AuthorizationSetup.SuporteGerenciar : perm)
+                .Distinct()
+                .ToArray();
 
             var extraClaims = new List<Claim>
             {
                 new Claim("AfiliadaId", afiliadaId.ToString()),
                 new Claim("WlUsuarioId", usuario.Id.ToString()),
+                new Claim(AuthorizationSetup.ClaimHost, _tenantContext.Host),
             };
 
             foreach (var perm in permissoes)
