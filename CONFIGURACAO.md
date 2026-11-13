@@ -58,6 +58,17 @@ fechada (erro explícito, nunca default silencioso).
 A conta de um tenant novo entra como `SeedAccounts__<AfiliadaId>__*`, no compose e
 no Snaps. Nada mais muda no BFF.
 
+## Suporte Snaps
+
+O BFF usa as entradas globais compartilhadas com o Core em preview e produção.
+As duas variáveis são opcionais na subida. Se o par estiver ausente ou inválido,
+apenas o proxy de Suporte devolve 503.
+
+| Variável | Para quê |
+|---|---|
+| `GOVERNANCE_API_KEY` | Credencial de servidor do projeto para o proxy de Suporte. |
+| `GOVERNANCE_API_URL` | Origem HTTPS do Snaps, sem caminho, query ou fragmento. |
+
 ## A conta de serviço
 
 Escrita de local e peça é delegada à API do Core, autenticada como a conta de
