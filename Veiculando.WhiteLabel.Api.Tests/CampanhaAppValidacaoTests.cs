@@ -8,6 +8,34 @@ namespace Veiculando.WhiteLabel.Api.Tests
 {
     public class CampanhaAppValidacaoTests
     {
+        [Theory]
+        [InlineData(0)]
+        [InlineData(-1)]
+        public void Verba_zero_ou_negativa_e_campanha_sem_verba(int verba)
+        {
+            // O mapa do App manda budget 0 com o campo vazio (VEI-SUP-46).
+            var hoje = DateTime.UtcNow.Date;
+            var request = new CampanhaAppRequest
+            {
+                Name = "Campanha", Product = "Produto",
+                StartDate = hoje.AddDays(1), EndDate = hoje.AddDays(30), Budget = verba
+            };
+
+            CampanhaAppValidacao.Validar(request).Should().BeEmpty();
+            request.Budget.Should().BeNull();
+        }
+
+        [Fact]
+        public void Verba_informada_continua_com_minimo_e_passo()
+        {
+            var hoje = DateTime.UtcNow.Date;
+            CampanhaAppValidacao.Validar(new CampanhaAppRequest
+            {
+                Name = "Campanha", Product = "Produto",
+                StartDate = hoje.AddDays(1), EndDate = hoje.AddDays(30), Budget = 2_500m
+            }).Should().ContainSingle(d => d.Contains("múltipla de R$ 1.000"));
+        }
+
         [Fact]
         public void Valor_comprometido_sai_em_reais_mesmo_com_o_container_em_cultura_invariante()
         {

@@ -48,6 +48,10 @@ public static class CampanhaAppValidacao
             return details;
         }
 
+        // Verba ≤ 0 é "sem verba", como no Campanha.Update do Core. O mapa do App manda 0 com o
+        // campo vazio; normalizado aqui, criar e editar gravam null (VEI-SUP-46).
+        if (request.Budget <= 0) request.Budget = null;
+
         var nome = request.Name?.Trim();
         if (string.IsNullOrEmpty(nome)) details.Add("Informe o nome da Campanha.");
         else if (nome.Length < 3 || nome.Length > 100) details.Add("O nome da Campanha deve ter de 3 a 100 caracteres.");

@@ -113,6 +113,13 @@ public sealed class AppCheckoutTests
         pedido.FonteUsuarioId.Should().Be(pedido.Campanha.IdUsuarioAnunciante);
         (await ctx.PedidosReserva.CountAsync(r => r.Pedido.IdCampanha == 1 && r.Pedido.IdPeriodo == 892)).Should().Be(1);
         (await ctx.WlAppCheckoutSubmissions.CountAsync(s => s.QuoteId == quote.QuoteId)).Should().Be(1);
+
+        // VEI-SUP-42: o total cotado é a soma dos itens em centavos e bate com o que foi gravado.
+        var itensCotados = System.Text.Json.JsonDocument.Parse(
+            (await ctx.WlAppCheckoutQuotes.SingleAsync(q => q.Id == quote.QuoteId)).PecasJson).RootElement;
+        itensCotados.EnumerateArray().Sum(i => i.GetProperty("ServerPrice").GetDecimal()).Should().Be(quote.Total);
+        (await ctx.PedidoItens.Where(i => i.Pedido.IdCampanha == 1 && i.Pedido.IdPeriodo == 892).SumAsync(i => i.ValorBruto))
+            .Should().Be(quote.Total, "o valor dos pedidos gravados é o valor aceito na cotação");
     }
 
     [Fact]

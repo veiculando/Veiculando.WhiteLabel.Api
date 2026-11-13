@@ -19,7 +19,7 @@ RUN dotnet publish Veiculando.WhiteLabel.Api/Veiculando.WhiteLabel.Api.csproj \
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends curl \
+    && apt-get install --yes --no-install-recommends curl fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

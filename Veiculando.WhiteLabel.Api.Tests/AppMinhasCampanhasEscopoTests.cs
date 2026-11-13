@@ -122,7 +122,7 @@ public sealed class AppMinhasCampanhasEscopoTests
         // GET /clients e Minhas Campanhas usam o mesmo conjunto: o expirado sai dos dois.
         var clientes = await JsonAsync(app, "/api/wl/app/clients");
         clientes.GetProperty("perfil").GetString().Should().Be("agencia");
-        clientes.GetProperty("podeAdicionarAnunciante").GetBoolean().Should().BeFalse();
+        clientes.GetProperty("podeAdicionarAnunciante").GetBoolean().Should().BeTrue("VEI-RD-67d: a agência adiciona anunciante");
         clientes.GetProperty("clientes").EnumerateArray().Select(c => c.GetProperty("id").GetInt32()).Should().Equal(vigente);
         var lista = await JsonAsync(app, "/api/wl/app/campaigns");
         lista.EnumerateArray().Select(c => c.GetProperty("codigo").GetString())
@@ -162,6 +162,15 @@ public sealed class AppMinhasCampanhasEscopoTests
         await DeveSer400ComDetails(await app.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns",
             new { name = "Nova", product = "Produto", startDate = DateTime.UtcNow.Date.AddDays(1),
                 endDate = DateTime.UtcNow.Date.AddDays(8), budget = 500m, clientId = vigente }));
+
+        // VEI-SUP-43: criar para o cliente de contrato vencido recusa pelo contrato,
+        // não pela falta de responsável comercial.
+        var vencido = await app.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns",
+            new { name = "Nova", product = "Produto", startDate = DateTime.UtcNow.Date.AddDays(1),
+                endDate = DateTime.UtcNow.Date.AddDays(8), budget = 5_000m, clientId = expirado });
+        vencido.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await vencido.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("message").GetString()
+            .Should().Be("O contrato com este anunciante não está vigente.");
     }
 
     [Fact]
@@ -258,14 +267,14 @@ public sealed class AppMinhasCampanhasEscopoTests
 
     private static string Mascara(string c) => $"{c[..2]}.{c[2..5]}.{c[5..8]}/{c[8..12]}-{c[12..]}";
 
-    private static async Task<JsonElement> JsonAsync(HttpClient app, string url)
+    internal static async Task<JsonElement> JsonAsync(HttpClient app, string url)
     {
         var r = await app.GetAsync(url);
         r.StatusCode.Should().Be(HttpStatusCode.OK, await r.Content.ReadAsStringAsync());
         return JsonDocument.Parse(await r.Content.ReadAsStringAsync()).RootElement.Clone();
     }
 
-    private static async Task<HttpClient> LoginAsync(WlApiFactory factory, string email)
+    internal static async Task<HttpClient> LoginAsync(WlApiFactory factory, string email)
     {
         var client = factory.ClienteAnonimo();
         var response = await client.PostAsJsonAsync("/api/wl/app/auth/login", new { email, password = Seed.SenhaPadrao });
@@ -275,7 +284,7 @@ public sealed class AppMinhasCampanhasEscopoTests
         return client;
     }
 
-    private static async Task AprovarAsync(int tenant, string email, string tipo, string documento, int? agenciaId = null)
+    internal static async Task AprovarAsync(int tenant, string email, string tipo, string documento, int? agenciaId = null)
     {
         using var ctx = new VeiculandoDataContext();
         var user = await ctx.WlUsuariosAnunciante.SingleAsync(u => u.AfiliadaId == tenant && u.Email.Endereco == email);
@@ -291,7 +300,7 @@ public sealed class AppMinhasCampanhasEscopoTests
     }
 
     /// <summary>Agência com vínculo ativo na exibidora e o usuário Core responsável (mesmo e-mail do App).</summary>
-    private static async Task<(int Agencia, int Responsavel)> AgenciaAsync(int tenant, string cnpj, string email)
+    internal static async Task<(int Agencia, int Responsavel)> AgenciaAsync(int tenant, string cnpj, string email)
     {
         using var ctx = new VeiculandoDataContext();
         var agencia = await ctx.Database.SqlQuery<int>(@"
@@ -312,7 +321,7 @@ SELECT @id;", $"Responsavel {tenant}", email, agencia).SingleAsync();
         return (agencia, usuario);
     }
 
-    private static async Task<int> ClienteAsync(int tenant, string codigo, string nome, string cnpj)
+    internal static async Task<int> ClienteAsync(int tenant, string codigo, string nome, string cnpj)
     {
         using var ctx = new VeiculandoDataContext();
         return await ctx.Database.SqlQuery<int>(@"
@@ -324,7 +333,7 @@ VALUES (@p3, @id, 1, 1, GETUTCDATE(), GETUTCDATE(), GETUTCDATE(), 1);
 SELECT @id;", codigo, nome, cnpj, tenant).SingleAsync();
     }
 
-    private static async Task ContratoAsync(int agencia, int cliente, DateTime expiracao)
+    internal static async Task ContratoAsync(int agencia, int cliente, DateTime expiracao)
     {
         using var ctx = new VeiculandoDataContext();
         await ctx.Database.ExecuteSqlCommandAsync(@"
@@ -333,7 +342,7 @@ INSERT AgenciaCliente (IdAgencia, IdCliente, ComissaoAgencia, DataInicioContrato
 VALUES (@p0, @p1, 0, DATEADD(year, -1, GETUTCDATE()), @p2, GETUTCDATE(), GETUTCDATE(), 1);", agencia, cliente, expiracao);
     }
 
-    private static async Task<int> CampanhaAsync(string codigo, int agencia, int responsavel, int cliente,
+    internal static async Task<int> CampanhaAsync(string codigo, int agencia, int responsavel, int cliente,
         StatusCampanhaEnum status, decimal? verba)
     {
         using var ctx = new VeiculandoDataContext();
@@ -348,7 +357,7 @@ SELECT CAST(SCOPE_IDENTITY() AS int);", agencia, responsavel, cliente, codigo, (
     }
 
     /// <summary>Pedido no período 1 do seed (hoje a hoje+14).</summary>
-    private static async Task<int> PedidoAsync(int campanha, string codigo, StatusPedidoEnum status)
+    internal static async Task<int> PedidoAsync(int campanha, string codigo, StatusPedidoEnum status)
     {
         using var ctx = new VeiculandoDataContext();
         return await ctx.Database.SqlQuery<int>(@"
@@ -361,7 +370,7 @@ VALUES (0, @p0, 1, 1, 1, @p1, @p2, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
 SELECT CAST(SCOPE_IDENTITY() AS int);", campanha, codigo, (int)status).SingleAsync();
     }
 
-    private static async Task ItemAsync(int pedido, int peca, StatusPedidoItemEnum status, decimal valor)
+    internal static async Task ItemAsync(int pedido, int peca, StatusPedidoItemEnum status, decimal valor)
     {
         using var ctx = new VeiculandoDataContext();
         await ctx.Database.ExecuteSqlCommandAsync(@"

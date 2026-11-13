@@ -143,10 +143,13 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 (buyer.AgenciaId.HasValue && responsible.Agencia.Id != buyer.AgenciaId.Value) ||
                 (onboarding.TipoConta != "pj" && !await _db.AfiliadaAgencias.AnyAsync(link =>
                     link.IdAfiliada == _tenant.AfiliadaId && link.IdAgencia == responsible.Agencia.Id &&
-                    link.Status == StatusVinculoEnum.Ativo, ct)) ||
-                !client.AgenciasContratadas.AsQueryable()
-                    .Any(AppCampanhasEscopo.AgenciaClienteVigente(responsible.Agencia.Id, DateTime.UtcNow)))
+                    link.Status == StatusVinculoEnum.Ativo, ct)))
                 return Conflict(new { message = "O cadastro aprovado ainda não está associado a um responsável comercial habilitado." });
+            // Responsável ok, mas sem AgenciaCliente vigente (vencido ou ainda não
+            // iniciado): a recusa é pelo contrato, não pelo responsável (VEI-SUP-43).
+            if (!client.AgenciasContratadas.AsQueryable()
+                    .Any(AppCampanhasEscopo.AgenciaClienteVigente(responsible.Agencia.Id, DateTime.UtcNow)))
+                return Conflict(new { message = "O contrato com este anunciante não está vigente." });
 
             var campaign = new Campanha(responsible, client, request.Name.Trim(), request.Product.Trim(),
                 request.Job?.Trim(), request.StartDate.Date, request.EndDate.Date, request.Budget);
