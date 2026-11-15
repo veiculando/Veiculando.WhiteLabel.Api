@@ -133,6 +133,45 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
         ordem.Pecas.Single().DataColagem.Should().Be(Hora);
     }
 
+    // VEI-RD-171d: a ordem tem TimeStamp. Colagens simultaneas de pecas diferentes
+    // colidem no SaveChanges; o BFF recarrega e reaplica, e as duas valem.
+    [Fact]
+    public async Task Colagens_simultaneas_de_pecas_diferentes_aplicam_as_duas()
+    {
+        var (factory, client, op, peca) = await Preparar("sim");
+        using var f = factory; using var c = client;
+        int id, outra;
+        using (var ctx = new VeiculandoDataContext())
+        {
+            var primeira = await ctx.Pecas.Include(p => p.Local.Cidade).SingleAsync(p => p.Id == peca);
+            outra = await Seed.PecaAsync(primeira.Local.Id, "PAsim2");
+        }
+        await Seed.AfiliadaAsync(Afiliada);
+        using (var ctx = new VeiculandoDataContext())
+        {
+            var pecas = await ctx.Pecas.Include(p => p.Local.Cidade).Where(p => p.Id == peca || p.Id == outra).ToListAsync();
+            var ordem = new OrdemServico(await ctx.Afiliadas.FindAsync(Afiliada), await ctx.Periodos.FindAsync(1),
+                2000 + await ctx.OrdensServico.CountAsync(o => o.IdAfiliada == Afiliada),
+                new[] { pecas[0].Local.Cidade }, pecas, await ctx.Usuarios.FindAsync(1));
+            ordem.DefinirAtribuidos(op, op);
+            ctx.OrdensServico.Add(ordem);
+            await ctx.SaveChangesAsync();
+            id = ordem.Id;
+        }
+        (await client.PostAsJsonAsync($"/api/wl/campo/ordens/{id}/iniciar", Corpo(Guid.NewGuid())))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var respostas = await Task.WhenAll(new[] { peca, outra }.Select(p =>
+            client.PostAsJsonAsync($"/api/wl/campo/ordens/{id}/pecas/{p}/colagem", Corpo(Guid.NewGuid(), null, null))));
+
+        foreach (var r in respostas)
+            r.StatusCode.Should().Be(HttpStatusCode.OK, await r.Content.ReadAsStringAsync());
+        using var final = new VeiculandoDataContext();
+        var gravada = await final.OrdensServico.Include(o => o.Pecas).SingleAsync(o => o.Id == id);
+        gravada.Pecas.Should().OnlyContain(p => p.DataColagem != null);
+        gravada.Status.Should().Be(StatusOrdemServicoEnum.AguardandoFoto);
+    }
+
     [Fact]
     public async Task Recusa_por_historico_e_cancelada_sai_com_codigo_e_fica_registrada()
     {
