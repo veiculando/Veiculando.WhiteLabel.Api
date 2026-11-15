@@ -1,4 +1,7 @@
+using System;
 using System.Linq;
+using Veiculando.WhiteLabel.Api.Configurations;
+using Veiculando.WhiteLabel.Api.Services;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -23,7 +26,11 @@ namespace Veiculando.WhiteLabel.Api.Middleware
             if (!anonimo && protegido && context.User.Identity?.IsAuthenticated == true)
             {
                 var claim = context.User.FindFirst("AfiliadaId")?.Value;
-                if (!int.TryParse(claim, out var afiliadaId) || afiliadaId != tenant.AfiliadaId)
+                var wrongProxyHost = SnapsSupportProxyRoutes.IsProxy(context.Request.Path)
+                    && context.User.HasClaim(c => c.Type == "WlUsuarioId")
+                    && !string.Equals(context.User.FindFirst(AuthorizationSetup.ClaimHost)?.Value, tenant.Host,
+                        StringComparison.OrdinalIgnoreCase);
+                if (!int.TryParse(claim, out var afiliadaId) || afiliadaId != tenant.AfiliadaId || wrongProxyHost)
                 {
                     context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                     return;

@@ -205,4 +205,20 @@
 # Traz a foto de peca do FileServer (#305, #307); contem dc13c3755e.
 # VEI-RD-154g: 0efc8c0b1f e o merge da PR Core #302 em sprint-16.0 (merge commit).
 # Traz HoraCampo e a migration AddHoraAparelhoAcaoCampo; contem 2a862b4c50.
-0efc8c0b1fe0cc46631659fc771867ab9f28833d
+# VEI-RD-157 (Sprint 17.0): carteira da vendedora na Prospecção (WL_CarteiraCliente).
+# a3b266fe e o merge da PR Core #313 em sprint-17.0 e contem b1997e64. RE-PIN no
+# commit de promocao da sprint-17.0 para a main do Core, antes do merge na master.
+# Promocao sprint-17.0 -> main (06/11/2026): 2c014ea58b e o commit de MERGE da
+# PR Core #317 em main e contem a3b266fe. SHA de `gh pr view 317 --json mergeCommit`.
+# VEI-RD-67g/67h: pin TEMPORARIO em 906db272, topo da branch
+# feature/main/vei-rd-67f-solicitacao-agencia do Core (WL_Representacao). Contem
+# 2c014ea5. RE-PIN OBRIGATORIO no commit de merge da PR do Core antes do merge aqui.
+# RE-PIN FINAL (VEI-RD-67f): 34d23ae0 e o commit de MERGE da PR Core #334 em main.
+# VEI-RD-162: permissao SuporteGerenciar e compose do WL. RE-PIN no commit de
+# MERGE da PR Core #332 em main (merge commit, contem 22ea97fd). 58d6e7de vem
+# depois de 34d23ae0 na main e contem a #334: cobre VEI-RD-67 e VEI-RD-162.
+# SHA de `gh pr view 332 --json mergeCommit`.
+# VEI-RD-171i: sync master -> sprint-16.0 do BFF. 60970d5e e o commit de MERGE da PR
+# Core #346 em sprint-16.0 (merge commit): contem 0efc8c0b (sprint-16.0) e 58d6e7de (main,
+# SuporteGerenciar). SHA de `gh pr view 346 --json mergeCommit`.
+60970d5e0d36c832075dbcd02a442d0f8a173b78

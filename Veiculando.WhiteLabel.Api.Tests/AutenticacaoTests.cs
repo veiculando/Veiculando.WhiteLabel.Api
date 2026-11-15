@@ -1,4 +1,12 @@
+using System;
+using System.Collections.Generic;
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
+using System.Net.Http.Headers;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Veiculando.WhiteLabel.Api.Services;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Linq;
@@ -232,6 +240,63 @@ namespace Veiculando.WhiteLabel.Api.Tests
             var reenvio = await admin.PostAsJsonAsync($"/api/wl/usuarios/{pendente.Id}/reenviar-convite", new { });
             reenvio.StatusCode.Should().Be(HttpStatusCode.OK);
             factory.EmailSender.Convites.Should().ContainSingle();
+        }
+
+        [Fact]
+        public async Task Grant_de_suporte_libera_so_o_operador_designado_no_login_e_refresh()
+        {
+            const int tenant = Afiliada + 95;
+            const string adminEmail = "admin-suporte@example.invalid";
+            const string operadorEmail = "operador-suporte@example.invalid";
+            const string outroEmail = "outro-suporte@example.invalid";
+            const string rota = SnapsSupportProxyTests.Prefix + "/support";
+            var permissaoAnterior = new[] { "ConteudoGerenciar" };
+            await Seed.OperadorAsync(tenant, adminEmail, new[] { "UsuarioAfiliadaGerenciar" });
+            var operadorId = await Seed.OperadorAsync(tenant, operadorEmail, permissaoAnterior);
+            await Seed.OperadorAsync(tenant, outroEmail, permissaoAnterior);
+
+            using var upstream = new SnapsSupportProxyTests.UpstreamStub();
+            using var factory = new WlApiFactory(_db, tenant, configuracao: new Dictionary<string, string?>
+            {
+                ["GOVERNANCE_API_KEY"] = SnapsSupportProxyTests.ProxyFixture.ServerKey,
+                ["GOVERNANCE_API_URL"] = "https://snaps.invalid"
+            });
+            using var app = factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+                services.AddHttpClient(SnapsSupportProxyService.ClientName).ConfigurePrimaryHttpMessageHandler(() => upstream)));
+            using var client = app.CreateClient(new WebApplicationFactoryClientOptions
+            {
+                BaseAddress = new Uri("https://" + factory.Host)
+            });
+
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await Login(operadorEmail));
+            (await client.GetAsync(rota)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await Login(adminEmail));
+            using var update = await client.PutAsJsonAsync($"/api/wl/usuarios/{operadorId}",
+                new { Permissoes = new[] { "ConteudoGerenciar", "suportegerenciar" } });
+            update.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var token = await Login(operadorEmail);
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            (await client.GetAsync(rota)).StatusCode.Should().Be(HttpStatusCode.OK);
+            using var refresh = await client.PostAsync("/api/wl/auth/refresh", null);
+            refresh.StatusCode.Should().Be(HttpStatusCode.OK);
+            var refreshed = await refresh.Content.ReadFromJsonAsync<LoginResposta>();
+            refreshed!.Permissoes.Should().BeEquivalentTo("ConteudoGerenciar", "SuporteGerenciar");
+            new JwtSecurityTokenHandler().ReadJwtToken(refreshed.Token).Claims
+                .Where(claim => claim.Type == "permission").Select(claim => claim.Value)
+                .Should().BeEquivalentTo("ConteudoGerenciar", "SuporteGerenciar");
+
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await Login(outroEmail));
+            (await client.GetAsync(rota)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            upstream.Calls.Should().Be(1);
+
+            async Task<string> Login(string email)
+            {
+                using var response = await client.PostAsJsonAsync("/api/wl/auth/login", new { Email = email, Senha = Seed.SenhaPadrao });
+                response.StatusCode.Should().Be(HttpStatusCode.OK);
+                return (await response.Content.ReadFromJsonAsync<LoginResposta>())!.Token;
+            }
         }
 
         private sealed record LoginResposta(string Token, int ExpiresInMinutes, string Nome, string Email, string[] Permissoes);
