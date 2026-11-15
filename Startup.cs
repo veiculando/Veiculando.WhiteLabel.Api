@@ -10,6 +10,9 @@ using Microsoft.AspNetCore.HttpsPolicy;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Net;
+using System.Net.Http;
+using System.Threading;
+using Veiculando.WhiteLabel.Api.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -38,6 +41,16 @@ namespace Veiculando.WhiteLabel.Api
         {
             services.AddJwtLocalAuthentication(Configuration);
             services.AddDependencyInjectionSetup(Configuration);
+            services.AddTransient<SnapsSupportProxyService>();
+            services.AddSingleton<SnapsSupportProxyTiming>();
+            services.AddHttpClient(SnapsSupportProxyService.ClientName, client => client.Timeout = Timeout.InfiniteTimeSpan)
+                .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+                {
+                    AllowAutoRedirect = false,
+                    UseCookies = false,
+                    ActivityHeadersPropagator = null
+                })
+                .RemoveAllLoggers();
 
             services.Configure<ForwardedHeadersOptions>(options =>
             {
