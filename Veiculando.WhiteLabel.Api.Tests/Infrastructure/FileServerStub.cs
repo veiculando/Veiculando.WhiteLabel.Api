@@ -78,6 +78,19 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                 return new HttpResponseMessage(HttpStatusCode.OK);
             }
 
+            // Checking copiado por upload/conteudo (VEI-RD-171e/171j): le de volta o que foi gravado.
+            const string checking = "conteudo/checking/";
+            var k = url.IndexOf(checking, StringComparison.Ordinal);
+            if (request.Method == HttpMethod.Get && k >= 0
+                && Conteudos.TryGetValue(Uri.UnescapeDataString(url[(k + "conteudo/".Length)..]), out var gravado))
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(gravado)
+                    {
+                        Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg") }
+                    }
+                };
+
             const string fotos = "conteudo/pecas/fotos/";
             var i = url.IndexOf(fotos, StringComparison.Ordinal);
             if (i >= 0)

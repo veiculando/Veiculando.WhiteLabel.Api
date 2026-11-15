@@ -37,12 +37,15 @@ public sealed class UploadsController : WlCoreProxyControllerBase
     private readonly ILogger<UploadsController> _logger;
     private readonly IFotoPecaFileServer _fotoFileServer;
     private readonly FotoPecaTrava _fotoTrava;
+    private readonly CheckingFotoLegado _checkingLegado;
+    private readonly IWlArquivoLegado _arquivoLegado;
 
     public UploadsController(VeiculandoDataContext db, ITenantQueries tenant, IFileValidationService validation,
         IWlUploadStorage storage, WlUploadPipeline pipeline, WlUploadReferences references,
-        ISeedAccountResolver seed, ILogger<UploadsController> logger, IFotoPecaFileServer fotoFileServer, FotoPecaTrava fotoTrava)
-        => (_db, _tenant, _validation, _storage, _pipeline, _references, _seed, _logger, _fotoFileServer, _fotoTrava) =
-            (db, tenant, validation, storage, pipeline, references, seed, logger, fotoFileServer, fotoTrava);
+        ISeedAccountResolver seed, ILogger<UploadsController> logger, IFotoPecaFileServer fotoFileServer, FotoPecaTrava fotoTrava,
+        CheckingFotoLegado checkingLegado, IWlArquivoLegado arquivoLegado)
+        => (_db, _tenant, _validation, _storage, _pipeline, _references, _seed, _logger, _fotoFileServer, _fotoTrava, _checkingLegado, _arquivoLegado) =
+            (db, tenant, validation, storage, pipeline, references, seed, logger, fotoFileServer, fotoTrava, checkingLegado, arquivoLegado);
 
     [HttpPost("pecas/locais/{idLocal}/pecas/{pecaId}/foto")]
     [Authorize(Policy = AuthorizationSetup.PecaGerenciar)]
@@ -212,6 +215,7 @@ public sealed class UploadsController : WlCoreProxyControllerBase
             return StatusCode(503, new { message = "A conta de serviço da exibidora não está disponível. Nenhuma foto foi salva." });
         }
 
+        CheckingFoto gravada = null;
         return await ExecutarUpload(foto, "checking", idItemPI, 15 * 1024 * 1024, async file =>
         {
             using var transaction = _db.Database.BeginTransaction(System.Data.IsolationLevel.Serializable);
@@ -239,7 +243,10 @@ public sealed class UploadsController : WlCoreProxyControllerBase
             checkingItem.RegistrarFoto(evidence);
             await _db.SaveChangesAsync(ct);
             transaction.Commit();
-        }, ct);
+            gravada = evidence;
+        }, ct,
+        // VEI-RD-171j: copia para o FileServer legado, para as telas de checking do Core.
+        (file, bytes) => _checkingLegado.CopiarAsync(gravada.Id, idItemPI, gravada.UrlArquivo, bytes, file.ContentType, ct));
     }
 
     [HttpGet("pecas/locais/{idLocal}/pecas/{pecaId}/fotos")]
@@ -275,15 +282,26 @@ public sealed class UploadsController : WlCoreProxyControllerBase
             return NotFound(new { message = "Item de PI não encontrado." });
         var photos = await _db.CheckingFotos.AsNoTracking().Where(f => f.IdPedidoItem == idItemPI
             && f.CheckingItem.PedidoInsercaoItem.PedidoInsercao.IdAfiliada == _tenant.AfiliadaId
-            && f.UrlArquivo.StartsWith(WlUploadReferences.Prefix) && f.StatusExibicao != StatusExibicaoEnum.Deletado).ToListAsync(ct);
+            && f.StatusExibicao != StatusExibicaoEnum.Deletado).ToListAsync(ct);
         var result = new List<object>();
         try
         {
             foreach (var photo in photos)
             {
-                var key = photo.UrlArquivo.Substring(WlUploadReferences.Prefix.Length);
+                var caminho = CampoImagemCaminho.Checking(photo.UrlArquivo);
+                if (caminho == null) continue;
+                var downloadUrl = $"/api/wl/checking/item/{idItemPI}/fotos/{photo.Id}/arquivo";
+                // VEI-RD-171j: foto no FileServer legado (copiada pelo WL ou enviada pelo Core).
+                if (caminho.Value.Legado != null)
+                {
+                    result.Add(new { FileName = caminho.Value.Legado.Split('/')[^1], ContentType = CampoImagemCaminho.ContentType(caminho.Value.Legado),
+                        Size = (long)photo.TamanhoArquivo, Sha256 = (string)null, CreatedAt = photo.DataCadastro, downloadUrl,
+                        status = photo.Status.ToString() });
+                    continue;
+                }
+                var key = caminho.Value.ChaveWl;
                 if (!KeyBelongs(key, "checking", idItemPI)) throw new InvalidOperationException("Referência de evidência inconsistente.");
-                result.Add(Descriptor(await _storage.InfoAsync(key, ct), $"/api/wl/checking/item/{idItemPI}/fotos/{photo.Id}/arquivo", photo.Status.ToString()));
+                result.Add(Descriptor(await _storage.InfoAsync(key, ct), downloadUrl, photo.Status.ToString()));
             }
             return Ok(result);
         }
@@ -317,8 +335,19 @@ public sealed class UploadsController : WlCoreProxyControllerBase
             && f.CheckingItem.PedidoInsercaoItem.PedidoInsercao.IdAfiliada == _tenant.AfiliadaId
             && f.CheckingItem.PedidoInsercaoItem.PedidoInsercao.StatusExibicao == StatusExibicaoEnum.Ativo
             && f.StatusExibicao != StatusExibicaoEnum.Deletado, ct);
-        if (photo == null || !photo.UrlArquivo.StartsWith(WlUploadReferences.Prefix)) return NotFound();
-        var key = photo.UrlArquivo.Substring(WlUploadReferences.Prefix.Length);
+        var caminho = CampoImagemCaminho.Checking(photo?.UrlArquivo);
+        if (caminho == null) return NotFound();
+        if (caminho.Value.Legado != null)
+        {
+            CampoImagem imagem;
+            try { imagem = await _arquivoLegado.AbrirAsync(caminho.Value.Legado, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return StorageError(ex); }
+            if (imagem == null) return NotFound();
+            Response.Headers.CacheControl = "private, no-store";
+            Response.Headers["X-Content-Type-Options"] = "nosniff";
+            return File(imagem.Conteudo, imagem.ContentType, caminho.Value.Legado.Split('/')[^1]);
+        }
+        var key = caminho.Value.ChaveWl;
         if (!KeyBelongs(key, "checking", idItemPI)) return NotFound();
         return await Download(key, ct);
     }
@@ -342,7 +371,8 @@ public sealed class UploadsController : WlCoreProxyControllerBase
         return true;
     }
 
-    private async Task<IActionResult> ExecutarUpload(IFormFile foto, string kind, int id, long limit, Func<WlStoredFile, Task> commit, CancellationToken ct)
+    private async Task<IActionResult> ExecutarUpload(IFormFile foto, string kind, int id, long limit, Func<WlStoredFile, Task> commit, CancellationToken ct,
+        Func<WlStoredFile, byte[], Task> depois = null)
     {
         if (WlUsuarioId is not > 0) return Forbid();
         try
@@ -364,6 +394,7 @@ public sealed class UploadsController : WlCoreProxyControllerBase
             var file = new WlStoredFile(Key(kind, id, name), name, foto.ContentType, body.Length, hash, DateTimeOffset.UtcNow);
             await _pipeline.SaveAsync(file, body, WlUsuarioId.Value, () => commit(file),
                 () => _references.ExistsAsync(file.Key, CancellationToken.None), ct);
+            if (depois != null) await depois(file, body.ToArray());
             return Ok(new { message = "Foto salva. Recarregue a lista para conferir.", fileName = name, sha256 = hash, size = file.Size });
         }
         catch (DbUpdateConcurrencyException)

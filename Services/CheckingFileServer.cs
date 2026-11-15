@@ -55,3 +55,44 @@ namespace Veiculando.WhiteLabel.Api.Services
         }
     }
 }
+
+namespace Veiculando.WhiteLabel.Api.Services
+{
+    using System.Data.Entity;
+    using System.Linq;
+    using Microsoft.Extensions.Logging;
+    using Veiculando.Data.Contexts;
+
+    /// <summary>
+    /// VEI-RD-171e/171j: copia uma foto de checking já gravada com <c>wl-upload:</c> para o
+    /// FileServer legado e troca <c>CheckingFoto.UrlArquivo</c> pela URL pública. Roda depois
+    /// do banco (o FileServer não tem exclusão, então nunca sobra arquivo órfão). Falha do
+    /// FileServer não derruba a requisição: a foto segue no storage WL e fica no log.
+    /// </summary>
+    public sealed class CheckingFotoLegado
+    {
+        private readonly VeiculandoDataContext _db;
+        private readonly ICheckingFileServer _fileServer;
+        private readonly ILogger<CheckingFotoLegado> _logger;
+
+        public CheckingFotoLegado(VeiculandoDataContext db, ICheckingFileServer fileServer, ILogger<CheckingFotoLegado> logger) =>
+            (_db, _fileServer, _logger) = (db, fileServer, logger);
+
+        public async Task CopiarAsync(int idFoto, int idPedidoItem, string urlAtual, byte[] conteudo, string contentType,
+            CancellationToken ct)
+        {
+            try
+            {
+                var codigos = await _db.CheckingItens.AsNoTracking().Where(i => i.IdPedidoItem == idPedidoItem)
+                    .Select(i => new { Pi = i.PedidoInsercaoItem.PedidoInsercao.Codigo, Peca = i.Peca.Codigo }).SingleAsync(ct);
+                var url = await _fileServer.EnviarAsync(codigos.Pi, codigos.Peca, conteudo, contentType, DateTime.Now, ct);
+                await _db.Database.ExecuteSqlCommandAsync(
+                    "UPDATE CheckingFoto SET UrlArquivo = @p0 WHERE Id = @p1 AND UrlArquivo = @p2", ct, url, idFoto, urlAtual);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "CHECKING_FILESERVER_FALHOU foto={Foto} chave={Chave}", idFoto, urlAtual);
+            }
+        }
+    }
+}
