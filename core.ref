@@ -218,7 +218,7 @@
 # MERGE da PR Core #332 em main (merge commit, contem 22ea97fd). 58d6e7de vem
 # depois de 34d23ae0 na main e contem a #334: cobre VEI-RD-67 e VEI-RD-162.
 # SHA de `gh pr view 332 --json mergeCommit`.
-# VEI-RD-171i: sync master -> sprint-16.0 do BFF. Pin TEMPORARIO em d4d92972, topo da
-# branch sync/vei-rd-171a-main-sprint-16.0 do Core (PR #346): contem 0efc8c0b (sprint-16.0)
-# e 58d6e7de (main). RE-PIN OBRIGATORIO no commit de MERGE da #346 antes do merge aqui.
-d4d92972da4671558ea630c12f644dc825c8a9db
+# VEI-RD-171i: sync master -> sprint-16.0 do BFF. 60970d5e e o commit de MERGE da PR
+# Core #346 em sprint-16.0 (merge commit): contem 0efc8c0b (sprint-16.0) e 58d6e7de (main,
+# SuporteGerenciar). SHA de `gh pr view 346 --json mergeCommit`.
+60970d5e0d36c832075dbcd02a442d0f8a173b78
