@@ -267,8 +267,13 @@ UPDATE Afiliada SET IdUsuarioCadastro = NULL, Nome = N'AURUM',
             login.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         }
 
+        /// <summary>
+        /// VEI-RD-157 (P4): na Prospecção não existe mais venda "da casa". O pedido sai para um
+        /// cliente da carteira aprovada da vendedora, na mesma cadeia de venda direta e com a
+        /// mesma trilha do operador que este teste sempre protegeu.
+        /// </summary>
         [Fact]
-        public async Task Pedido_da_casa_sai_com_a_trilha_do_operador_na_cadeia_de_venda_direta()
+        public async Task Pedido_da_prospeccao_sai_com_cliente_da_carteira_e_a_trilha_do_operador_na_venda_direta()
         {
             const int tenant = 8976;
             const string cnpj = "22333444000162";
@@ -288,15 +293,26 @@ UPDATE Afiliada SET IdUsuarioCadastro = NULL, Nome = N'AURUM',
             var login = (await resgate.Content.ReadFromJsonAsync<Login>())!;
             app.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
-            var campanha = await app.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns", new
+            var daCasa = await app.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns", new
             {
                 name = "Campanha da casa", product = "Venda direta",
+                startDate = DateTime.UtcNow.Date.AddDays(1), endDate = DateTime.UtcNow.Date.AddDays(8)
+            });
+            daCasa.StatusCode.Should().Be(HttpStatusCode.BadRequest, "sem cliente da carteira não há venda na Prospecção");
+
+            var cadastro = await ProspeccaoCarteiraTests.CadastrarAsync(app, ProspeccaoCarteiraTests.Cnpj(tenant, 1));
+            await ProspeccaoCarteiraTests.EnviarComDocumentosAsync(app, cadastro.Id);
+            await ProspeccaoCarteiraTests.AprovarAsync(tenant, cadastro.Id);
+
+            var campanha = await app.PostAsJsonAsync("/api/wl/app/checkout/context/campaigns", new
+            {
+                name = "Campanha da carteira", product = "Venda direta", clientId = cadastro.ClienteId,
                 startDate = DateTime.UtcNow.Date.AddDays(1), endDate = DateTime.UtcNow.Date.AddDays(8)
             });
             campanha.StatusCode.Should().Be(HttpStatusCode.Created, await campanha.Content.ReadAsStringAsync());
             int campanhaId;
             using (var lookup = new VeiculandoDataContext())
-                campanhaId = (await lookup.Campanhas.SingleAsync(c => c.Nome == "Campanha da casa" && c.Cliente.Cnpj.Numero == cnpj)).Id;
+                campanhaId = (await lookup.Campanhas.SingleAsync(c => c.Nome == "Campanha da carteira" && c.IdCliente == cadastro.ClienteId)).Id;
 
             var cotacaoResposta = await app.PostAsJsonAsync("/api/wl/app/checkout/quote",
                 new { pieceIds = new[] { pecaId }, campaignId = campanhaId, periodCode = $"CSA{tenant}" });
@@ -312,6 +328,7 @@ UPDATE Afiliada SET IdUsuarioCadastro = NULL, Nome = N'AURUM',
             var pedido = await db.Pedidos.Include(p => p.Campanha).SingleAsync(p => p.IdCampanha == campanhaId);
             var agencia = await db.Agencias.SingleAsync(a => a.Cnpj.Numero == cnpj);
             pedido.Campanha.IdAgencia.Should().Be(agencia.Id, "o pedido entra na agência de venda direta da afiliada");
+            pedido.Campanha.IdCliente.Should().Be(cadastro.ClienteId, "o anunciante é o cliente da carteira, não a exibidora");
             pedido.FonteOrigem.Should().Be(FonteOrigemEnum.WhiteLabel);
             pedido.FonteAgenciaId.Should().Be(tenant);
             pedido.FonteUsuarioId.Should().Be(sessao.FonteUsuarioId, "a trilha identifica o operador que abriu a prospecção");

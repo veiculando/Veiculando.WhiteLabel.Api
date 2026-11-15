@@ -21,6 +21,7 @@ using Veiculando.Domain.Entities.WhiteLabel;
 using Veiculando.Domain.Enums;
 using Veiculando.Infra.Security;
 using Veiculando.WhiteLabel.Api.Middleware;
+using Veiculando.WhiteLabel.Api.Services;
 
 namespace Veiculando.WhiteLabel.Api.Controllers;
 
@@ -36,9 +37,11 @@ public sealed class AppCheckoutController : ControllerBase
     private readonly VeiculandoDataContext _db;
     private readonly ITenantQueries _tenant;
     private readonly JwtSettings _jwt;
+    private readonly CarteiraProspeccao _carteira;
 
-    public AppCheckoutController(VeiculandoDataContext db, ITenantQueries tenant, IOptions<JwtSettings> jwt)
-        => (_db, _tenant, _jwt) = (db, tenant, jwt.Value);
+    public AppCheckoutController(VeiculandoDataContext db, ITenantQueries tenant, IOptions<JwtSettings> jwt,
+        CarteiraProspeccao carteira)
+        => (_db, _tenant, _jwt, _carteira) = (db, tenant, jwt.Value, carteira);
 
     [HttpPost("quote")]
     [EnableRateLimiting(Startup.RateLimitEscrita)]
@@ -56,8 +59,10 @@ public sealed class AppCheckoutController : ControllerBase
             o.UsuarioId == userId && o.AfiliadaId == _tenant.AfiliadaId, ct);
         if (onboarding?.Status != WlAppKycStatus.Aprovado || string.IsNullOrWhiteSpace(onboarding.Documento))
             return StatusCode(403, new { message = "O cadastro deve estar aprovado para cotar." });
+        var sessao = await _carteira.ResolverAsync(User, buyer, ct);
+        if (sessao.Modo == ModoSessaoApp.Recusada) return StatusCode(403, new { message = SessaoApp.MensagemRecusada });
 
-        var campaign = await EligibleCampaign(onboarding, buyer, request.CampaignId).SingleOrDefaultAsync(ct);
+        var campaign = await EligibleCampaign(onboarding, buyer, request.CampaignId, sessao).SingleOrDefaultAsync(ct);
         if (campaign == null) return NotFound(new { message = "Campanha não encontrada para este anunciante e exibidora." });
         if (campaign.AnuncianteResponsavel?.Agencia == null)
             return Conflict(new { message = "A campanha não possui responsável comercial habilitado para pedidos." });
@@ -81,11 +86,12 @@ public sealed class AppCheckoutController : ControllerBase
 
         var orders = BuildOrders(campaign, period, pieces, simulation: true);
         if (orders == null) return Conflict(new { message = "Não foi possível calcular a cotação com os dados comerciais atuais." });
-        var total = Money(orders.Sum(order => order.ValorTotalBruto));
-        if (total <= 0) return Conflict(new { message = "A cotação não possui valor válido." });
-
         var items = pieces.OrderBy(p => p.Id).Select(p => new QuoteItem(p.Id, p.Codigo,
             Money(orders.SelectMany(o => o.Itens).Single(i => i.IdPeca == p.Id).ValorBruto))).ToArray();
+        // VEI-SUP-42: o total é a soma dos itens já em centavos, que é o que o banco grava.
+        // Truncar a soma dos valores brutos dava 1 centavo a mais que os pedidos.
+        var total = TotalDosItens(orders);
+        if (total <= 0) return Conflict(new { message = "A cotação não possui valor válido." });
         var json = JsonSerializer.Serialize(items);
         // SQL Server datetime arredonda frações de segundo; persistir um instante
         // exato evita que a assinatura mude após ler a cotação do banco.
@@ -145,7 +151,9 @@ public sealed class AppCheckoutController : ControllerBase
             return StatusCode(403, new { message = "O cadastro deve estar aprovado para fechar o pedido." });
         var buyer = await _tenant.UsuariosAnunciante.AsNoTracking().SingleOrDefaultAsync(u => u.Id == userId, ct);
         if (buyer == null) return Unauthorized();
-        var campaign = await EligibleCampaign(onboarding, buyer, quote.CampanhaId).SingleOrDefaultAsync(ct);
+        var sessao = await _carteira.ResolverAsync(User, buyer, ct);
+        if (sessao.Modo == ModoSessaoApp.Recusada) return StatusCode(403, new { message = SessaoApp.MensagemRecusada });
+        var campaign = await EligibleCampaign(onboarding, buyer, quote.CampanhaId, sessao).SingleOrDefaultAsync(ct);
         if (campaign?.AnuncianteResponsavel?.Agencia == null)
             return Conflict(new { message = "Campanha ou responsável comercial indisponível." });
         var period = await _db.Periodos.SingleOrDefaultAsync(p =>
@@ -163,7 +171,7 @@ public sealed class AppCheckoutController : ControllerBase
             return Conflict(new { message = "Uma ou mais peças ficaram indisponíveis; solicite nova cotação." });
 
         var orders = BuildOrders(campaign, period, pieces, simulation: false);
-        if (orders == null || Money(orders.Sum(o => o.ValorTotalBruto)) != quote.ValorTotal ||
+        if (orders == null || TotalDosItens(orders) != quote.ValorTotal ||
             quotedItems.Any(i => !pieces.Any(p => p.Id == i.Id && p.Codigo == i.Code) ||
                 Money(orders.SelectMany(o => o.Itens).Single(item => item.IdPeca == i.Id).ValorBruto) != i.ServerPrice))
             return Conflict(new { message = "Preço ou disponibilidade alterados; solicite nova cotação." });
@@ -222,7 +230,8 @@ public sealed class AppCheckoutController : ControllerBase
         return Content(receipt, "application/json");
     }
 
-    internal IQueryable<Campanha> EligibleCampaign(WlAppOnboarding onboarding, WlUsuarioAnunciante buyer, int campaignId)
+    internal IQueryable<Campanha> EligibleCampaign(WlAppOnboarding onboarding, WlUsuarioAnunciante buyer, int campaignId,
+        SessaoApp sessao)
     {
         var query = _db.Campanhas
         .Include(c => c.Cliente).Include(c => c.Agencia.ContratosCliente)
@@ -231,6 +240,17 @@ public sealed class AppCheckoutController : ControllerBase
             c.Status != StatusCampanhaEnum.Cancelada && c.Status != StatusCampanhaEnum.Aprovada &&
             c.Cliente.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId &&
                 v.Status == StatusVinculoEnum.Ativo));
+        // VEI-RD-157: a sessão de carteira vem antes do "ad", que é o tipo da casa.
+        if (sessao.Modo == ModoSessaoApp.Carteira)
+        {
+            if (!buyer.AgenciaId.HasValue) return query.Where(c => false);
+            var liberados = _carteira.ClientesLiberados(sessao.VendedorId, buyer.AgenciaId.Value);
+            return query.Where(c => c.IdAgencia == buyer.AgenciaId.Value && liberados.Contains(c.IdCliente) &&
+                c.AnuncianteResponsavel.Email.Endereco == buyer.Email.Endereco &&
+                c.Agencia.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId &&
+                    v.Status == StatusVinculoEnum.Ativo));
+        }
+        if (sessao.Modo != ModoSessaoApp.Comum) return query.Where(c => false);
         if (onboarding.TipoConta == "ad" && buyer.ClienteId.HasValue && buyer.AgenciaId.HasValue)
             return query.Where(c => c.IdCliente == buyer.ClienteId.Value && c.IdAgencia == buyer.AgenciaId.Value &&
                 c.AnuncianteResponsavel.Email.Endereco == buyer.Email.Endereco &&
@@ -292,6 +312,10 @@ public sealed class AppCheckoutController : ControllerBase
     // Os valores do Pedido no Core são gravados em decimal(18,2) pelo EF6.
     // Alinhar a cotação à mesma escala evita assinar um total que muda ao persistir.
     private static decimal Money(decimal value) => decimal.Truncate(value * 100m) / 100m;
+
+    /// <summary>Soma dos itens em centavos (truncados, como o decimal(18,2) do PedidoItem grava).</summary>
+    internal static decimal TotalDosItens(IEnumerable<Pedido> orders) =>
+        orders.SelectMany(o => o.Itens).Sum(i => Money(i.ValorBruto));
 
     private static bool FixedEquals(string actual, string expected)
     {

@@ -113,14 +113,21 @@ public sealed record WlUploadKey(int TenantId, string Kind, int ResourceId, stri
     /// <summary>Fotos de peça substituídas e PNGs originais, guardados antes da troca.</summary>
     public const string HistoricoPeca = "pecas-historico";
 
+    /// <summary>Documentos da carteira da vendedora na Prospecção (VEI-RD-157); o recurso é o cliente do Core.</summary>
+    public const string Carteira = "carteira";
+
+    /// <summary>Documentos do pedido de representação da agência (VEI-RD-67d); o recurso é o cliente do Core.</summary>
+    public const string Representacao = "representacao";
+
     public static WlUploadKey Parse(string key)
     {
         var match = System.Text.RegularExpressions.Regex.Match(key ?? "",
-            @"^tenant-([1-9][0-9]*)/(pecas|pecas-historico|checking|kyc)/([1-9][0-9]*)/(wl-[a-f0-9]{32}\.(?:jpg|png|pdf))$");
+            @"^tenant-([1-9][0-9]*)/(pecas|pecas-historico|checking|kyc|carteira|representacao)/([1-9][0-9]*)/(wl-[a-f0-9]{32}\.(?:jpg|png|pdf))$");
         if (!match.Success || !int.TryParse(match.Groups[1].Value, out var tenant) || !int.TryParse(match.Groups[3].Value, out var resource))
             throw new ArgumentException("Referência de upload inválida.");
-        if (match.Groups[2].Value != "kyc" && match.Groups[4].Value.EndsWith(".pdf", StringComparison.Ordinal))
-            throw new ArgumentException("Documento PDF pertence exclusivamente ao KYC.");
+        if (match.Groups[2].Value != "kyc" && match.Groups[2].Value != Carteira && match.Groups[2].Value != Representacao &&
+            match.Groups[4].Value.EndsWith(".pdf", StringComparison.Ordinal))
+            throw new ArgumentException("Documento PDF pertence exclusivamente ao KYC, à carteira e à representação.");
         return new(tenant, match.Groups[2].Value, resource, match.Groups[4].Value);
     }
 }
