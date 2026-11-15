@@ -231,6 +231,8 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
 
         // 154d: as duas URLs servem a imagem pelo BFF, sem expor o FileServer.
         factory.FileServer.Conteudo = new byte[] { 0xFF, 0xD8, 0xFF };
+        // O stub so serve arte-final gravada antes (VEI-RD-166a).
+        factory.FileServer.Conteudos["arte-final/cli/camp/privado-alta.jpg"] = new byte[] { 0xFF, 0xD8, 0xFF };
         foreach (var url in new[] { $"/api/wl/campo/imagens/checking/{fotoId}", $"/api/wl/campo/imagens/arte/{arteId}" })
         {
             var img = await client.GetAsync(url);
