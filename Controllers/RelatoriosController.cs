@@ -1,11 +1,15 @@
 using System;
+using System.Collections.Generic;
 using System.Data.Entity;
+using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Veiculando.Data.Contexts;
+using Veiculando.Domain.Entities.WhiteLabel;
 using Veiculando.Domain.Enums;
 using Veiculando.WhiteLabel.Api.Configurations;
 using Veiculando.WhiteLabel.Api.Middleware;
@@ -166,9 +170,125 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             return File(bytes, "text/csv", $"relatorio-financeiro-periodo-{periodoId}.csv");
         }
 
+        /// <summary>
+        /// Pedidos fechados na Prospecção, por vendedora (VEI-RD-157f).
+        /// </summary>
+        /// <remarks>
+        /// <para>A base é o evento <c>PedidoCriado</c> da Prospecção, que guarda o operador da
+        /// sessão e os códigos dos pedidos — e não <c>Pedido.FonteUsuarioId</c>, que fora da
+        /// Prospecção guarda o anunciante (peer review I2). O pedido fica com quem vendeu:
+        /// trocar a responsável pela carteira depois não o move.</para>
+        /// <para>Nomes de coluna estáveis: o arquivo deve servir de base para o SAP.</para>
+        /// </remarks>
+        [HttpGet("pedidos-por-vendedora")]
+        public async Task<IActionResult> PedidosPorVendedora([FromQuery] DateTime? de, [FromQuery] DateTime? ate,
+            [FromQuery] int? vendedorId)
+        {
+            var (linhas, erro) = await LinhasPorVendedoraAsync(de, ate, vendedorId);
+            if (erro != null) return BadRequest(new { message = erro });
+            return Ok(new
+            {
+                de = Inicio(de), ate = Fim(ate),
+                totalPedidos = linhas.Count,
+                valorBrutoTotal = linhas.Sum(l => l.ValorBruto),
+                porVendedora = linhas.GroupBy(l => new { l.VendedorId, l.Vendedora })
+                    .Select(g => new { g.Key.VendedorId, g.Key.Vendedora, pedidos = g.Count(), valorBruto = g.Sum(l => l.ValorBruto) })
+                    .OrderByDescending(g => g.valorBruto),
+                pedidos = linhas
+            });
+        }
+
+        [HttpGet("pedidos-por-vendedora/exportar")]
+        [Authorize(Policy = AuthorizationSetup.RelatorioExportar)]
+        public async Task<IActionResult> ExportarPedidosPorVendedora([FromQuery] DateTime? de, [FromQuery] DateTime? ate,
+            [FromQuery] int? vendedorId)
+        {
+            var (linhas, erro) = await LinhasPorVendedoraAsync(de, ate, vendedorId);
+            if (erro != null) return BadRequest(new { message = erro });
+            var csv = new StringBuilder();
+            csv.AppendLine("VendedoraId;Vendedora;Pedido;DataPedido;Cliente;CnpjCliente;Campanha;Periodo;ValorBruto;ValorLiquidoAnunciante;Status");
+            foreach (var l in linhas)
+                csv.AppendLine(string.Join(';',
+                    l.VendedorId.ToString(CultureInfo.InvariantCulture), CsvEscape(l.Vendedora), CsvEscape(l.Pedido),
+                    l.DataPedido.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture), CsvEscape(l.Cliente),
+                    l.CnpjCliente, CsvEscape(l.Campanha), CsvEscape(l.Periodo),
+                    l.ValorBruto.ToString("F2", CultureInfo.InvariantCulture),
+                    l.ValorLiquidoAnunciante.ToString("F2", CultureInfo.InvariantCulture), CsvEscape(l.Status)));
+            return File(Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray(), "text/csv",
+                $"pedidos-por-vendedora-{Inicio(de):yyyyMMdd}-{Fim(ate):yyyyMMdd}.csv");
+        }
+
+        public sealed record LinhaVendedora(int VendedorId, string Vendedora, string Pedido, DateTime DataPedido,
+            string Cliente, string CnpjCliente, string Campanha, string Periodo, decimal ValorBruto,
+            decimal ValorLiquidoAnunciante, string Status);
+
+        // VEI-SUP-40: o período é o dia de Brasília; os eventos são gravados em UTC.
+        private static readonly TimeZoneInfo Brasilia = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
+        private static DateTime Hoje() => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, Brasilia).Date;
+        private static DateTime Inicio(DateTime? de) => (de ?? new DateTime(Hoje().Year, Hoje().Month, 1)).Date;
+        private static DateTime Fim(DateTime? ate) => (ate ?? Hoje()).Date;
+        private static DateTime Utc(DateTime diaLocal) =>
+            TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(diaLocal, DateTimeKind.Unspecified), Brasilia);
+
+        /// <summary>Pedido que não conta para a vendedora (base de comissão): cancelado, revisado ou simulação.</summary>
+        private static readonly StatusPedidoEnum[] ForaDoRelatorio =
+            { StatusPedidoEnum.Cancelado, StatusPedidoEnum.Revisado, StatusPedidoEnum.Simulacao };
+
+        private async Task<(List<LinhaVendedora> Linhas, string Erro)> LinhasPorVendedoraAsync(DateTime? de, DateTime? ate, int? vendedorId)
+        {
+            var inicio = Inicio(de);
+            var fimExclusivo = Fim(ate).AddDays(1);
+            if (fimExclusivo <= inicio) return (null, "A data final deve ser igual ou posterior à inicial.");
+            if ((fimExclusivo - inicio).TotalDays > 366) return (null, "Escolha um intervalo de até um ano.");
+
+            var inicioUtc = Utc(inicio);
+            var fimUtc = Utc(fimExclusivo);
+            var eventos = await _tenant.ProspeccaoEventos.AsNoTracking()
+                .Where(e => e.Evento == WlProspeccaoEventoTipo.PedidoCriado && e.OcorridoEm >= inicioUtc && e.OcorridoEm < fimUtc &&
+                    (vendedorId == null || e.OperadorId == vendedorId))
+                .Select(e => new { e.OperadorId, e.CodigosPedido })
+                .ToListAsync();
+            var vendedoraPorPedido = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var e in eventos)
+            {
+                string[] codigos;
+                try { codigos = JsonSerializer.Deserialize<string[]>(e.CodigosPedido ?? "[]") ?? Array.Empty<string>(); }
+                catch (JsonException) { continue; }
+                foreach (var codigo in codigos.Where(c => !string.IsNullOrWhiteSpace(c))) vendedoraPorPedido[codigo] = e.OperadorId;
+            }
+            if (vendedoraPorPedido.Count == 0) return (new List<LinhaVendedora>(), null);
+
+            var codigosPedido = vendedoraPorPedido.Keys.ToList();
+            var pedidos = await _db.Pedidos.AsNoTracking()
+                .Where(p => codigosPedido.Contains(p.Codigo) && !ForaDoRelatorio.Contains(p.Status))
+                .Select(p => new
+                {
+                    p.Codigo, p.DataCadastro, p.Status, p.ValorTotalBruto, p.ValorLiquidoAnunciante,
+                    Cliente = p.Campanha.Cliente.Nome, Cnpj = p.Campanha.Cliente.Cnpj.Numero,
+                    Campanha = p.Campanha.Nome, Periodo = p.Periodo.Codigo
+                })
+                .ToListAsync();
+            var ids = vendedoraPorPedido.Values.Distinct().ToList();
+            var emails = await NomesUsuarioWl.ResolverAsync(_tenant, ids.Select(i => (int?)i), System.Threading.CancellationToken.None);
+
+            var linhas = pedidos
+                .Select(p =>
+                {
+                    var vendedora = vendedoraPorPedido[p.Codigo];
+                    return new LinhaVendedora(vendedora, emails.TryGetValue(vendedora, out var email) ? email : null,
+                        p.Codigo, p.DataCadastro, p.Cliente, CarteiraProspeccao.Digitos(p.Cnpj), p.Campanha, p.Periodo,
+                        p.ValorTotalBruto, p.ValorLiquidoAnunciante, p.Status.ToString());
+                })
+                .OrderBy(l => l.Vendedora).ThenBy(l => l.DataPedido)
+                .ToList();
+            return (linhas, null);
+        }
+
         private static string CsvEscape(string valor)
         {
             if (string.IsNullOrEmpty(valor)) return string.Empty;
+            // Célula que começa com = + - @ vira fórmula no Excel; o nome do cliente vem de cadastro feito no App.
+            if ("=+-@".IndexOf(valor[0]) >= 0) valor = "'" + valor;
             return valor.Contains(';') || valor.Contains('"')
                 ? $"\"{valor.Replace("\"", "\"\"")}\""
                 : valor;

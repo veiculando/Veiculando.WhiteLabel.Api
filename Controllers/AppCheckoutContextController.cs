@@ -1,5 +1,4 @@
 using System;
-using System.ComponentModel.DataAnnotations;
 using System.Data.Entity;
 using System.Linq;
 using System.Security.Claims;
@@ -13,6 +12,7 @@ using Veiculando.Domain.Entities;
 using Veiculando.Domain.Entities.WhiteLabel;
 using Veiculando.Domain.Enums;
 using Veiculando.WhiteLabel.Api.Middleware;
+using Veiculando.WhiteLabel.Api.Services;
 
 namespace Veiculando.WhiteLabel.Api.Controllers
 {
@@ -26,61 +26,43 @@ namespace Veiculando.WhiteLabel.Api.Controllers
     {
         private readonly VeiculandoDataContext _db;
         private readonly ITenantQueries _tenant;
+        private readonly CarteiraProspeccao _carteira;
+        private readonly AppCampanhasEscopo _escopo;
 
-        public AppCheckoutContextController(VeiculandoDataContext db, ITenantQueries tenant)
+        public AppCheckoutContextController(VeiculandoDataContext db, ITenantQueries tenant, CarteiraProspeccao carteira,
+            AppCampanhasEscopo escopo)
         {
             _db = db;
             _tenant = tenant;
+            _carteira = carteira;
+            _escopo = escopo;
         }
 
         [HttpGet]
         public async Task<IActionResult> Get(CancellationToken ct)
         {
             if (!TryUser(out var userId)) return Unauthorized();
-
-            var onboarding = await _db.WlAppOnboardings.AsNoTracking()
-                .SingleOrDefaultAsync(x => x.UsuarioId == userId && x.AfiliadaId == _tenant.AfiliadaId, ct);
-            if (onboarding == null || onboarding.Status != WlAppKycStatus.Aprovado || string.IsNullOrWhiteSpace(onboarding.Documento))
-                return StatusCode(403, new { message = "A aprovação do cadastro é necessária para escolher o contexto da compra." });
-            var buyer = await _tenant.UsuariosAnunciante.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId, ct);
-            if (buyer == null) return Unauthorized();
-            if ((onboarding.TipoConta == "ad" || onboarding.TipoConta == "ag") &&
-                (!buyer.AgenciaId.HasValue || !await _db.AfiliadaAgencias.AsNoTracking().AnyAsync(link =>
-                    link.IdAfiliada == _tenant.AfiliadaId && link.IdAgencia == buyer.AgenciaId.Value &&
-                    link.Status == StatusVinculoEnum.Ativo, ct)))
-                return StatusCode(403, new { message = "O vínculo da agência com a exibidora está inativo." });
+            var escopo = await _escopo.ResolverAsync(User, userId,
+                "A aprovação do cadastro é necessária para escolher o contexto da compra.", ct);
+            if (escopo.StatusErro.HasValue)
+                return escopo.StatusErro == 401
+                    ? Unauthorized()
+                    : StatusCode(escopo.StatusErro.Value, new { message = escopo.MensagemErro });
 
             var now = DateTime.UtcNow;
-            var query = _db.Campanhas.AsNoTracking()
-                .Include(x => x.Cliente)
-                .Where(x => x.StatusExibicao == StatusExibicaoEnum.Ativo &&
-                            x.Cliente.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId &&
-                                v.Status == StatusVinculoEnum.Ativo) &&
-                            x.Status != StatusCampanhaEnum.Cancelada && x.Status != StatusCampanhaEnum.Aprovada);
-            if (onboarding.TipoConta == "ag" && buyer.AgenciaId.HasValue)
-                query = query.Where(x => x.IdAgencia == buyer.AgenciaId.Value &&
-                    x.AnuncianteResponsavel.Email.Endereco == buyer.Email.Endereco);
-            else if (onboarding.TipoConta == "ad" && buyer.ClienteId.HasValue && buyer.AgenciaId.HasValue)
-                query = query.Where(x => x.IdCliente == buyer.ClienteId.Value && x.IdAgencia == buyer.AgenciaId.Value &&
-                    x.AnuncianteResponsavel.Email.Endereco == buyer.Email.Endereco);
-            else if (onboarding.TipoConta == "pj")
-                query = query.Where(x => x.Cliente.Cnpj.Numero == onboarding.Documento);
-            else return StatusCode(403, new { message = "Identidade comercial ainda não provisionada." });
-            var campanhas = await query
+            // O contexto da compra tira canceladas e aprovadas; Minhas Campanhas mostra como histórico.
+            var campanhas = await escopo.Campanhas
+                .Where(x => x.Status != StatusCampanhaEnum.Cancelada && x.Status != StatusCampanhaEnum.Aprovada)
                 .OrderByDescending(x => x.DataAtualizacao)
                 .Select(x => new { x.Id, x.Codigo, x.Nome, x.DataInicioPrevisto, x.DataFimPrevisto })
                 .ToListAsync(ct);
 
-            var clients = onboarding.TipoConta == "ag" && buyer.AgenciaId.HasValue
-                ? await _db.AgenciaClientes.AsNoTracking()
-                    .Where(link => link.IdAgencia == buyer.AgenciaId.Value &&
-                        link.StatusExibicao == StatusExibicaoEnum.Ativo &&
-                        link.DataInicioContrato <= now && link.DataExpiracaoContrato >= now &&
-                        link.Cliente.StatusExibicao == StatusExibicaoEnum.Ativo &&
-                        link.Cliente.AfiliadasVinculadas.Any(v => v.IdAfiliada == _tenant.AfiliadaId &&
-                            v.Status == StatusVinculoEnum.Ativo))
-                    .Select(link => new { id = link.IdCliente, name = link.Cliente.Nome }).ToListAsync(ct)
-                : null;
+            // Mesmo conjunto de clientes do GET /api/wl/app/clients (VEI-RD-67e). Anunciante direto
+            // não escolhe cliente na compra, então aqui continua sem lista.
+            var clients = escopo.Perfil == "anunciante_direto"
+                ? null
+                : await _db.Clientes.AsNoTracking().Where(c => escopo.Clientes.Contains(c.Id)).OrderBy(c => c.Nome)
+                    .Select(c => new { id = c.Id, name = c.Nome }).ToListAsync(ct);
 
             var periodos = await _db.Periodos.AsNoTracking()
                 .Where(x => x.StatusExibicao == StatusExibicaoEnum.Ativo && x.DataFim >= now)
@@ -112,11 +94,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         public async Task<IActionResult> CreateCampaign([FromBody] CreateCampaignRequest request, CancellationToken ct)
         {
             if (!TryUser(out var userId)) return Unauthorized();
-            if (request == null || string.IsNullOrWhiteSpace(request.Name) ||
-                string.IsNullOrWhiteSpace(request.Product) || request.EndDate.Date < request.StartDate.Date ||
-                request.EndDate.Date < DateTime.UtcNow.Date || request.EndDate.Date > DateTime.UtcNow.Date.AddYears(2) ||
-                request.Budget < 0)
-                return BadRequest(new { message = "Informe nome, produto e datas válidas para a campanha." });
+            // Mesma validação do PUT de Minhas Campanhas (VEI-RD-68e): 400 sempre com details.
+            var invalidos = CampanhaAppValidacao.Validar(request);
+            if (invalidos.Count > 0) return CampanhaAppValidacao.Erro(CampanhaAppValidacao.Mensagem, invalidos);
 
             var onboarding = await _db.WlAppOnboardings.AsNoTracking()
                 .SingleOrDefaultAsync(x => x.UsuarioId == userId && x.AfiliadaId == _tenant.AfiliadaId, ct);
@@ -128,12 +108,24 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             var buyer = await _tenant.UsuariosAnunciante.AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == userId, ct);
             if (buyer == null) return Unauthorized();
-            if (onboarding.TipoConta == "ag" && (!buyer.AgenciaId.HasValue || !request.ClientId.HasValue))
-                return BadRequest(new { message = "Selecione um anunciante representado por esta agência." });
+            var sessao = await _carteira.ResolverAsync(User, buyer, ct);
+            if (sessao.Modo == ModoSessaoApp.Recusada)
+                return StatusCode(403, new { message = SessaoApp.MensagemRecusada });
+            var carteira = sessao.Modo == ModoSessaoApp.Carteira;
+            if (carteira)
+            {
+                if (!buyer.AgenciaId.HasValue || !request.ClientId.HasValue)
+                    return CampanhaAppValidacao.Erro("Selecione um cliente da sua carteira.");
+                if (!await _carteira.ClientesLiberados(sessao.VendedorId, buyer.AgenciaId.Value)
+                        .AnyAsync(id => id == request.ClientId.Value, ct))
+                    return StatusCode(403, new { message = "Este cliente não está liberado na sua carteira." });
+            }
+            else if (onboarding.TipoConta == "ag" && (!buyer.AgenciaId.HasValue || !request.ClientId.HasValue))
+                return CampanhaAppValidacao.Erro("Selecione um anunciante representado por esta agência.");
             if (onboarding.TipoConta == "ad" && (!buyer.ClienteId.HasValue || !buyer.AgenciaId.HasValue))
                 return Conflict(new { message = "Identidade de venda direta ainda não provisionada." });
 
-            var desiredClientId = onboarding.TipoConta == "ag" ? request.ClientId : buyer.ClienteId;
+            var desiredClientId = carteira || onboarding.TipoConta == "ag" ? request.ClientId : buyer.ClienteId;
             var client = await _db.Clientes.Include(x => x.AgenciasContratadas)
                 .SingleOrDefaultAsync(x =>
                     (onboarding.TipoConta == "pj" ? x.Cnpj.Numero == onboarding.Documento : x.Id == desiredClientId) &&
@@ -151,30 +143,27 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                 (buyer.AgenciaId.HasValue && responsible.Agencia.Id != buyer.AgenciaId.Value) ||
                 (onboarding.TipoConta != "pj" && !await _db.AfiliadaAgencias.AnyAsync(link =>
                     link.IdAfiliada == _tenant.AfiliadaId && link.IdAgencia == responsible.Agencia.Id &&
-                    link.Status == StatusVinculoEnum.Ativo, ct)) ||
-                !client.AgenciasContratadas.Any(link =>
-                link.IdAgencia == responsible.Agencia.Id && link.StatusExibicao == StatusExibicaoEnum.Ativo &&
-                link.DataInicioContrato <= DateTime.UtcNow && link.DataExpiracaoContrato >= DateTime.UtcNow))
+                    link.Status == StatusVinculoEnum.Ativo, ct)))
                 return Conflict(new { message = "O cadastro aprovado ainda não está associado a um responsável comercial habilitado." });
+            // Responsável ok, mas sem AgenciaCliente vigente (vencido ou ainda não
+            // iniciado): a recusa é pelo contrato, não pelo responsável (VEI-SUP-43).
+            if (!client.AgenciasContratadas.AsQueryable()
+                    .Any(AppCampanhasEscopo.AgenciaClienteVigente(responsible.Agencia.Id, DateTime.UtcNow)))
+                return Conflict(new { message = "O contrato com este anunciante não está vigente." });
 
             var campaign = new Campanha(responsible, client, request.Name.Trim(), request.Product.Trim(),
                 request.Job?.Trim(), request.StartDate.Date, request.EndDate.Date, request.Budget);
             if (!campaign.IsValid())
-                return BadRequest(new { message = "Dados da campanha inválidos.", details = campaign.Notifications });
+                return CampanhaAppValidacao.Erro("Dados da campanha inválidos.",
+                    campaign.Notifications.Select(n => n.Message));
             campaign.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, responsible.Agencia.Id, responsible.Id);
             _db.Campanhas.Add(campaign);
             await _db.SaveChangesAsync(ct);
             return CreatedAtAction(nameof(Get), new { id = campaign.Id, code = campaign.Codigo, name = campaign.Nome });
         }
 
-        public sealed class CreateCampaignRequest
+        public sealed class CreateCampaignRequest : CampanhaAppRequest
         {
-            [Required, StringLength(100, MinimumLength = 3)] public string Name { get; set; }
-            [Required, StringLength(100, MinimumLength = 2)] public string Product { get; set; }
-            [StringLength(100)] public string Job { get; set; }
-            public DateTime StartDate { get; set; }
-            public DateTime EndDate { get; set; }
-            [Range(0, 100000000)] public decimal? Budget { get; set; }
             public int? ClientId { get; set; }
         }
 

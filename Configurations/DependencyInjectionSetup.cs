@@ -1,4 +1,4 @@
-﻿using MediatR;
+using MediatR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -105,6 +105,9 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             services.AddScoped<WlPublicLinks>();
             services.AddScoped<Services.VendaDiretaProvisionamento>();
             services.AddScoped<Services.AnuncianteDaCasaProvisionamento>();
+            services.AddScoped<Services.CarteiraProspeccao>();
+            services.AddScoped<Services.AppCampanhasEscopo>();
+            services.AddScoped<Services.ProducaoCampanhaApp>();
 
             // Segunda camada de limite do esqueci-senha, por hash do e-mail e
             // independente de IP (ver PasswordResetAttemptGuard). Singleton: o
@@ -145,6 +148,12 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             {
                 client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
             });
+            // Arte final do App (VEI-RD-166a): mesma rota upload/conteudo do Core, até 25 MB.
+            services.AddHttpClient<IArteFinalFileServer, FileServerArteFinal>(client =>
+            {
+                client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
+                client.Timeout = TimeSpan.FromSeconds(120);
+            });
             services.AddHttpClient<IFotoPecaFileServer, FileServerFotoPeca>(client =>
             {
                 client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
@@ -160,6 +169,10 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             services.AddSingleton<FotoPecaTrava>();
             services.AddScoped<WlUploadReferences>();
             services.AddHostedService<WlUploadReconciler>();
+            // VEI-RD-161: rascunho da carteira parado não deixa Cliente ativo no Core.
+            services.AddScoped<CarteiraRascunhoLimpeza>();
+            services.AddScoped<RepresentacaoRascunhoLimpeza>();
+            services.AddHostedService<CarteiraRascunhoAgendador>();
 
             // CMS da Aurum (VEI-RD-19). Sem Cms:SupabaseUrl e Cms:ServiceRoleKey, ou
             // com a afiliada fora de Cms:AfiliadasHabilitadas, api/wl/cms/* responde
