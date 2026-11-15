@@ -1,4 +1,5 @@
-﻿using MediatR;
+using System.Net.Http;
+using MediatR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -151,6 +152,16 @@ namespace Veiculando.WhiteLabel.Api.Configurations
                 // Upload de foto de até 10 MB pela rota do Core; com 15s, rede lenta pode virar 503.
                 client.Timeout = TimeSpan.FromSeconds(60);
             });
+
+            // VEI-RD-171e: foto de checking do app de campo também no FileServer legado.
+            var fileServerPublico = configuration.GetValue<string>("FileServerPublicUrl") ?? "https://file.veiculando.com.br";
+            services.AddHttpClient(nameof(FileServerChecking), client =>
+            {
+                client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
+                client.Timeout = TimeSpan.FromSeconds(60);
+            });
+            services.AddScoped<ICheckingFileServer>(sp => new FileServerChecking(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(FileServerChecking)), fileServerPublico));
 
             // Validação de arquivos (magic bytes + tamanho).
             services.AddSingleton<IFileValidationService, FileValidationService>();

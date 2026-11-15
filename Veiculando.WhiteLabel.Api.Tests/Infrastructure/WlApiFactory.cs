@@ -167,6 +167,12 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                     })
                     .ConfigurePrimaryHttpMessageHandler(() => FileServer);
 
+                services.AddHttpClient(nameof(FileServerChecking), client =>
+                    {
+                        client.BaseAddress = new Uri("http://fileserver.invalido/");
+                    })
+                    .ConfigurePrimaryHttpMessageHandler(() => FileServer);
+
                 services.AddHttpClient<Services.Cms.ISupabaseCmsClient, Services.Cms.SupabaseCmsClient>()
                     .ConfigurePrimaryHttpMessageHandler(() => Supabase.Handler);
 

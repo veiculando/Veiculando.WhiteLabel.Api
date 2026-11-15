@@ -36,6 +36,12 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
         /// <summary>Faz <c>upload/peca-foto</c> responder 500.</summary>
         public bool FalharUploadFoto { get; set; }
 
+        /// <summary>Arquivos gravados por <c>upload/conteudo</c> (checking, VEI-RD-171e), por caminho.</summary>
+        public Dictionary<string, byte[]> Conteudos { get; } = new();
+
+        /// <summary>Faz <c>upload/conteudo</c> responder 500.</summary>
+        public bool FalharUploadConteudo { get; set; }
+
         /// <summary>Roda depois de gravar uma foto, para simular o que acontece em seguida.</summary>
         public Action? AoGravarFoto { get; set; }
 
@@ -58,6 +64,17 @@ namespace Veiculando.WhiteLabel.Api.Tests.Infrastructure
                     if (nome != null) FotosPeca[nome] = await parte.ReadAsByteArrayAsync(cancellationToken);
                 }
                 AoGravarFoto?.Invoke();
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            }
+
+            if (request.Method == HttpMethod.Post && url.EndsWith("upload/conteudo"))
+            {
+                if (FalharUploadConteudo) return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+                foreach (var parte in (MultipartFormDataContent)request.Content!)
+                {
+                    var nome = parte.Headers.ContentDisposition?.FileName?.Trim('"');
+                    if (nome != null) Conteudos[nome] = await parte.ReadAsByteArrayAsync(cancellationToken);
+                }
                 return new HttpResponseMessage(HttpStatusCode.OK);
             }
 
