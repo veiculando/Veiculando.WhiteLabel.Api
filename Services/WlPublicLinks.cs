@@ -21,10 +21,20 @@ namespace Veiculando.WhiteLabel.Api.Services
 
         public string Convite(string token, string email) => Montar("primeiro-acesso", token, email);
         public string Recuperacao(string token, string email) => Montar("alterar-senha", token, email);
-        public string CampoPrimeiroAcesso(string token, string email) => Montar("campo/primeiro-acesso", token, email);
-        public string CampoRecuperacao(string token, string email) => Montar("campo/alterar-senha", token, email);
+        /// <summary>Página do BFF que abre o app de campo pelo scheme (VEI-RD-155).</summary>
+        public string CampoPrimeiroAcesso(string token, string email) => Campo(CampoAcesso.PrimeiroAcesso, token, email);
+        public string CampoRecuperacao(string token, string email) => Campo(CampoAcesso.AlterarSenha, token, email);
 
-        private string Montar(string pagina, string token, string email)
+        private string Campo(string tipo, string token, string email) =>
+            $"{Origem()}/api/wl/campo/acesso?tipo={tipo}&{Query(token, email)}";
+
+        private string Montar(string pagina, string token, string email) =>
+            $"{Origem()}/login/{pagina}?{Query(token, email)}";
+
+        private static string Query(string token, string email) =>
+            $"token={Uri.EscapeDataString(token)}&email={Uri.EscapeDataString(email)}";
+
+        private string Origem()
         {
             if (!_tenant.Resolvido || string.IsNullOrWhiteSpace(_tenant.Host))
                 throw new InvalidOperationException("Tenant não resolvido para o link de autenticação.");
@@ -41,8 +51,17 @@ namespace Veiculando.WhiteLabel.Api.Services
                 (origin.Scheme != Uri.UriSchemeHttps && !(allowHttp && origin.Scheme == Uri.UriSchemeHttp)))
                 throw new InvalidOperationException("Origem pública inválida para o tenant. HTTPS é obrigatório fora do preview explícito.");
 
-            var query = $"token={Uri.EscapeDataString(token)}&email={Uri.EscapeDataString(email)}";
-            return $"{origin.GetLeftPart(UriPartial.Authority)}/login/{pagina}?{query}";
+            return origin.GetLeftPart(UriPartial.Authority);
         }
+    }
+
+    /// <summary>Tipos aceitos na página e no deep link de acesso de campo.</summary>
+    public static class CampoAcesso
+    {
+        public const string PrimeiroAcesso = "primeiro-acesso";
+        public const string AlterarSenha = "alterar-senha";
+        public const string Scheme = "veiculandooperador";
+
+        public static bool Valido(string tipo) => tipo == PrimeiroAcesso || tipo == AlterarSenha;
     }
 }
