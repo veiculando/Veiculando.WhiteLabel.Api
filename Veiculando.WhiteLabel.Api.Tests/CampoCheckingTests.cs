@@ -59,7 +59,7 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
     }
 
     // Ordem iniciada no periodo 1; com colar, a peca ja tem a colagem marcada.
-    private static async Task<int> Ordem(HttpClient client, int operador, int pecaId, bool colar = true)
+    private static async Task<int> Ordem(HttpClient client, int operador, int pecaId, bool colar = true, DateTimeOffset? hora = null)
     {
         await Seed.AfiliadaAsync(Afiliada);
         int id;
@@ -74,7 +74,7 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
             await ctx.SaveChangesAsync();
             id = ordem.Id;
         }
-        var corpo = new { idCliente = Guid.NewGuid(), hora = Hora, latitude = -23.55, longitude = -46.63 };
+        var corpo = new { idCliente = Guid.NewGuid(), hora = hora ?? Hora, latitude = -23.55, longitude = -46.63 };
         (await client.PostAsJsonAsync($"/api/wl/campo/ordens/{id}/iniciar", corpo)).EnsureSuccessStatusCode();
         if (colar)
             (await client.PostAsJsonAsync($"/api/wl/campo/ordens/{id}/pecas/{pecaId}/colagem",
@@ -102,7 +102,7 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
         return item.IdPedidoItem;
     }
 
-    private static MultipartFormDataContent Foto(Guid idCliente, bool comPosicao = true)
+    private static MultipartFormDataContent Foto(Guid idCliente, bool comPosicao = true, DateTimeOffset? hora = null)
     {
         var form = new MultipartFormDataContent();
         var bytes = new ByteArrayContent(Convert.FromBase64String(
@@ -110,7 +110,7 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
         bytes.Headers.ContentType = new MediaTypeHeaderValue("image/png");
         form.Add(bytes, "foto", "foto.png");
         form.Add(new StringContent(idCliente.ToString()), "idCliente");
-        form.Add(new StringContent(Hora.ToString("O", CultureInfo.InvariantCulture)), "hora");
+        form.Add(new StringContent((hora ?? Hora).ToString("O", CultureInfo.InvariantCulture)), "hora");
         if (comPosicao)
         {
             form.Add(new StringContent("-23.55"), "latitude");
@@ -232,6 +232,61 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
         factory.Uploads.Files.Should().BeEmpty();
         using var verifica = new VeiculandoDataContext();
         (await verifica.CheckingFotos.CountAsync(x => x.IdOperadorCampo == op)).Should().Be(0);
+    }
+
+    // VEI-RD-138b: a foto que ficou horas na fila do aparelho guarda a hora da captura,
+    // nao a do envio, e os metadados vem do corpo (sem EXIF).
+    [Fact]
+    public async Task Foto_que_ficou_horas_na_fila_guarda_a_hora_da_captura()
+    {
+        var (factory, client, op, peca) = await Preparar("fila");
+        using var f = factory; using var c = client;
+        var colagem = Hora.AddHours(-22);
+        var captura = Hora.AddHours(-20);
+        var id = await Ordem(client, op, peca, hora: colagem);
+        await ItemDeChecking(peca, "CKFILA");
+        var idCliente = Guid.NewGuid();
+        var antesDoEnvio = DateTimeOffset.UtcNow;
+
+        using var form = Foto(idCliente, hora: captura);
+        var resp = await client.PostAsync($"/api/wl/campo/ordens/{id}/pecas/{peca}/checking", form);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.OK, await resp.Content.ReadAsStringAsync());
+        (await resp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("hora").GetDateTimeOffset().Should().Be(captura);
+        using var ctx = new VeiculandoDataContext();
+        var foto = await ctx.CheckingFotos.SingleAsync(x => x.IdClienteAcao == idCliente);
+        foto.DataCapturaAparelho.Should().Be(captura);
+        foto.DataCapturaAparelho.Should().BeBefore(antesDoEnvio.AddHours(-19));
+        foto.ModeloAparelho.Should().Be("Pixel 8");
+        foto.Geolocalizacao.Longitude.Should().Be(-46.63);
+        (await ctx.OrdensServico.Include(o => o.Pecas).SingleAsync(o => o.Id == id))
+            .Pecas.Single().DataFotoCampo.Should().Be(captura);
+    }
+
+    // VEI-RD-144a: foto tirada e enfileirada antes do cancelamento da ordem chega depois:
+    // recusa definitiva antes do upload, sem arquivo e sem foto no Core.
+    [Fact]
+    public async Task Foto_enfileirada_antes_do_cancelamento_e_recusada_sem_arquivo()
+    {
+        var (factory, client, op, peca) = await Preparar("canc");
+        using var f = factory; using var c = client;
+        var id = await Ordem(client, op, peca);
+        await ItemDeChecking(peca, "CKCANC");
+        var capturadaAntes = Hora.AddMinutes(30);
+        using (var ctx = new VeiculandoDataContext())
+            await ctx.Database.ExecuteSqlCommandAsync("UPDATE OrdemServico SET Status=@p0 WHERE Id=@p1",
+                (int)StatusOrdemServicoEnum.Cancelada, id);
+
+        using (var form = Foto(Guid.NewGuid(), hora: capturadaAntes))
+            (await Codigo(await client.PostAsync($"/api/wl/campo/ordens/{id}/pecas/{peca}/checking", form)))
+                .Should().Be(RecusaCampo.OrdemCancelada);
+
+        factory.Uploads.Files.Should().BeEmpty();
+        factory.FileServer.Conteudos.Should().BeEmpty();
+        using var verifica = new VeiculandoDataContext();
+        (await verifica.CheckingFotos.CountAsync(x => x.IdOrdemServicoCampo == id)).Should().Be(0);
+        (await verifica.OrdensServico.Include(o => o.Pecas).SingleAsync(o => o.Id == id))
+            .Pecas.Single().DataFotoCampo.Should().BeNull();
     }
 
     [Fact]

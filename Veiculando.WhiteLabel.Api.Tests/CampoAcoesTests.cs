@@ -196,6 +196,50 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
             .Should().Be(RecusaCampo.OrdemCancelada);
     }
 
+    // VEI-RD-144a: colagem marcada offline antes da desatribuicao ou do cancelamento
+    // chega depois. A hora antiga do aparelho nao torna a acao valida: recusa definitiva,
+    // registro de idempotencia com o codigo e a ordem fica como estava.
+    [Fact]
+    public async Task Colagem_enfileirada_antes_da_desatribuicao_ou_cancelamento_nao_altera_a_ordem()
+    {
+        var (factory, client, op, peca) = await Preparar("fila");
+        using var f = factory; using var c = client;
+        var desatribuida = await Criar(op, peca);
+        var outraPeca = await Seed.PecaAsync(await Seed.LocalAsync(Afiliada, "LAfila2"), "PAfila2");
+        var cancelada = await Criar(op, outraPeca);
+        foreach (var id in new[] { desatribuida, cancelada })
+            (await client.PostAsJsonAsync($"/api/wl/campo/ordens/{id}/iniciar", Corpo(Guid.NewGuid())))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+        var marcadaOffline = Hora.AddMinutes(10);
+        using (var ctx = new VeiculandoDataContext())
+        {
+            (await ctx.OrdensServico.FindAsync(desatribuida)).Desatribuir(op);
+            await ctx.SaveChangesAsync();
+            await ctx.Database.ExecuteSqlCommandAsync("UPDATE OrdemServico SET Status=@p0 WHERE Id=@p1",
+                (int)StatusOrdemServicoEnum.Cancelada, cancelada);
+        }
+
+        var idDesatribuida = Guid.NewGuid();
+        var idCancelada = Guid.NewGuid();
+        (await Codigo(await client.PostAsJsonAsync($"/api/wl/campo/ordens/{desatribuida}/pecas/{peca}/colagem",
+            new { idCliente = idDesatribuida, hora = marcadaOffline, latitude = -23.55, longitude = -46.63 })))
+            .Should().Be(RecusaCampo.SomenteHistorico);
+        (await Codigo(await client.PostAsJsonAsync($"/api/wl/campo/ordens/{cancelada}/pecas/{outraPeca}/colagem",
+            new { idCliente = idCancelada, hora = marcadaOffline, latitude = -23.55, longitude = -46.63 })))
+            .Should().Be(RecusaCampo.OrdemCancelada);
+
+        using var verifica = new VeiculandoDataContext();
+        foreach (var (id, idCliente, status) in new[] {
+                     (desatribuida, idDesatribuida, StatusOrdemServicoEnum.Colagem),
+                     (cancelada, idCancelada, StatusOrdemServicoEnum.Cancelada) })
+        {
+            var ordem = await verifica.OrdensServico.Include(o => o.Pecas).SingleAsync(o => o.Id == id);
+            ordem.Pecas.Should().OnlyContain(p => p.DataColagem == null);
+            ordem.Status.Should().Be(status);
+            (await Registros(idCliente)).Should().Be(1);
+        }
+    }
+
     [Fact]
     public async Task Ordem_invisivel_e_404_e_id_reutilizado_ou_corpo_invalido_sao_recusados()
     {
