@@ -219,6 +219,8 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
         // VEI-RD-171f: a ordem ainda pendente vai com os locais no pacote do colador,
         // e as imagens dela precisam abrir para o prefetch offline.
         factory.FileServer.Conteudo = new byte[] { 0xFF, 0xD8, 0xFF };
+        // O stub so serve arte-final gravada antes (VEI-RD-166a).
+        factory.FileServer.Conteudos["arte-final/cli/camp/privado-alta.jpg"] = new byte[] { 0xFF, 0xD8, 0xFF };
         var pendente = await client.GetFromJsonAsync<JsonElement>("/api/wl/campo/pacote");
         var pecaPendente = pendente.GetProperty("itens").EnumerateArray().Single(o => o.GetProperty("id").GetInt32() == id)
             .GetProperty("locais")[0].GetProperty("pecas")[0];
