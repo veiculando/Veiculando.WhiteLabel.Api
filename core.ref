@@ -225,4 +225,6 @@
 # SuporteGerenciar). SHA de `gh pr view 346 --json mergeCommit`.
 # VEI-RD-155a: e49960d2a9 e o merge da PR Core #347 em sprint-16.0 e contem f4355a69
 # (merge da #342, WLUsuario_Operador.ConcluirPrimeiroAcesso/AlterarSenha) e 60970d5e.
-e49960d2a94fb16a0c4c3743b4be881806d5b7f9
+# Promocao sprint-16.0 -> main (19/11/2026): 7c88a52426 e o commit de MERGE da
+# PR Core #350 em main e contem e49960d2. SHA de `gh pr view 350 --json mergeCommit`.
+7c88a52426ca9e03d567565ad83b0aa62f114cea
