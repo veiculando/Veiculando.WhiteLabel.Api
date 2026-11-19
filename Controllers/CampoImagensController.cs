@@ -34,9 +34,15 @@ public sealed class CampoImagensController : CampoControllerBase
         _logger = logger;
     }
 
-    private IQueryable<OrdemServico> Iniciadas() =>
-        CampoOrdensController.Visiveis(_queries, AfiliadaId, new FiltroListaCampo(AfiliadaId, OperadorId))
-            .Where(o => o.DataInicio != null);
+    // Mesma regra do ComLocais do pacote (VEI-RD-171f): iniciadas, ou pendentes do colador
+    // atual, que recebe os locais antes de iniciar para trabalhar offline.
+    private IQueryable<OrdemServico> Iniciadas()
+    {
+        var operador = OperadorId;
+        return CampoOrdensController.Visiveis(_queries, AfiliadaId, new FiltroListaCampo(AfiliadaId, operador))
+            .Where(o => o.DataInicio != null || (o.Status == StatusOrdemServicoEnum.Pendente
+                && operador > 0 && (o.IdColador == operador || o.IdResponsavel == operador)));
+    }
 
     [HttpGet("checking/{id:int}")]
     public async Task<IActionResult> Checking(int id, CancellationToken ct)
