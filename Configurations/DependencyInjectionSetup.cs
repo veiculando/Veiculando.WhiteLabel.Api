@@ -171,6 +171,7 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             });
             services.AddScoped<ICheckingFileServer>(sp => new FileServerChecking(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(FileServerChecking)), fileServerPublico));
+            services.AddScoped<CheckingFotoLegado>();
 
             // Validação de arquivos (magic bytes + tamanho).
             services.AddSingleton<IFileValidationService, FileValidationService>();

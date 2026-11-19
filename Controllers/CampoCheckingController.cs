@@ -44,19 +44,19 @@ public sealed class CampoCheckingController : CampoControllerBase
     private readonly IFileValidationService _validation;
     private readonly WlUploadPipeline _pipeline;
     private readonly WlUploadReferences _references;
-    private readonly ICheckingFileServer _fileServer;
+    private readonly CheckingFotoLegado _legado;
     private readonly ILogger<CampoCheckingController> _logger;
 
     public CampoCheckingController(VeiculandoDataContext db, ITenantQueries queries, ITenantContext tenant,
         IFileValidationService validation, WlUploadPipeline pipeline, WlUploadReferences references,
-        ICheckingFileServer fileServer, ILogger<CampoCheckingController> logger) : base(tenant)
+        CheckingFotoLegado legado, ILogger<CampoCheckingController> logger) : base(tenant)
     {
         _db = db;
         _queries = queries;
         _validation = validation;
         _pipeline = pipeline;
         _references = references;
-        _fileServer = fileServer;
+        _legado = legado;
         _logger = logger;
     }
 
@@ -169,27 +169,11 @@ public sealed class CampoCheckingController : CampoControllerBase
         return await Responder(existente, id, idPeca, ct);
     }
 
-    // VEI-RD-171e: as telas de checking do Core usam <img src=UrlArquivo>, e wl-upload: nao abre.
-    // A foto vai tambem para o FileServer legado e UrlArquivo passa a ser a URL publica.
-    // Roda depois do banco: o FileServer nao tem rota de exclusao, entao uma falha do banco
-    // nao deixa arquivo orfao. Se o FileServer falhar, a foto continua no storage WL (o app
-    // segue vendo) e so o Core fica sem a imagem; fica no log para reenvio manual.
     private async Task CopiarParaFileServer(CheckingFoto foto, byte[] conteudo, string contentType, CancellationToken ct)
     {
+        // VEI-RD-171e: as telas de checking do Core usam <img src=UrlArquivo>, e wl-upload: nao abre.
         if (foto == null || foto.IdOperadorCampo != OperadorId) return;
-        try
-        {
-            var codigos = await _db.CheckingItens.AsNoTracking().Where(i => i.IdPedidoItem == foto.IdPedidoItem)
-                .Select(i => new { Pi = i.PedidoInsercaoItem.PedidoInsercao.Codigo, Peca = i.Peca.Codigo }).SingleAsync(ct);
-            var url = await _fileServer.EnviarAsync(codigos.Pi, codigos.Peca, conteudo, contentType, DateTime.Now, ct);
-            await _db.Database.ExecuteSqlCommandAsync("UPDATE CheckingFoto SET UrlArquivo = @p0 WHERE Id = @p1 AND UrlArquivo = @p2",
-                ct, url, foto.Id, foto.UrlArquivo);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(ex, "CAMPO_CHECKING_FILESERVER_FALHOU tenant={Tenant} foto={Foto} chave={Chave}",
-                AfiliadaId, foto.Id, foto.UrlArquivo);
-        }
+        await _legado.CopiarAsync(foto.Id, foto.IdPedidoItem, foto.UrlArquivo, conteudo, contentType, ct);
     }
 
     // A ordem tem TimeStamp: outra acao de campo simultanea faz o SaveChanges
