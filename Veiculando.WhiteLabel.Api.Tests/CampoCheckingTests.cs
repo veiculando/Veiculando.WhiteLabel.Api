@@ -153,7 +153,11 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
         using (var ctx = new VeiculandoDataContext())
         {
             var foto = await ctx.CheckingFotos.Include(x => x.CheckingItem).SingleAsync(x => x.IdClienteAcao == idCliente);
-            foto.UrlArquivo.Should().Be(WlUploadReferences.Prefix + arquivo.Key);
+            // VEI-RD-171e: a foto vai tambem ao FileServer legado, e UrlArquivo e a URL publica.
+            var legado = factory.FileServer.Conteudos.Should().ContainSingle().Subject;
+            legado.Key.Should().MatchRegex(@"^checking/exib/[a-z0-9\-_]+/[a-z0-9\-_]+_\d+\.png$");
+            legado.Value.Should().Equal(arquivo.Value.Bytes);
+            foto.UrlArquivo.Should().Be("https://file.veiculando.com.br/conteudo/" + legado.Key);
             foto.IdPedidoItem.Should().Be(idItem);
             foto.DataCapturaAparelho.Should().Be(Hora);
             foto.ModeloAparelho.Should().Be("Pixel 8");
@@ -173,6 +177,26 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
         factory.Uploads.Files.Should().ContainSingle();
         using (var ctx = new VeiculandoDataContext())
             (await ctx.CheckingFotos.CountAsync(x => x.IdClienteAcao == idCliente)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Falha_do_fileserver_legado_mantem_a_foto_no_storage_wl()
+    {
+        var (factory, client, op, peca) = await Preparar("fsl");
+        using var f = factory; using var c = client;
+        var id = await Ordem(client, op, peca);
+        await ItemDeChecking(peca, "CKFSL");
+        factory.FileServer.FalharUploadConteudo = true;
+        var idCliente = Guid.NewGuid();
+
+        using var form = Foto(idCliente);
+        var resp = await client.PostAsync($"/api/wl/campo/ordens/{id}/pecas/{peca}/checking", form);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.OK, await resp.Content.ReadAsStringAsync());
+        var arquivo = factory.Uploads.Files.Should().ContainSingle().Subject;
+        using var ctx = new VeiculandoDataContext();
+        (await ctx.CheckingFotos.SingleAsync(x => x.IdClienteAcao == idCliente)).UrlArquivo
+            .Should().Be(WlUploadReferences.Prefix + arquivo.Key);
     }
 
     [Fact]
