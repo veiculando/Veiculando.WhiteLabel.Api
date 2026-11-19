@@ -1,3 +1,5 @@
+using System.Data.Entity;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -95,6 +97,13 @@ namespace Veiculando.WhiteLabel.Api.Tests
 
             resposta.StatusCode.Should().Be(HttpStatusCode.OK);
             factory.Uploads.Files.Should().ContainSingle();
+            // VEI-RD-171j: copia no FileServer legado, e UrlArquivo vira a URL publica (telas do Core).
+            var legado = factory.FileServer.Conteudos.Should().ContainSingle().Subject;
+            legado.Key.Should().StartWith("checking/exib/");
+            legado.Value.Should().Equal(jpeg);
+            using (var ctx = new Veiculando.Data.Contexts.VeiculandoDataContext())
+                (await ctx.CheckingFotos.Where(f => f.IdPedidoItem == idItem).Select(f => f.UrlArquivo).SingleAsync())
+                    .Should().Be("https://file.veiculando.com.br/conteudo/" + legado.Key);
             var fotos = await client.GetFromJsonAsync<System.Text.Json.JsonElement[]>($"/api/wl/checking/item/{idItem}/fotos");
             fotos.Should().ContainSingle();
             var url = fotos[0].GetProperty("downloadUrl").GetString();

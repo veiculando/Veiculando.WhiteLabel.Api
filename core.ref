@@ -194,6 +194,19 @@
 # ---------------------------------------------------------------------------
 # VEI-RD-119: DefinirAtribuidos entra no Core em 30ac8041d6 (main, merge da #285).
 # VEI-RD-124: baixa manual da colagem e da foto. b1997e64bc é o commit da feature no Core.
+# VEI-RD-154: Core da sprint-16.0 apos sincronizacao com producao (PR #299).
+# Contem AcoesCampo, RecusaCampo e ListaCampoConsulta (PRs #292/#293).
+# Refixar no SHA da main quando a Sprint 16 for promovida.
+# VEI-RD-141c: aab415f767 e o merge da PR Core #300 em sprint-16.0 (merge commit).
+# Traz CheckingColagemCampo e a migration AddCheckingCampo.
+# VEI-RD-143: dc13c3755e e o merge da PR Core #301 em sprint-16.0 (merge commit).
+# Traz CheckingCampoAutor e a migration AddCheckingCampoAutor.
+# VEI-SUP-33: 2a862b4c50 e o merge da PR Core #308 (sync main -> sprint-16.0).
+# Traz a foto de peca do FileServer (#305, #307); contem dc13c3755e.
+# VEI-RD-154g: 0efc8c0b1f e o merge da PR Core #302 em sprint-16.0 (merge commit).
+# Traz HoraCampo e a migration AddHoraAparelhoAcaoCampo; contem 2a862b4c50.
+# VEI-RD-155a: TEMPORARIO a4d3bb6c98, head da PR Core #342 (primeiro acesso e
+# troca de senha do WLUsuario_Operador). REFIXAR no merge commit da #342.
 # VEI-RD-157 (Sprint 17.0): carteira da vendedora na Prospecção (WL_CarteiraCliente).
 # a3b266fe e o merge da PR Core #313 em sprint-17.0 e contem b1997e64. RE-PIN no
 # commit de promocao da sprint-17.0 para a main do Core, antes do merge na master.
@@ -207,4 +220,11 @@
 # MERGE da PR Core #332 em main (merge commit, contem 22ea97fd). 58d6e7de vem
 # depois de 34d23ae0 na main e contem a #334: cobre VEI-RD-67 e VEI-RD-162.
 # SHA de `gh pr view 332 --json mergeCommit`.
-58d6e7de12a1d88849972459231088f972fac235
+# VEI-RD-171i: sync master -> sprint-16.0 do BFF. 60970d5e e o commit de MERGE da PR
+# Core #346 em sprint-16.0 (merge commit): contem 0efc8c0b (sprint-16.0) e 58d6e7de (main,
+# SuporteGerenciar). SHA de `gh pr view 346 --json mergeCommit`.
+# VEI-RD-155a: e49960d2a9 e o merge da PR Core #347 em sprint-16.0 e contem f4355a69
+# (merge da #342, WLUsuario_Operador.ConcluirPrimeiroAcesso/AlterarSenha) e 60970d5e.
+# Promocao sprint-16.0 -> main (19/11/2026): 7c88a52426 e o commit de MERGE da
+# PR Core #350 em main e contem e49960d2. SHA de `gh pr view 350 --json mergeCommit`.
+7c88a52426ca9e03d567565ad83b0aa62f114cea
