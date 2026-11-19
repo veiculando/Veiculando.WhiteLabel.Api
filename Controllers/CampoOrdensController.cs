@@ -249,20 +249,32 @@ public sealed class CampoOrdensController : CampoControllerBase
         var registro = await _db.OrdemServicoAcoesCampo.AsNoTracking().FirstOrDefaultAsync(a => a.IdCliente == idCliente, ct);
         if (registro == null)
         {
-            var ordem = await _db.OrdensServico.Include(o => o.Pecas).SingleAsync(o => o.Id == id, ct);
             var comando = new ComandoAcaoCampo(idCliente, OperadorId, tipo, idPeca, pedido.Hora.Value,
                 pedido.Latitude, pedido.Longitude, DateTimeOffset.UtcNow);
-            registro = AcoesCampo.Executar(ordem, null, comando).Registro;
-            _db.OrdemServicoAcoesCampo.Add(registro);
-            try
+            for (var tentativa = 1; ; tentativa++)
             {
-                await _db.SaveChangesAsync(ct);
-            }
-            catch (DbUpdateException)
-            {
-                // Corrida com o mesmo UUID: a PK recusou esta gravacao.
-                registro = await _db.OrdemServicoAcoesCampo.AsNoTracking().FirstOrDefaultAsync(a => a.IdCliente == idCliente, ct);
-                if (registro == null) throw;
+                var ordem = await _db.OrdensServico.Include(o => o.Pecas).SingleAsync(o => o.Id == id, ct);
+                registro = AcoesCampo.Executar(ordem, null, comando).Registro;
+                _db.OrdemServicoAcoesCampo.Add(registro);
+                try
+                {
+                    await _db.SaveChangesAsync(ct);
+                    break;
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    // VEI-RD-171d: TimeStamp da ordem (outra acao simultanea). Recarrega e reaplica a regra.
+                    DesanexarTudo();
+                    if (tentativa >= Tentativas) return RecusarCampo(OrdemAlterada);
+                }
+                catch (DbUpdateException)
+                {
+                    // Corrida com o mesmo UUID: a PK recusou esta gravacao.
+                    DesanexarTudo();
+                    registro = await _db.OrdemServicoAcoesCampo.AsNoTracking().FirstOrDefaultAsync(a => a.IdCliente == idCliente, ct);
+                    if (registro == null) throw;
+                    break;
+                }
             }
         }
         if (registro.IdOperador != OperadorId || registro.IdOrdemServico != id || registro.Tipo != tipo
@@ -273,6 +285,12 @@ public sealed class CampoOrdensController : CampoControllerBase
 
         var atual = await ComResumo(visiveis).FirstAsync(o => o.Id == id, ct);
         return Ok(new { idCliente, idPeca, hora = registro.DataAcao, ordem = CampoOrdensProjecao.Linha(atual, OperadorId) });
+    }
+
+    private void DesanexarTudo()
+    {
+        foreach (var entrada in _db.ChangeTracker.Entries().ToList())
+            entrada.State = EntityState.Detached;
     }
 
     private static Campanha CampanhaDe(PecaPeriodoStatus p) =>

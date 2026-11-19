@@ -38,7 +38,6 @@ public sealed class CampoCheckingPedido
 public sealed class CampoCheckingController : CampoControllerBase
 {
     public const long LimiteFoto = 10 * 1024 * 1024;
-    private const int Tentativas = 3;
 
     private readonly VeiculandoDataContext _db;
     private readonly ITenantQueries _queries;
@@ -206,13 +205,23 @@ public sealed class CampoCheckingController : CampoControllerBase
                 await _db.SaveChangesAsync(ct);
                 return;
             }
-            catch (DbUpdateException ex) when (tentativa < Tentativas)
+            catch (DbUpdateException ex)
             {
                 foreach (var entrada in _db.ChangeTracker.Entries().ToList())
                     entrada.State = EntityState.Detached;
                 // Indice unico do IdClienteAcao: a mesma acao ja foi gravada; quem chamou devolve essa foto.
                 if (ex is not DbUpdateConcurrencyException && await Gravada(comando.IdCliente, ct) != null) throw;
                 // TimeStamp da ordem ou PK de CheckingCampoAutor (primeiro autor concorrente): reaplica a regra.
+                if (tentativa < Tentativas) continue;
+                // VEI-RD-171d: na ultima tentativa, a PK do autor recusada por outro operador e recusa, nao 500.
+                if (ex is not DbUpdateConcurrencyException)
+                {
+                    var outro = await _db.CheckingCampoAutores.AsNoTracking().SingleOrDefaultAsync(a =>
+                        a.IdPedidoItem == idPedidoItem && a.IdOrdemServico == id, ct);
+                    if (outro != null && outro.IdOperador != comando.IdOperador)
+                        throw new RecusaCheckingException(RecusaCampo.CheckingJaRealizado);
+                }
+                throw;
             }
         }
     }
