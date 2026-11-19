@@ -158,13 +158,11 @@ namespace Veiculando.WhiteLabel.Api.Tests
         }
 
         [Fact]
-        public void Whitelist_do_dominio_tem_exatamente_onze_permissoes()
+        public void Whitelist_do_dominio_tem_exatamente_doze_permissoes()
         {
-            // A decima primeira e ConteudoGerenciar (VEI-RD-106).
-            // Se alguem adicionar uma decima segunda, o AuthorizationSetup do BFF e
-            // o PERMISSOES_WL do frontend precisam acompanhar. Este teste forca a
-            // conversa em vez de deixar os tres divergirem em silencio.
-            WlPermissoesValidas.Lista.Should().HaveCount(11);
+            // O AuthorizationSetup e o PERMISSOES_WL precisam acompanhar
+            // novas permissões da lista canônica.
+            WlPermissoesValidas.Lista.Should().HaveCount(12);
         }
     }
 }

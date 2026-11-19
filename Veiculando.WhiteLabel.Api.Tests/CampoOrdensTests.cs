@@ -207,8 +207,6 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
                 DateTime.UtcNow, 100, new Veiculando.Domain.ValueObjects.Geolocalizacao(-23.55, -46.63),
                 new System.Collections.Generic.Dictionary<string, string> { ["Modelo"] = "Aparelho de teste" }, "", user);
             ctx.CheckingFotos.Add(foto);
-            (await ctx.OrdensServico.Include(x => x.Pecas).SingleAsync(x => x.Id == id))
-                .Iniciar(op, -23.55, -46.63, DateTimeOffset.UtcNow).Should().BeNull();
             var erros = ctx.GetValidationErrors().SelectMany(e => e.ValidationErrors.Select(v =>
                 e.Entry.Entity.GetType().Name + "." + v.PropertyName + ": " + v.ErrorMessage)).ToArray();
             erros.Should().BeEmpty("o grafo de campanha/arte/checking do teste precisa ser valido");
@@ -217,6 +215,23 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
             await ctx.Database.ExecuteSqlCommandAsync("UPDATE ArteFinal SET DataCadastro=@p0 WHERE Id=@p1", new DateTime(2020, 1, 1), arteAntiga.Id);
             arteId = arte.Id; fotoId = foto.Id;
         }
+
+        // VEI-RD-171f: a ordem ainda pendente vai com os locais no pacote do colador,
+        // e as imagens dela precisam abrir para o prefetch offline.
+        factory.FileServer.Conteudo = new byte[] { 0xFF, 0xD8, 0xFF };
+        var pendente = await client.GetFromJsonAsync<JsonElement>("/api/wl/campo/pacote");
+        var pecaPendente = pendente.GetProperty("itens").EnumerateArray().Single(o => o.GetProperty("id").GetInt32() == id)
+            .GetProperty("locais")[0].GetProperty("pecas")[0];
+        foreach (var url in new[] { pecaPendente.GetProperty("fotoAnteriorUrl").GetString(), pecaPendente.GetProperty("arteAtualUrl").GetString() })
+            (await client.GetAsync(url)).StatusCode.Should().Be(HttpStatusCode.OK, url);
+        var rotasAntesDoInicio = factory.FileServer.Rotas.Count;
+        using (var ctx = new VeiculandoDataContext())
+        {
+            (await ctx.OrdensServico.Include(x => x.Pecas).SingleAsync(x => x.Id == id))
+                .Iniciar(op, -23.55, -46.63, DateTimeOffset.UtcNow).Should().BeNull();
+            await ctx.SaveChangesAsync();
+        }
+
         var resp = await client.GetAsync($"/api/wl/campo/ordens/{id}");
         resp.StatusCode.Should().Be(HttpStatusCode.OK, await resp.Content.ReadAsStringAsync());
         var texto = await resp.Content.ReadAsStringAsync();
@@ -231,6 +246,8 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
 
         // 154d: as duas URLs servem a imagem pelo BFF, sem expor o FileServer.
         factory.FileServer.Conteudo = new byte[] { 0xFF, 0xD8, 0xFF };
+        // O stub so serve arte-final gravada antes (VEI-RD-166a).
+        factory.FileServer.Conteudos["arte-final/cli/camp/privado-alta.jpg"] = new byte[] { 0xFF, 0xD8, 0xFF };
         foreach (var url in new[] { $"/api/wl/campo/imagens/checking/{fotoId}", $"/api/wl/campo/imagens/arte/{arteId}" })
         {
             var img = await client.GetAsync(url);
@@ -239,7 +256,7 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
             (await img.Content.ReadAsByteArrayAsync()).Should().Equal(0xFF, 0xD8, 0xFF);
             img.Headers.CacheControl!.NoStore.Should().BeTrue();
         }
-        factory.FileServer.Rotas.Should().Equal(
+        factory.FileServer.Rotas.Skip(rotasAntesDoInicio).Should().Equal(
             "http://fileserver.invalido/conteudo/checking/privado-anterior.jpg",
             "http://fileserver.invalido/conteudo/arte-final/cli/camp/privado-alta.jpg");
 
@@ -282,7 +299,11 @@ INSERT Usuario_Operador (Id, IdAfiliada, Colador, Fiscal) VALUES (SCOPE_IDENTITY
         pacote.GetProperty("total").GetInt32().Should().Be(2);
         var itens = pacote.GetProperty("itens").EnumerateArray().ToDictionary(o => o.GetProperty("id").GetInt32());
         itens.Keys.Should().BeEquivalentTo(new[] { pendente, iniciada });
-        itens[pendente].GetProperty("locais").GetArrayLength().Should().Be(0);
+        // Colador da pendente recebe os locais no pacote para iniciar offline (VEI-RD-132a);
+        // o detalhe online continua sem locais antes do inicio.
+        itens[pendente].GetProperty("locais")[0].GetProperty("pecas")[0].GetProperty("codigo").GetString().Should().Be("PCpac");
+        (await client.GetFromJsonAsync<JsonElement>($"/api/wl/campo/ordens/{pendente}")).GetProperty("locais")
+            .GetArrayLength().Should().Be(0);
         var pecaPacote = itens[iniciada].GetProperty("locais")[0].GetProperty("pecas")[0];
         pecaPacote.GetProperty("codigo").GetString().Should().Be("PCpac");
         pecaPacote.GetProperty("tipo").GetString().Should().NotBeNullOrEmpty();

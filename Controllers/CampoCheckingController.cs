@@ -38,24 +38,25 @@ public sealed class CampoCheckingPedido
 public sealed class CampoCheckingController : CampoControllerBase
 {
     public const long LimiteFoto = 10 * 1024 * 1024;
-    private const int Tentativas = 3;
 
     private readonly VeiculandoDataContext _db;
     private readonly ITenantQueries _queries;
     private readonly IFileValidationService _validation;
     private readonly WlUploadPipeline _pipeline;
     private readonly WlUploadReferences _references;
+    private readonly CheckingFotoLegado _legado;
     private readonly ILogger<CampoCheckingController> _logger;
 
     public CampoCheckingController(VeiculandoDataContext db, ITenantQueries queries, ITenantContext tenant,
         IFileValidationService validation, WlUploadPipeline pipeline, WlUploadReferences references,
-        ILogger<CampoCheckingController> logger) : base(tenant)
+        CheckingFotoLegado legado, ILogger<CampoCheckingController> logger) : base(tenant)
     {
         _db = db;
         _queries = queries;
         _validation = validation;
         _pipeline = pipeline;
         _references = references;
+        _legado = legado;
         _logger = logger;
     }
 
@@ -160,8 +161,19 @@ public sealed class CampoCheckingController : CampoControllerBase
             _logger.LogError(ex, "CAMPO_CHECKING_FALHOU tenant={Tenant} operador={Operador}", AfiliadaId, OperadorId);
             return StatusCode(503, new { message = "Não foi possível salvar a foto. Tente novamente." });
         }
-        existente ??= await Gravada(idCliente, ct);
+        if (existente == null)
+        {
+            existente = await Gravada(idCliente, ct);
+            await CopiarParaFileServer(existente, corpo.ToArray(), pedido.Foto.ContentType, ct);
+        }
         return await Responder(existente, id, idPeca, ct);
+    }
+
+    private async Task CopiarParaFileServer(CheckingFoto foto, byte[] conteudo, string contentType, CancellationToken ct)
+    {
+        // VEI-RD-171e: as telas de checking do Core usam <img src=UrlArquivo>, e wl-upload: nao abre.
+        if (foto == null || foto.IdOperadorCampo != OperadorId) return;
+        await _legado.CopiarAsync(foto.Id, foto.IdPedidoItem, foto.UrlArquivo, conteudo, contentType, ct);
     }
 
     // A ordem tem TimeStamp: outra acao de campo simultanea faz o SaveChanges
@@ -206,13 +218,23 @@ public sealed class CampoCheckingController : CampoControllerBase
                 await _db.SaveChangesAsync(ct);
                 return;
             }
-            catch (DbUpdateException ex) when (tentativa < Tentativas)
+            catch (DbUpdateException ex)
             {
                 foreach (var entrada in _db.ChangeTracker.Entries().ToList())
                     entrada.State = EntityState.Detached;
                 // Indice unico do IdClienteAcao: a mesma acao ja foi gravada; quem chamou devolve essa foto.
                 if (ex is not DbUpdateConcurrencyException && await Gravada(comando.IdCliente, ct) != null) throw;
                 // TimeStamp da ordem ou PK de CheckingCampoAutor (primeiro autor concorrente): reaplica a regra.
+                if (tentativa < Tentativas) continue;
+                // VEI-RD-171d: na ultima tentativa, a PK do autor recusada por outro operador e recusa, nao 500.
+                if (ex is not DbUpdateConcurrencyException)
+                {
+                    var outro = await _db.CheckingCampoAutores.AsNoTracking().SingleOrDefaultAsync(a =>
+                        a.IdPedidoItem == idPedidoItem && a.IdOrdemServico == id, ct);
+                    if (outro != null && outro.IdOperador != comando.IdOperador)
+                        throw new RecusaCheckingException(RecusaCampo.CheckingJaRealizado);
+                }
+                throw;
             }
         }
     }

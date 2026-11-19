@@ -1,4 +1,5 @@
-﻿using MediatR;
+using System.Net.Http;
+using MediatR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -105,6 +106,9 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             services.AddScoped<WlPublicLinks>();
             services.AddScoped<Services.VendaDiretaProvisionamento>();
             services.AddScoped<Services.AnuncianteDaCasaProvisionamento>();
+            services.AddScoped<Services.CarteiraProspeccao>();
+            services.AddScoped<Services.AppCampanhasEscopo>();
+            services.AddScoped<Services.ProducaoCampanhaApp>();
 
             // Segunda camada de limite do esqueci-senha, por hash do e-mail e
             // independente de IP (ver PasswordResetAttemptGuard). Singleton: o
@@ -145,12 +149,29 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             {
                 client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
             });
+            // Arte final do App (VEI-RD-166a): mesma rota upload/conteudo do Core, até 25 MB.
+            services.AddHttpClient<IArteFinalFileServer, FileServerArteFinal>(client =>
+            {
+                client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
+                client.Timeout = TimeSpan.FromSeconds(120);
+            });
             services.AddHttpClient<IFotoPecaFileServer, FileServerFotoPeca>(client =>
             {
                 client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
                 // Upload de foto de até 10 MB pela rota do Core; com 15s, rede lenta pode virar 503.
                 client.Timeout = TimeSpan.FromSeconds(60);
             });
+
+            // VEI-RD-171e: foto de checking do app de campo também no FileServer legado.
+            var fileServerPublico = configuration.GetValue<string>("FileServerPublicUrl") ?? "https://file.veiculando.com.br";
+            services.AddHttpClient(nameof(FileServerChecking), client =>
+            {
+                client.BaseAddress = new Uri(fileServerUrl.EndsWith("/") ? fileServerUrl : fileServerUrl + "/");
+                client.Timeout = TimeSpan.FromSeconds(60);
+            });
+            services.AddScoped<ICheckingFileServer>(sp => new FileServerChecking(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(FileServerChecking)), fileServerPublico));
+            services.AddScoped<CheckingFotoLegado>();
 
             // Validação de arquivos (magic bytes + tamanho).
             services.AddSingleton<IFileValidationService, FileValidationService>();
@@ -160,6 +181,10 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             services.AddSingleton<FotoPecaTrava>();
             services.AddScoped<WlUploadReferences>();
             services.AddHostedService<WlUploadReconciler>();
+            // VEI-RD-161: rascunho da carteira parado não deixa Cliente ativo no Core.
+            services.AddScoped<CarteiraRascunhoLimpeza>();
+            services.AddScoped<RepresentacaoRascunhoLimpeza>();
+            services.AddHostedService<CarteiraRascunhoAgendador>();
 
             // CMS da Aurum (VEI-RD-19). Sem Cms:SupabaseUrl e Cms:ServiceRoleKey, ou
             // com a afiliada fora de Cms:AfiliadasHabilitadas, api/wl/cms/* responde
