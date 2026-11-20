@@ -227,4 +227,6 @@
 # (merge da #342, WLUsuario_Operador.ConcluirPrimeiroAcesso/AlterarSenha) e 60970d5e.
 # Promocao sprint-16.0 -> main (19/11/2026): 7c88a52426 e o commit de MERGE da
 # PR Core #350 em main e contem e49960d2. SHA de `gh pr view 350 --json mergeCommit`.
-7c88a52426ca9e03d567565ad83b0aa62f114cea
+# VEI-SUP-49: aaf63787c0 e o commit de MERGE da PR Core #354 em main (promocao da
+# #353: Reatribuir tira a OS de Rascunho). Contem 7c88a524. SHA de `gh pr view 354 --json mergeCommit`.
+aaf63787c08fa71bde9817d1f2e60260989da7f5
