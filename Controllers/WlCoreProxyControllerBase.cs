@@ -25,12 +25,13 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         /// <summary>
         /// Repassa a resposta do core preservando o status e o corpo, para que as
         /// notificações do domínio (mensagens de validação) cheguem à tela em vez
-        /// de virarem um 500 genérico.
+        /// de virarem um 500 genérico. No sucesso, sem os dados da conta de serviço
+        /// (<see cref="CoreRespostaSegura"/>).
         /// </summary>
         protected IActionResult RepassarResposta(CoreRespostaCadastro resposta)
         {
             if (resposta.Sucesso)
-                return Content(resposta.Corpo ?? "{}", "application/json");
+                return Content(CoreRespostaSegura.Limpar(resposta.Corpo), "application/json");
 
             return StatusCode(resposta.StatusCode, new
             {

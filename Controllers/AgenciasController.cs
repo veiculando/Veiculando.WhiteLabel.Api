@@ -3,6 +3,7 @@ using System.Data.Entity;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Veiculando.Data.Contexts;
@@ -208,8 +209,8 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         }
 
         /// <summary>
-        /// Cria a agência. Agencia e AfiliadaAgencia são gravadas na mesma transação
-        /// pelo handler do core — nenhuma regra de negócio é reimplementada aqui.
+        /// Cria a agência e a vincula a esta afiliada: o handler do core grava só a
+        /// Agencia, e o vínculo vai numa segunda chamada (VEI-SUP-57).
         /// </summary>
         /// <remarks>
         /// Não existe "prazo de pagamento" neste payload. O PRD §5.5 é explícito e o
@@ -257,6 +258,26 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             };
 
             var resposta = await _coreCadastro.SalvarAgenciaAsync(command, WlUsuarioId);
+            if (!resposta.Sucesso)
+                return RepassarResposta(resposta);
+
+            // VEI-SUP-57: o AgenciaHandler do Core grava só a Agencia. Sem o vínculo a
+            // agência não aparece na lista e a edição responde 404.
+            var id = CoreRespostaSegura.IdDoResultado(resposta.Corpo);
+            if (id == null)
+                return StatusCode(StatusCodes.Status502BadGateway, new
+                {
+                    message = "A agência foi cadastrada, mas o Core não devolveu o código dela. Busque pelo CNPJ e vincule."
+                });
+
+            var vinculo = await _coreCadastro.VincularAgenciaAsync(id.Value, WlUsuarioId);
+            if (!vinculo.Sucesso)
+                return StatusCode(vinculo.StatusCode, new
+                {
+                    message = "A agência foi cadastrada, mas não foi vinculada a esta exibidora. Busque pelo CNPJ e vincule.",
+                    detalhe = vinculo.Corpo
+                });
+
             return RepassarResposta(resposta);
         }
 

@@ -183,8 +183,9 @@ namespace Veiculando.WhiteLabel.Api.Services
         }
 
         /// <summary>
-        /// Cria ou edita a agência pelo handler do core, que grava Agencia e
-        /// AfiliadaAgencia na mesma transação (VEI-RD-79). O AgenciaHandler distingue
+        /// Cria ou edita a agência pelo handler do core. Ele grava só a Agencia: o
+        /// vínculo com a afiliada é <see cref="VincularAgenciaAsync"/>, chamado pelo
+        /// controller depois do cadastro (VEI-SUP-57). O AgenciaHandler distingue
         /// criação de edição por <c>command.Id</c>, igual ao ClienteHandler.
         /// </summary>
         /// <remarks>
