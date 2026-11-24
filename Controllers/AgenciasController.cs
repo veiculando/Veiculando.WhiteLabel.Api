@@ -236,6 +236,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (cnpjExistente)
                 return Conflict(new { message = "Já existe uma agência com este CNPJ. Vincule em vez de cadastrar." });
 
+            // O construtor de Agencia no Core valida Email e Telefone sem checar nulo:
+            // vazio virava 500 "Object reference not set" (preview, 24/11).
+            if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Telefone))
+                return BadRequest(new { message = "Informe o telefone e o e-mail de contato da agência." });
+
             var command = new AgenciaCadastroCommand
             {
                 Id = 0,
