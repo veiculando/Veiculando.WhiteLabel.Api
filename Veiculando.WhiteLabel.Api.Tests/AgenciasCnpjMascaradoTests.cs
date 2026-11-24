@@ -18,6 +18,8 @@ namespace Veiculando.WhiteLabel.Api.Tests
     public class AgenciasCnpjMascaradoTests
     {
         private const int Tenant = 9362;
+        /// <summary>Id fixo e alto: com IDENTITY, a linha poderia ocupar o Id 1 que o Seed reserva à "Agencia Teste".</summary>
+        private const int AgenciaId = 936257;
         private readonly SqlServerFixture _db;
 
         public AgenciasCnpjMascaradoTests(SqlServerFixture db) => _db = db;
@@ -32,9 +34,27 @@ namespace Veiculando.WhiteLabel.Api.Tests
             using (var ctx = new VeiculandoDataContext())
             {
                 await ctx.Database.ExecuteSqlCommandAsync(@"
-INSERT INTO Agencia (Nome, Cnpj, Email, AvaliacaoMedia, BonificacaoVolume, DataCadastro, DataAtualizacao, StatusExibicao)
-VALUES ('Agencia Mascarada', @p0, 'mascarada@exemplo.com', 0, 0, GETDATE(), GETDATE(), 1);", Mascara(cnpj));
+SET IDENTITY_INSERT Agencia ON;
+INSERT INTO Agencia (Id, Nome, Cnpj, Email, AvaliacaoMedia, BonificacaoVolume, DataCadastro, DataAtualizacao, StatusExibicao)
+VALUES (@p1, 'Agencia Mascarada', @p0, 'mascarada@exemplo.com', 0, 0, GETDATE(), GETDATE(), 1);
+SET IDENTITY_INSERT Agencia OFF;", Mascara(cnpj), AgenciaId);
             }
+
+            try
+            {
+                await ExecutarAsync(cnpj);
+            }
+            finally
+            {
+                // O banco é compartilhado pela coleção: sobrar esta agência mudaria o que
+                // outros testes enxergam (ex.: a primeira agência da lista).
+                using var ctx = new VeiculandoDataContext();
+                await ctx.Database.ExecuteSqlCommandAsync("DELETE FROM Agencia WHERE Id = @p0", AgenciaId);
+            }
+        }
+
+        private async Task ExecutarAsync(string cnpj)
+        {
 
             var email = $"sup57{Guid.NewGuid():N}"[..20] + "@exemplo.com";
             await Seed.OperadorAsync(Tenant, email, new[] { "ClienteGerenciar" });
