@@ -45,7 +45,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
         }
 
         private static object Agencia(string cnpj) =>
-            new { cnpj, nome = "Nova", razaoSocial = "Nova Ltda", cidade = "Sao Paulo", uf = "SP" };
+            new { cnpj, nome = "Nova", razaoSocial = "Nova Ltda", cidade = "Sao Paulo", uf = "SP", email = "nova@exemplo.com", telefone = "11944774353" };
 
         [Fact]
         public async Task Cadastro_vincula_a_agencia_e_nao_devolve_a_conta_de_servico()
@@ -95,6 +95,23 @@ namespace Veiculando.WhiteLabel.Api.Tests
 
             resposta.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             factory.Core.Requisicoes.Should().ContainSingle();
+        }
+
+        [Fact]
+        public async Task Sem_telefone_ou_email_responde_400_sem_chamar_o_core()
+        {
+            var (factory, cliente) = await EntrarAsync();
+            using var _ = factory;
+
+            var resposta = await cliente.PostAsJsonAsync("/api/wl/agencias", new
+            {
+                cnpj = ProspeccaoCarteiraTests.Cnpj(Tenant, 4), nome = "Nova", razaoSocial = "Nova Ltda",
+                cidade = "Sao Paulo", uf = "SP", email = "nova@exemplo.com", telefone = ""
+            });
+
+            resposta.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await resposta.Content.ReadAsStringAsync()).Should().Contain("telefone");
+            factory.Core.Requisicoes.Should().BeEmpty();
         }
 
         [Fact]
