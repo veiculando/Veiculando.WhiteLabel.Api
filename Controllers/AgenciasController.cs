@@ -188,7 +188,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             var agencia = await _db.Agencias
                 .AsNoTracking()
-                .FirstOrDefaultAsync(a => a.Cnpj.Numero == cnpjNumero);
+                .FirstOrDefaultAsync(a => a.Cnpj.Numero.Replace(".", "").Replace("/", "").Replace("-", "").Replace(" ", "") == cnpjNumero);
 
             if (agencia == null)
                 return NotFound(new { message = "Nenhuma agência com este CNPJ. O cadastro pode prosseguir." });
@@ -231,7 +231,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // A busca por CNPJ é obrigatória antes de o formulário abrir (regra de UI);
             // aqui é a garantia do servidor: nunca uma segunda Agencia para um CNPJ que
             // já existe, em nenhuma afiliada.
-            var cnpjExistente = await _db.Agencias.AsNoTracking().AnyAsync(a => a.Cnpj.Numero == cnpjNumero);
+            var cnpjExistente = await _db.Agencias.AsNoTracking().AnyAsync(a => a.Cnpj.Numero.Replace(".", "").Replace("/", "").Replace("-", "").Replace(" ", "") == cnpjNumero);
             if (cnpjExistente)
                 return Conflict(new { message = "Já existe uma agência com este CNPJ. Vincule em vez de cadastrar." });
 

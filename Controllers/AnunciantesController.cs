@@ -161,7 +161,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
 
             var cliente = await _db.Clientes
                 .AsNoTracking()
-                .FirstOrDefaultAsync(c => c.Cnpj.Numero == cnpjNumero);
+                .FirstOrDefaultAsync(c => c.Cnpj.Numero.Replace(".", "").Replace("/", "").Replace("-", "").Replace(" ", "") == cnpjNumero);
 
             if (cliente == null)
                 return NotFound(new { message = "Nenhum anunciante com este CNPJ. O cadastro pode prosseguir." });
@@ -199,7 +199,7 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             // A busca por CNPJ é obrigatória antes do formulário abrir (regra de
             // UI); aqui é a garantia do servidor: nunca um segundo Cliente para
             // um CNPJ que já existe, em nenhuma afiliada.
-            var cnpjExistente = await _db.Clientes.AsNoTracking().AnyAsync(c => c.Cnpj.Numero == cnpjNumero);
+            var cnpjExistente = await _db.Clientes.AsNoTracking().AnyAsync(c => c.Cnpj.Numero.Replace(".", "").Replace("/", "").Replace("-", "").Replace(" ", "") == cnpjNumero);
             if (cnpjExistente)
                 return Conflict(new { message = "Já existe um anunciante com este CNPJ. Vincule em vez de cadastrar." });
 
