@@ -241,6 +241,11 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Telefone))
                 return BadRequest(new { message = "Informe o telefone e o e-mail de contato da agência." });
 
+            // O Core mapeia Endereco.Cep como obrigatório: sem ele o EF responde
+            // "Null value for non-nullable member. Member: 'Cep'" (preview, 25/11).
+            if (string.IsNullOrWhiteSpace(request.Cep))
+                return BadRequest(new { message = "Informe o CEP da agência." });
+
             var command = new AgenciaCadastroCommand
             {
                 Id = 0,
