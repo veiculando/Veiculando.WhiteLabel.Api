@@ -45,7 +45,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
         }
 
         private static object Agencia(string cnpj) =>
-            new { cnpj, nome = "Nova", razaoSocial = "Nova Ltda", cidade = "Sao Paulo", uf = "SP", email = "nova@exemplo.com", telefone = "11944774353" };
+            new { cnpj, nome = "Nova", razaoSocial = "Nova Ltda", cidade = "Sao Paulo", uf = "SP", email = "nova@exemplo.com", telefone = "11944774353", cep = "01001-000" };
 
         [Fact]
         public async Task Cadastro_vincula_a_agencia_e_nao_devolve_a_conta_de_servico()
@@ -111,6 +111,25 @@ namespace Veiculando.WhiteLabel.Api.Tests
 
             resposta.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             (await resposta.Content.ReadAsStringAsync()).Should().Contain("telefone");
+            factory.Core.Requisicoes.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task Sem_cep_cidade_ou_nome_responde_400_listando_os_campos_sem_chamar_o_core()
+        {
+            var (factory, cliente) = await EntrarAsync();
+            using var _ = factory;
+
+            var resposta = await cliente.PostAsJsonAsync("/api/wl/agencias", new
+            {
+                cnpj = ProspeccaoCarteiraTests.Cnpj(Tenant, 5), nome = "", razaoSocial = "Nova Ltda",
+                cidade = " ", uf = "SP", email = "nova@exemplo.com", telefone = "11944774353", cep = (string)null
+            });
+
+            resposta.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            var corpo = await resposta.Content.ReadAsStringAsync();
+            corpo.Should().Contain("nome fantasia").And.Contain("CEP").And.Contain("cidade");
+            corpo.Should().NotContain("telefone").And.NotContain("UF");
             factory.Core.Requisicoes.Should().BeEmpty();
         }
 
