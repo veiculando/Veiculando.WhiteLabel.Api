@@ -168,9 +168,15 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     PecaCodigo = pps.Peca.Codigo,
                     LocalId = pps.Peca.IdLocal,
                     LocalCodigo = pps.Peca.Local.Codigo,
+                    PecaCodigoInterno = pps.Peca.Local.CodigoInterno,
+                    Logradouro = pps.Peca.Local.Endereco.Logradouro,
+                    Numero = pps.Peca.Local.Endereco.Numero,
+                    Bairro = pps.Peca.Local.Endereco.Bairro,
+                    FotoArquivo = pps.Peca.Foto.ArquivoNome,
                     PeriodoId = pps.IdPeriodo,
                     Periodo = pps.Periodo,
-                    Status = pps.Status
+                    Status = pps.Status,
+                    Cliente = pps.Pedido != null ? pps.Pedido.Campanha.Cliente.Nome : null
                 })
                 .ToListAsync();
 
@@ -181,13 +187,28 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     x.PecaCodigo,
                     x.LocalId,
                     x.LocalCodigo,
+                    // VEI-SUP-61: a tela já tinha as colunas, mas o BFF não mandava os campos.
+                    PecaCodigoInterno = string.IsNullOrWhiteSpace(x.PecaCodigoInterno) ? null : x.PecaCodigoInterno.Trim(),
+                    Endereco = MontarEndereco(x.Logradouro, x.Numero),
+                    Bairro = string.IsNullOrWhiteSpace(x.Bairro) ? null : x.Bairro.Trim(),
+                    // Mesmo endpoint público da vitrine do App (mesmo domínio, sem token no <img>).
+                    // Mesmo critério da vitrine: nome que o endpoint recusaria não vira link quebrado.
+                    FotoUrl = FileServerFotoPeca.NomeValido(x.FotoArquivo)
+                        ? $"/api/wl/app/inventory/{Uri.EscapeDataString(x.PecaCodigo)}/photo" : null,
                     x.PeriodoId,
                     PeriodoNome = x.Periodo != null ? x.Periodo.Nome : null,
-                    Status = x.Status.ToString()
+                    Status = x.Status.ToString(),
+                    x.Cliente
                 })
                 .ToList();
 
             return Ok(WlPaginacao.Montar(grade, page, pageSize, total));
+        }
+
+        internal static string MontarEndereco(string logradouro, string numero)
+        {
+            if (string.IsNullOrWhiteSpace(logradouro)) return null;
+            return string.IsNullOrWhiteSpace(numero) ? logradouro.Trim() : $"{logradouro.Trim()}, {numero.Trim()}";
         }
     }
 

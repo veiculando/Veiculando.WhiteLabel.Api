@@ -9,7 +9,9 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Veiculando.Data.Contexts;
+using Veiculando.Domain.Entities.Pedidos;
 using Veiculando.Domain.Enums;
+using Veiculando.WhiteLabel.Api.Middleware;
 using Veiculando.WhiteLabel.Api.Services;
 
 namespace Veiculando.WhiteLabel.Api.Controllers;
@@ -36,9 +38,11 @@ public sealed class AppCampaignsController : ControllerBase
     private readonly VeiculandoDataContext _db;
     private readonly AppCampanhasEscopo _escopo;
     private readonly ProducaoCampanhaApp _producao;
+    private readonly ITenantQueries _tenant;
 
-    public AppCampaignsController(VeiculandoDataContext db, AppCampanhasEscopo escopo, ProducaoCampanhaApp producao)
-        => (_db, _escopo, _producao) = (db, escopo, producao);
+    public AppCampaignsController(VeiculandoDataContext db, AppCampanhasEscopo escopo, ProducaoCampanhaApp producao,
+        ITenantQueries tenant)
+        => (_db, _escopo, _producao, _tenant) = (db, escopo, producao, tenant);
 
     /// <param name="clienteId">Cliente escolhido no gateway. Fora do conjunto da sessão → 404.</param>
     [HttpGet]
@@ -163,6 +167,8 @@ public sealed class AppCampaignsController : ControllerBase
                         periodo = new { codigo = p.CodigoPeriodo, dataInicio = p.InicioPeriodo, dataFim = p.FimPeriodo },
                         status = StatusPedido(p.StatusPedido),
                         simulacao = p.StatusPedido == StatusPedidoEnum.Simulacao,
+                        // VEI-SUP-60: a exibidora confirmou; falta a agência aprovar para nascer o PI.
+                        podeAprovar = criadaPelaSessao && p.StatusPedido == StatusPedidoEnum.Confirmado,
                         pecas = doPedido.Count,
                         valor = doPedido.Sum(i => i.ValorBruto)
                     };
@@ -267,6 +273,78 @@ public sealed class AppCampaignsController : ControllerBase
         }
 
         return Ok(new { codigo = campanha.Codigo, nome = campanha.Nome });
+    }
+
+    /// <summary>
+    /// Aprova o pedido que a exibidora confirmou e gera o PI (VEI-SUP-60). É o
+    /// "assinar PI" da agência do Veiculando.Web, que o App não tinha: sem ele a campanha
+    /// ficava em rascunho e a exibidora nunca via o pedido de inserção.
+    /// </summary>
+    /// <remarks>
+    /// <para>Mesmos passos do <c>PedidoCadastroHandler.Handle(PedidoAssinarPICommand)</c> do Core:
+    /// <c>Pedido.AssinarPIAgencia</c>, <c>Campanha.AtualizaStatusAssinatura</c>,
+    /// <c>PedidoInsercao.GerarPedidosDeInsercao</c> e a grade de disponibilidade em Autorizada.</para>
+    /// <para>Fica de fora a permissão legada <c>FinaceiroAprovador</c>, que nenhum responsável
+    /// comercial do WhiteLabel recebe (mesmo motivo do <see cref="CampanhaEdicaoCore"/>): quem
+    /// pode aprovar é decidido pelo escopo da sessão e por ser o responsável do pedido.
+    /// O e-mail do Core para a exibidora também fica de fora: o PI aparece no painel.</para>
+    /// <para>Ordem: fora do escopo → 404; campanha de outro responsável → 403; fora de Confirmado ou com
+    /// itens de outra exibidora → 409.</para>
+    /// </remarks>
+    [HttpPost("{code}/pedidos/{pedido}/aprovar")]
+    [EnableRateLimiting(Startup.RateLimitEscrita)]
+    public async Task<IActionResult> Aprovar(string code, string pedido, CancellationToken ct)
+    {
+        if (!TryUser(out var userId)) return Unauthorized();
+        if (!CodigoValido(code) || !CodigoValido(pedido)) return NotFound(new { message = NaoEncontrada });
+        var escopo = await _escopo.ResolverAsync(User, userId, MensagemSemKyc, ct);
+        if (escopo.StatusErro.HasValue) return Erro(escopo);
+
+        var daCampanha = escopo.MinhasCampanhas.Where(c => c.Codigo == code);
+        var idCampanha = await daCampanha.Select(c => (int?)c.Id).FirstOrDefaultAsync(ct);
+        if (idCampanha == null) return NotFound(new { message = NaoEncontrada });
+        // Quem aprova é o responsável comercial da campanha (o mesmo que o checkout grava no
+        // pedido); um pj que só enxerga a campanha de uma agência não aprova por ela.
+        if (!await daCampanha.AnyAsync(escopo.CriadaPelaSessao, ct))
+            return StatusCode(403, new { message = "Só quem fez o pedido pode aprová-lo." });
+
+        var alvo = await _db.Pedidos
+            .Include(p => p.Itens.Select(i => i.Peca.Local.Afiliada))
+            .Include(p => p.Itens.Select(i => i.Insercao))
+            .Include(p => p.Campanha.Pedidos)
+            .Include(p => p.Campanha.AnuncianteResponsavel)
+            .SingleOrDefaultAsync(p => p.Codigo == pedido && p.IdCampanha == idCampanha.Value, ct);
+        if (alvo == null) return NotFound(new { message = "Pedido não encontrado." });
+        if (alvo.IdUsuarioAnunciante != alvo.Campanha.IdUsuarioAnunciante)
+            return StatusCode(403, new { message = "Só quem fez o pedido pode aprová-lo." });
+        if (alvo.Status != StatusPedidoEnum.Confirmado)
+            return Conflict(new { message = "Este pedido não pode mais ser aprovado." });
+        if (alvo.Itens.Any(i => i.Peca.Local.IdAfiliada != _tenant.AfiliadaId))
+            return Conflict(new { message = "Este pedido tem peças de outra exibidora e não pode ser aprovado por aqui." });
+
+        alvo.AssinarPIAgencia(alvo.Campanha.AnuncianteResponsavel);
+        CampanhaAssinaturaCore.AtualizarStatus(alvo.Campanha);
+        var pis = PedidoInsercao.GerarPedidosDeInsercao(alvo);
+
+        foreach (var item in pis.SelectMany(pi => pi.Itens.Select(i => (pi, i.PedidoItem))))
+        {
+            // FirstOrDefault como o RetornaPorPecaPeriodo do Core: linha duplicada não derruba a aprovação.
+            var status = await _db.PecaPeriodoStatus.FirstOrDefaultAsync(s =>
+                s.IdPeca == item.PedidoItem.IdPeca && s.IdPeriodo == item.PedidoItem.IdPeriodo, ct);
+            status?.SetStatusAutorizada(item.pi);
+        }
+        _db.PedidosInsercao.AddRange(pis);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { message = "O pedido foi alterado por outra pessoa. Recarregue e tente de novo." });
+        }
+
+        return Ok(new { codigo = alvo.Codigo, status = StatusPedido(alvo.Status), pedidosInsercao = pis.Select(pi => pi.Codigo) });
     }
 
     /// <summary>Status do Core para o badge do PRD §4.5.2 (mais "cancelada", que o PRD não cobre).</summary>

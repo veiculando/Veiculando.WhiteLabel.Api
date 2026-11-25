@@ -12,8 +12,12 @@ namespace Veiculando.WhiteLabel.Api.Services
         /// <summary>Campo de ordenação. Validado contra a whitelist do endpoint.</summary>
         public string Sort { get; set; }
 
-        /// <summary>Ordem decrescente.</summary>
-        public bool Desc { get; set; }
+        /// <summary>
+        /// Ordem decrescente. Nulo quando a tela não manda: cada endpoint aplica o próprio
+        /// padrão (<c>pagina?.Desc ?? true</c>). Como <c>bool</c>, a ausência virava
+        /// <c>false</c> e o padrão nunca valia (VEI-SUP-60: reservas mais antigas no topo).
+        /// </summary>
+        public bool? Desc { get; set; }
     }
 
     /// <summary>Uma página de resultados, com o total para a UI montar o rodapé.</summary>

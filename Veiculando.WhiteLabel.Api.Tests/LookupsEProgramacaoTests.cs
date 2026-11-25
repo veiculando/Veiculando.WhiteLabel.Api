@@ -1,4 +1,5 @@
 ﻿using System.Net.Http.Json;
+using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Veiculando.WhiteLabel.Api.Tests.Infrastructure;
@@ -62,8 +63,18 @@ namespace Veiculando.WhiteLabel.Api.Tests
 
             var localId = await Seed.LocalAsync(Afiliada, "LPROG-A");
             var pecaId = await Seed.PecaAsync(localId, "PPROG-A");
-            await Seed.ReservaAsync(Afiliada, "RPROG-A", pecaId);
+            var reserva = await Seed.ReservaAsync(Afiliada, "RPROG-A", pecaId);
             await Seed.StatusProgramacaoAsync(pecaId);
+            // VEI-SUP-61: dados do local e o pedido da célula, como na Aurum (código interno, endereço, bairro).
+            using (var ctx = new Veiculando.Data.Contexts.VeiculandoDataContext())
+            {
+                await ctx.Database.ExecuteSqlCommandAsync(@"
+UPDATE Local SET CodigoInterno = '37', Logradouro = 'AV. LOTHAR WALDEMAR HOENNE', Numero = '100', Bairro = 'NOVA MOGILAR'
+WHERE Id = @p0;
+UPDATE Peca SET Foto = 'pprog-a.jpg' WHERE Id = @p2;
+UPDATE PecaPeriodoStatus SET IdPedido = (SELECT IdPedido FROM PedidoReserva WHERE Id = @p1) WHERE IdPeca = @p2;",
+                    localId, reserva.Id, pecaId);
+            }
 
             using var factory = new WlApiFactory(_db, Afiliada);
             using var client = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
@@ -76,6 +87,12 @@ namespace Veiculando.WhiteLabel.Api.Tests
             var pagina = await resposta.Content.ReadFromJsonAsync<PaginaDto<GradeDto>>();
             pagina.Should().NotBeNull();
             pagina!.Itens.Should().Contain(g => g.PecaCodigo == "PPROG-A");
+            var linha = pagina.Itens.First(g => g.PecaCodigo == "PPROG-A");
+            linha.PecaCodigoInterno.Should().Be("37");
+            linha.Endereco.Should().Be("AV. LOTHAR WALDEMAR HOENNE, 100");
+            linha.Bairro.Should().Be("NOVA MOGILAR");
+            linha.FotoUrl.Should().Be("/api/wl/app/inventory/PPROG-A/photo", "foto do FileServer, como na Aurum");
+            linha.Cliente.Should().NotBeNullOrWhiteSpace("a célula com pedido mostra o cliente da campanha");
         }
 
         /// <summary>
@@ -111,6 +128,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
 
         private sealed record CidadeDto(int Id, string Nome, string Sigla);
         private sealed record PeriodoDto(int Id, string Nome);
-        private sealed record GradeDto(int PecaId, string PecaCodigo, int LocalId, string LocalCodigo, int PeriodoId, string Status);
+        private sealed record GradeDto(int PecaId, string PecaCodigo, int LocalId, string LocalCodigo, int PeriodoId, string Status,
+            string PecaCodigoInterno = null, string Endereco = null, string Bairro = null, string FotoUrl = null, string Cliente = null);
     }
 }
