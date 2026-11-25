@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Data.Entity;
 using System.Linq;
 using System.Threading.Tasks;
@@ -236,15 +237,16 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (cnpjExistente)
                 return Conflict(new { message = "Já existe uma agência com este CNPJ. Vincule em vez de cadastrar." });
 
-            // O construtor de Agencia no Core valida Email e Telefone sem checar nulo:
-            // vazio virava 500 "Object reference not set" (preview, 24/11).
-            if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Telefone))
-                return BadRequest(new { message = "Informe o telefone e o e-mail de contato da agência." });
-
-            // O Core mapeia Endereco.Cep como obrigatório: sem ele o EF responde
-            // "Null value for non-nullable member. Member: 'Cep'" (preview, 25/11).
-            if (string.IsNullOrWhiteSpace(request.Cep))
-                return BadRequest(new { message = "Informe o CEP da agência." });
+            // Campos que o Core exige, recusados aqui com mensagem para a tela (VEI-SUP-57):
+            // - Email e Telefone: o construtor de Agencia lê as notificações sem checar
+            //   nulo; vazio virava 500 "Object reference not set" (preview, 24/11).
+            // - Cep: Endereco.Cep é tipo complexo obrigatório no EF; vazio virava
+            //   "Null value for non-nullable member. Member: 'Cep'" (preview, 25/11).
+            // - Nome, Cidade e Uf: IsRequired sem mensagem, que sai em inglês
+            //   ("Field Cidade is required.").
+            var faltando = CamposObrigatoriosFaltando(request);
+            if (faltando.Count > 0)
+                return BadRequest(new { message = "Preencha: " + string.Join(", ", faltando) + "." });
 
             var command = new AgenciaCadastroCommand
             {
@@ -389,6 +391,21 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             await _db.SaveChangesAsync();
 
             return Ok(new { vinculo.IdAgencia, vinculo.Status });
+        }
+
+        private static List<string> CamposObrigatoriosFaltando(AgenciaCadastroRequest request)
+        {
+            var campos = new (string Valor, string Rotulo)[]
+            {
+                (request.Nome, "nome fantasia"),
+                (request.RazaoSocial, "razão social"),
+                (request.Telefone, "telefone"),
+                (request.Email, "e-mail"),
+                (request.Cep, "CEP"),
+                (request.Cidade, "cidade"),
+                (request.Uf, "UF"),
+            };
+            return campos.Where(c => string.IsNullOrWhiteSpace(c.Valor)).Select(c => c.Rotulo).ToList();
         }
 
         private static string SomenteDigitos(string valor) =>
