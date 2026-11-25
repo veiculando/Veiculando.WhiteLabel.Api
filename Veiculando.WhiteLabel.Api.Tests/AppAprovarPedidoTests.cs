@@ -76,6 +76,41 @@ public sealed class AppAprovarPedidoTests
             .StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
+    /// <summary>
+    /// O pj enxerga a campanha que a agência criou para o CNPJ dele, mas quem aprova é a
+    /// agência: o botão não aparece e o POST responde 403 sem mexer no pedido.
+    /// </summary>
+    [Fact]
+    public async Task Pj_nao_aprova_pedido_da_campanha_que_a_agencia_criou()
+    {
+        const int tenant = 8982;
+        const string emailAgencia = "sup60-ag-8982@exemplo.com";
+        const string emailPj = "sup60-pj-8982@exemplo.com";
+        var peca = await Seed.PecaAsync(await Seed.LocalAsync(tenant, $"AP{tenant}"), $"P-AP-{tenant}");
+        await Seed.ReservaAsync(tenant, $"AP-{tenant}", peca);
+        var cnpjAgencia = ProspeccaoCarteiraTests.Cnpj(tenant, 9);
+        var cnpjPj = ProspeccaoCarteiraTests.Cnpj(tenant, 1);
+        var (agencia, responsavel) = await AgenciaAsync(tenant, cnpjAgencia, emailAgencia);
+        var cliente = await ClienteAsync(tenant, "AP8982", "Cliente Pj", cnpjPj);
+        var campanha = await CampanhaAsync("AP8982C", agencia, responsavel, cliente, StatusCampanhaEnum.PedidoEmAberto, null);
+        var pedido = await PedidoAsync(campanha, "AP8982C-0001", StatusPedidoEnum.Confirmado, responsavel);
+        await ItemAsync(pedido, peca, StatusPedidoItemEnum.Reservado, 1_000m);
+
+        await Seed.AnuncianteAsync(tenant, emailPj, cnpjPj);
+        await AprovarAsync(tenant, emailPj, "pj", cnpjPj);
+        using var factory = new WlApiFactory(_db, tenant);
+        using var app = await LoginAsync(factory, emailPj);
+
+        var linha = (await JsonAsync(app, "/api/wl/app/campaigns/AP8982C")).GetProperty("pedidos").EnumerateArray().Single();
+        linha.GetProperty("podeAprovar").GetBoolean().Should().BeFalse("a campanha é da agência");
+
+        var r = await app.PostAsync("/api/wl/app/campaigns/AP8982C/pedidos/AP8982C-0001/aprovar", null);
+        r.StatusCode.Should().Be(HttpStatusCode.Forbidden, await r.Content.ReadAsStringAsync());
+        using var ctx = new VeiculandoDataContext();
+        (await ctx.Pedidos.SingleAsync(p => p.Id == pedido)).Status.Should().Be(StatusPedidoEnum.Confirmado);
+        (await ctx.PedidosInsercao.AnyAsync(x => x.IdPedido == pedido)).Should().BeFalse();
+    }
+
     private static async Task<int> PedidoAsync(int campanha, string codigo, StatusPedidoEnum status, int responsavel)
     {
         using var ctx = new VeiculandoDataContext();

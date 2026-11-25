@@ -192,8 +192,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
                     Endereco = MontarEndereco(x.Logradouro, x.Numero),
                     Bairro = string.IsNullOrWhiteSpace(x.Bairro) ? null : x.Bairro.Trim(),
                     // Mesmo endpoint público da vitrine do App (mesmo domínio, sem token no <img>).
-                    FotoUrl = string.IsNullOrWhiteSpace(x.FotoArquivo) ? null
-                        : $"/api/wl/app/inventory/{Uri.EscapeDataString(x.PecaCodigo)}/photo",
+                    // Mesmo critério da vitrine: nome que o endpoint recusaria não vira link quebrado.
+                    FotoUrl = FileServerFotoPeca.NomeValido(x.FotoArquivo)
+                        ? $"/api/wl/app/inventory/{Uri.EscapeDataString(x.PecaCodigo)}/photo" : null,
                     x.PeriodoId,
                     PeriodoNome = x.Periodo != null ? x.Periodo.Nome : null,
                     Status = x.Status.ToString(),

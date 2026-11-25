@@ -328,7 +328,8 @@ public sealed class AppCampaignsController : ControllerBase
 
         foreach (var item in pis.SelectMany(pi => pi.Itens.Select(i => (pi, i.PedidoItem))))
         {
-            var status = await _db.PecaPeriodoStatus.SingleOrDefaultAsync(s =>
+            // FirstOrDefault como o RetornaPorPecaPeriodo do Core: linha duplicada não derruba a aprovação.
+            var status = await _db.PecaPeriodoStatus.FirstOrDefaultAsync(s =>
                 s.IdPeca == item.PedidoItem.IdPeca && s.IdPeriodo == item.PedidoItem.IdPeriodo, ct);
             status?.SetStatusAutorizada(item.pi);
         }

@@ -71,6 +71,7 @@ namespace Veiculando.WhiteLabel.Api.Tests
                 await ctx.Database.ExecuteSqlCommandAsync(@"
 UPDATE Local SET CodigoInterno = '37', Logradouro = 'AV. LOTHAR WALDEMAR HOENNE', Numero = '100', Bairro = 'NOVA MOGILAR'
 WHERE Id = @p0;
+UPDATE Peca SET Foto = 'pprog-a.jpg' WHERE Id = @p2;
 UPDATE PecaPeriodoStatus SET IdPedido = (SELECT IdPedido FROM PedidoReserva WHERE Id = @p1) WHERE IdPeca = @p2;",
                     localId, reserva.Id, pecaId);
             }
@@ -90,6 +91,7 @@ UPDATE PecaPeriodoStatus SET IdPedido = (SELECT IdPedido FROM PedidoReserva WHER
             linha.PecaCodigoInterno.Should().Be("37");
             linha.Endereco.Should().Be("AV. LOTHAR WALDEMAR HOENNE, 100");
             linha.Bairro.Should().Be("NOVA MOGILAR");
+            linha.FotoUrl.Should().Be("/api/wl/app/inventory/PPROG-A/photo", "foto do FileServer, como na Aurum");
             linha.Cliente.Should().NotBeNullOrWhiteSpace("a célula com pedido mostra o cliente da campanha");
         }
 

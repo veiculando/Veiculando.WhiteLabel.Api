@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Veiculando.Data.Contexts;
 using Veiculando.WhiteLabel.Api.Tests.Infrastructure;
 using Xunit;
 
@@ -562,6 +563,43 @@ namespace Veiculando.WhiteLabel.Api.Tests
             var vistos = p1.Itens.Concat(p2.Itens).Concat(p3.Itens).Select(r => r.Id).ToList();
             vistos.Should().OnlyHaveUniqueItems("nenhum pedido pode aparecer em duas paginas");
             vistos.Should().HaveCount(5, "nenhum pedido pode ser pulado entre as paginas");
+        }
+
+        /// <summary>
+        /// VEI-SUP-60: sem <c>desc</c> na URL, a listagem vem das mais recentes para as mais
+        /// antigas. Com <c>Desc</c> como <c>bool</c>, a ausência virava false e a Aurum via a
+        /// reserva nova no fim da lista.
+        /// </summary>
+        [Fact]
+        public async Task Sem_parametro_de_ordem_as_reservas_mais_recentes_vem_primeiro()
+        {
+            const int afiliadaOrdem = 8621;
+
+            var email = "reserva-ordem@exemplo.com";
+            await Seed.OperadorAsync(afiliadaOrdem, email, new[] { "PedidoReservaGerenciar" });
+            var localId = await Seed.LocalAsync(afiliadaOrdem, "L-ordem");
+            var ids = new int[3];
+            for (var i = 0; i < 3; i++)
+                ids[i] = (await Seed.ReservaAsync(afiliadaOrdem, $"R-ordem{i}", await Seed.PecaAsync(localId, $"P-ordem{i}"))).Id;
+
+            using (var ctx = new VeiculandoDataContext())
+            {
+                // R-ordem0 de 2019, R-ordem1 de 2026, R-ordem2 de hoje (como na Aurum).
+                await ctx.Database.ExecuteSqlCommandAsync(
+                    "UPDATE PedidoReserva SET DataCadastro = '2019-06-25' WHERE Id = @p0; " +
+                    "UPDATE PedidoReserva SET DataCadastro = '2026-05-11' WHERE Id = @p1; " +
+                    "UPDATE PedidoReserva SET DataCadastro = GETDATE() WHERE Id = @p2;", ids[0], ids[1], ids[2]);
+            }
+
+            using var factory = new WlApiFactory(_db, afiliadaOrdem);
+            using var client = await factory.ClienteAutenticadoAsync(email, Seed.SenhaPadrao);
+
+            var padrao = await client.GetFromJsonAsync<PaginaDto<ReservaListDto>>("/api/wl/pedidos-reserva");
+            padrao!.Itens.Select(r => r.Codigo).Should().Equal("R-ordem2", "R-ordem1", "R-ordem0");
+
+            var crescente = await client.GetFromJsonAsync<PaginaDto<ReservaListDto>>("/api/wl/pedidos-reserva?desc=false");
+            // A tela ainda pode pedir a ordem crescente.
+            crescente!.Itens.Select(r => r.Codigo).Should().Equal("R-ordem0", "R-ordem1", "R-ordem2");
         }
 
         [Fact]
