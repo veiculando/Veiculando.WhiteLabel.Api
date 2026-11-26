@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Veiculando.Data.Contexts;
 using Veiculando.Domain.Entities.WhiteLabel;
+using Veiculando.Domain.Enums;
 using Veiculando.Infra.Security;
 using Veiculando.WhiteLabel.Api.Tests.Infrastructure;
 using Xunit;
@@ -220,6 +221,59 @@ IF NOT EXISTS (SELECT 1 FROM dbo.AgenciaCliente WHERE IdAgencia = 1 AND IdClient
         var auditoria = await operador.GetStringAsync("/api/wl/prospeccao/auditoria");
         auditoria.Should().Contain(codigo);
         auditoria.Should().NotContain(sessao.Token);
+    }
+
+    [Fact]
+    public async Task Salvar_simulacao_grava_pedido_simulacao_sem_bloquear_a_grade()
+    {
+        const int tenant = 8999;
+        const string email = "checkout-8999@exemplo.com";
+        var piece = await PrepareAsync(tenant, email, "P-CHK-8999", 8999);
+        using var factory = new WlApiFactory(_db, tenant);
+        using var client = await AppClientAsync(factory, email);
+        var payload = new { pieceIds = new[] { piece }, campaignId = 1, periodCode = "APP8999" };
+
+        (await client.PostAsJsonAsync("/api/wl/app/checkout/simulations", payload)).StatusCode
+            .Should().Be(HttpStatusCode.Forbidden, "sem KYC aprovado não há simulação");
+        await ApproveAsync(tenant, email);
+        (await client.PostAsJsonAsync("/api/wl/app/checkout/simulations",
+            new { pieceIds = new[] { piece }, campaignId = 1, periodCode = "" })).StatusCode
+            .Should().Be(HttpStatusCode.BadRequest, "período é obrigatório");
+
+        var first = await client.PostAsJsonAsync("/api/wl/app/checkout/simulations", payload);
+        first.StatusCode.Should().Be(HttpStatusCode.OK, await first.Content.ReadAsStringAsync());
+
+        using (var ctx = new VeiculandoDataContext())
+        {
+            var pedido = await ctx.Pedidos.Include(p => p.Itens).SingleAsync(p => p.IdCampanha == 1 && p.IdPeriodo == 8999);
+            pedido.Status.Should().Be(StatusPedidoEnum.Simulacao);
+            pedido.Itens.Should().ContainSingle(i => i.IdPeca == piece && i.Status == StatusPedidoItemEnum.Simulacao);
+            (await ctx.PecaPeriodoStatus.CountAsync(s => s.IdPeriodo == 8999)).Should().Be(0, "simulação não bloqueia a grade");
+            (await ctx.PedidosReserva.CountAsync(r => r.Pedido.IdPeriodo == 8999)).Should().Be(0, "simulação não gera reserva");
+        }
+
+        var again = await client.PostAsJsonAsync("/api/wl/app/checkout/simulations", payload);
+        again.StatusCode.Should().Be(HttpStatusCode.OK, "nova simulação substitui a anterior: " + await again.Content.ReadAsStringAsync());
+
+        // Fechar o pedido depois de simular: antes travava em "Já existe pedido nesta campanha, cidade e período".
+        var quoteResponse = await client.PostAsJsonAsync("/api/wl/app/checkout/quote", payload);
+        quoteResponse.StatusCode.Should().Be(HttpStatusCode.OK, await quoteResponse.Content.ReadAsStringAsync());
+        var quote = await quoteResponse.Content.ReadFromJsonAsync<QuoteResponse>();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", "simulacao-8999");
+        var order = await client.PostAsJsonAsync("/api/wl/app/checkout/orders",
+            new { quoteId = quote.QuoteId, termsAccepted = true, termsVersion = "aurum-v1" });
+        order.StatusCode.Should().Be(HttpStatusCode.OK, await order.Content.ReadAsStringAsync());
+
+        (await client.PostAsJsonAsync("/api/wl/app/checkout/simulations", payload)).StatusCode
+            .Should().Be(HttpStatusCode.Conflict, "pedido de verdade continua bloqueando campanha, cidade e período");
+
+        using var check = new VeiculandoDataContext();
+        var pedidos = await check.Pedidos.Where(p => p.IdCampanha == 1 && p.IdPeriodo == 8999)
+            .Select(p => p.Status).ToListAsync();
+        pedidos.Should().HaveCount(3);
+        pedidos.Count(st => st == StatusPedidoEnum.Cancelado).Should().Be(2, "as duas simulações foram substituídas");
+        pedidos.Should().ContainSingle(st => st == StatusPedidoEnum.Solicitado);
+        (await check.WlProspeccaoSessaoEventos.CountAsync(e => e.AfiliadaId == tenant)).Should().Be(0);
     }
 
     private sealed record ProspeccaoResponse(string Token, int FonteUsuarioId);
