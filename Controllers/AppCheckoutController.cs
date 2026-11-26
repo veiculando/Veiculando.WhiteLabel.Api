@@ -177,9 +177,7 @@ public sealed class AppCheckoutController : ControllerBase
             return Conflict(new { message = "Preço ou disponibilidade alterados; solicite nova cotação." });
 
         var cityIds = pieces.Select(p => p.Local.IdCidade).Distinct().ToArray();
-        if (await _db.Pedidos.AnyAsync(p => p.IdCampanha == campaign.Id && p.IdPeriodo == period.Id &&
-            cityIds.Contains(p.IdCidade) && p.Status != StatusPedidoEnum.Cancelado &&
-            p.Status != StatusPedidoEnum.Revisado, ct))
+        if (!await SubstituirSimulacoesAsync(campaign.Id, period.Id, cityIds, ct))
             return Conflict(new { message = "Já existe pedido nesta campanha, cidade e período." });
 
         // Na prospecção quem cria o pedido é o usuário da exibidora que emitiu a
@@ -228,6 +226,100 @@ public sealed class AppCheckoutController : ControllerBase
         }
         transaction.Commit();
         return Content(receipt, "application/json");
+    }
+
+    /// <summary>
+    /// Salva o carrinho como simulação (VEI-SUP-62): pedidos com status
+    /// <c>Simulacao</c>, como o PedidoCadastroHandler do Core faz. Simulação não
+    /// checa nem bloqueia a grade (sem PecaPeriodoStatus) e não gera pedido de
+    /// reserva; só respeita um pedido por campanha, cidade e período.
+    /// </summary>
+    [HttpPost("simulations")]
+    [EnableRateLimiting(Startup.RateLimitEscrita)]
+    public async Task<IActionResult> Simulations([FromBody] QuoteRequest request, CancellationToken ct)
+    {
+        if (!TryUser(out var userId)) return Unauthorized();
+        if (request?.PieceIds == null || request.PieceIds.Length == 0 || request.PieceIds.Length > 100 ||
+            request.PieceIds.Any(id => id <= 0) || request.PieceIds.Distinct().Count() != request.PieceIds.Length ||
+            request.CampaignId <= 0 || string.IsNullOrWhiteSpace(request.PeriodCode))
+            return BadRequest(new { message = "Informe peças, campanha e período válidos." });
+
+        var buyer = await _tenant.UsuariosAnunciante.SingleOrDefaultAsync(u => u.Id == userId, ct);
+        if (buyer == null) return Unauthorized();
+        var onboarding = await _db.WlAppOnboardings.AsNoTracking().SingleOrDefaultAsync(o =>
+            o.UsuarioId == userId && o.AfiliadaId == _tenant.AfiliadaId, ct);
+        if (onboarding?.Status != WlAppKycStatus.Aprovado || string.IsNullOrWhiteSpace(onboarding.Documento))
+            return StatusCode(403, new { message = "O cadastro deve estar aprovado para salvar simulação." });
+        var sessao = await _carteira.ResolverAsync(User, buyer, ct);
+        if (sessao.Modo == ModoSessaoApp.Recusada) return StatusCode(403, new { message = SessaoApp.MensagemRecusada });
+
+        var campaign = await EligibleCampaign(onboarding, buyer, request.CampaignId, sessao).SingleOrDefaultAsync(ct);
+        if (campaign == null) return NotFound(new { message = "Campanha não encontrada para este anunciante e exibidora." });
+        if (campaign.AnuncianteResponsavel?.Agencia == null)
+            return Conflict(new { message = "A campanha não possui responsável comercial habilitado para pedidos." });
+
+        var period = await _db.Periodos.SingleOrDefaultAsync(p =>
+            p.Codigo == request.PeriodCode && p.StatusExibicao == StatusExibicaoEnum.Ativo &&
+            p.DataFim >= DateTime.UtcNow && p.DataInicio <= campaign.DataFimPrevisto &&
+            p.DataFim >= campaign.DataInicioPrevisto, ct);
+        if (period == null) return BadRequest(new { message = "Período indisponível para esta campanha." });
+
+        var pieces = await ActivePieces(request.PieceIds).ToListAsync(ct);
+        if (pieces.Count != request.PieceIds.Length)
+            return BadRequest(new { message = "Uma ou mais peças não pertencem ao inventário publicado desta exibidora." });
+        if (pieces.Any(p => p.PeriodicidadePadrao?.Tipo != period.Periodicidade.Tipo))
+            return BadRequest(new { message = "As peças selecionadas não usam a periodicidade do período escolhido." });
+
+        var orders = BuildOrders(campaign, period, pieces, simulation: true);
+        if (orders == null) return Conflict(new { message = "Não foi possível montar a simulação com os dados comerciais atuais." });
+
+        using var transaction = _db.Database.BeginTransaction(IsolationLevel.Serializable);
+        var cityIds = pieces.Select(p => p.Local.IdCidade).Distinct().ToArray();
+        if (!await SubstituirSimulacoesAsync(campaign.Id, period.Id, cityIds, ct))
+            return Conflict(new { message = "Já existe pedido nesta campanha, cidade e período." });
+
+        var resgate = await ResgateDaSessaoDeProspeccaoAsync(ct);
+        foreach (var order in orders)
+        {
+            if (resgate != null)
+                order.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, resgate.AfiliadaId, resgate.OperadorId);
+            else
+                order.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, campaign.IdAgencia, campaign.IdUsuarioAnunciante);
+            campaign.AdicionarPedido(order);
+            _db.Pedidos.Add(order);
+        }
+        // Simulação não é venda: não entra na trilha de pedidos da Prospecção.
+        // A origem (vendedora) fica no próprio pedido e vale se ele for fechado.
+        await _db.SaveChangesAsync(ct);
+        transaction.Commit();
+
+        return Ok(new
+        {
+            campaignId = campaign.Id,
+            orders = orders.Select(o => new { code = o.Codigo, city = o.Cidade.Nome, period = period.Codigo }).ToArray(),
+            total = TotalDosItens(orders)
+        });
+    }
+
+    /// <summary>
+    /// Um pedido por campanha, cidade e período. Se o que existe ali é só simulação,
+    /// ela é cancelada (como o "excluir simulação" do Core, que só muda o status) e o
+    /// novo pedido ou simulação toma o lugar; pedido de verdade continua bloqueando.
+    /// Sem isso, quem salvava a simulação não conseguia mais fechar o pedido pelo App,
+    /// que não tem aprovar/excluir simulação (VEI-SUP-62). Roda dentro da transação do chamador.
+    /// </summary>
+    private async Task<bool> SubstituirSimulacoesAsync(int campaignId, int periodId, int[] cityIds, CancellationToken ct)
+    {
+        var existentes = await _db.Pedidos.AsNoTracking()
+            .Where(p => p.IdCampanha == campaignId && p.IdPeriodo == periodId && cityIds.Contains(p.IdCidade) &&
+                p.Status != StatusPedidoEnum.Cancelado && p.Status != StatusPedidoEnum.Revisado)
+            .Select(p => new { p.Id, p.Status }).ToListAsync(ct);
+        if (existentes.Any(p => p.Status != StatusPedidoEnum.Simulacao)) return false;
+        foreach (var simulacao in existentes)
+            await _db.Database.ExecuteSqlCommandAsync(
+                "UPDATE dbo.Pedido SET Status = @p0, DataAtualizacao = GETUTCDATE() WHERE Id = @p1 AND Status = @p2",
+                ct, (int)StatusPedidoEnum.Cancelado, simulacao.Id, (int)StatusPedidoEnum.Simulacao);
+        return true;
     }
 
     internal IQueryable<Campanha> EligibleCampaign(WlAppOnboarding onboarding, WlUsuarioAnunciante buyer, int campaignId,
