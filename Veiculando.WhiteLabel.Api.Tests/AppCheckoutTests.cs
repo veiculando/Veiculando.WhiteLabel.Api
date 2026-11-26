@@ -274,6 +274,21 @@ IF NOT EXISTS (SELECT 1 FROM dbo.AgenciaCliente WHERE IdAgencia = 1 AND IdClient
         pedidos.Count(st => st == StatusPedidoEnum.Cancelado).Should().Be(2, "as duas simulações foram substituídas");
         pedidos.Should().ContainSingle(st => st == StatusPedidoEnum.Solicitado);
         (await check.WlProspeccaoSessaoEventos.CountAsync(e => e.AfiliadaId == tenant)).Should().Be(0);
+
+        // Simulação em outro período não pode rebaixar a campanha que já tem pedido de verdade:
+        // o contexto não faz lazy loading, então o status era recalculado só com a simulação nova.
+        using (var seed = new VeiculandoDataContext())
+            await seed.Database.ExecuteSqlCommandAsync(@"
+SET IDENTITY_INSERT dbo.Periodo ON;
+INSERT dbo.Periodo (Id, Codigo, Periodicidade, DataInicio, DataFim, StatusExibicao)
+VALUES (89991, 'APP89991', 0, DATEADD(day, 1, GETUTCDATE()), DATEADD(day, 8, GETUTCDATE()), 1);
+SET IDENTITY_INSERT dbo.Periodo OFF;");
+        var outroPeriodo = await client.PostAsJsonAsync("/api/wl/app/checkout/simulations",
+            new { pieceIds = new[] { piece }, campaignId = 1, periodCode = "APP89991" });
+        outroPeriodo.StatusCode.Should().Be(HttpStatusCode.OK, await outroPeriodo.Content.ReadAsStringAsync());
+        using var depois = new VeiculandoDataContext();
+        (await depois.Campanhas.Where(c => c.Id == 1).Select(c => c.Status).SingleAsync())
+            .Should().Be(StatusCampanhaEnum.PedidoEmAberto, "a campanha tem pedido solicitado; simulação não a rebaixa");
     }
 
     private sealed record ProspeccaoResponse(string Token, int FonteUsuarioId);

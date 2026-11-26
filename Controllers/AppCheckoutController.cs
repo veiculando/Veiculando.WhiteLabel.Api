@@ -278,6 +278,12 @@ public sealed class AppCheckoutController : ControllerBase
         if (!await SubstituirSimulacoesAsync(campaign.Id, period.Id, cityIds, ct))
             return Conflict(new { message = "Já existe pedido nesta campanha, cidade e período." });
 
+        // O contexto não faz lazy loading: Campanha.AdicionarPedido recalcularia o status só
+        // com a simulação nova e rebaixaria para Simulacao uma campanha com pedido de verdade.
+        // Simulação não é venda, então só mexe no status de campanha que ainda não tem pedido.
+        var temPedidoReal = await _db.Pedidos.AnyAsync(p => p.IdCampanha == campaign.Id &&
+            p.Status != StatusPedidoEnum.Cancelado && p.Status != StatusPedidoEnum.Revisado &&
+            p.Status != StatusPedidoEnum.Simulacao, ct);
         var resgate = await ResgateDaSessaoDeProspeccaoAsync(ct);
         foreach (var order in orders)
         {
@@ -285,7 +291,7 @@ public sealed class AppCheckoutController : ControllerBase
                 order.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, resgate.AfiliadaId, resgate.OperadorId);
             else
                 order.RegistrarOrigem(FonteOrigemEnum.WhiteLabel, campaign.IdAgencia, campaign.IdUsuarioAnunciante);
-            campaign.AdicionarPedido(order);
+            if (!temPedidoReal) campaign.AdicionarPedido(order);
             _db.Pedidos.Add(order);
         }
         // Simulação não é venda: não entra na trilha de pedidos da Prospecção.
