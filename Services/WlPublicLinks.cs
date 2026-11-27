@@ -22,30 +22,44 @@ namespace Veiculando.WhiteLabel.Api.Services
         public string Convite(string token, string email) => Montar("primeiro-acesso", token, email);
         public string Recuperacao(string token, string email) => Montar("alterar-senha", token, email);
         /// <summary>Página do BFF que abre o app de campo pelo scheme (VEI-RD-155).</summary>
-        public string CampoPrimeiroAcesso(string token, string email) => Campo(CampoAcesso.PrimeiroAcesso, token, email);
-        public string CampoRecuperacao(string token, string email) => Campo(CampoAcesso.AlterarSenha, token, email);
+        public string CampoPrimeiroAcesso(string token, string email) => Campo(HostDoTenant(), CampoAcesso.PrimeiroAcesso, token, email);
+        public string CampoRecuperacao(string token, string email) => Campo(HostDoTenant(), CampoAcesso.AlterarSenha, token, email);
 
-        private string Campo(string tipo, string token, string email) =>
-            $"{Origem()}/api/wl/campo/acesso?tipo={tipo}&{Query(token, email)}";
+        /// <summary>
+        /// Link de campo no domínio de outra exibidora (VEI-RD-181): o pedido central
+        /// chega por um Host só e cada e-mail leva o domínio da exibidora do operador.
+        /// </summary>
+        public string CampoPrimeiroAcesso(string host, string token, string email) => Campo(host, CampoAcesso.PrimeiroAcesso, token, email);
+        public string CampoRecuperacao(string host, string token, string email) => Campo(host, CampoAcesso.AlterarSenha, token, email);
+
+        private string Campo(string host, string tipo, string token, string email) =>
+            $"{Origem(host)}/api/wl/campo/acesso?tipo={tipo}&{Query(token, email)}";
 
         private string Montar(string pagina, string token, string email) =>
-            $"{Origem()}/login/{pagina}?{Query(token, email)}";
+            $"{Origem(HostDoTenant())}/login/{pagina}?{Query(token, email)}";
 
         private static string Query(string token, string email) =>
             $"token={Uri.EscapeDataString(token)}&email={Uri.EscapeDataString(email)}";
 
-        private string Origem()
+        private string HostDoTenant()
         {
             if (!_tenant.Resolvido || string.IsNullOrWhiteSpace(_tenant.Host))
                 throw new InvalidOperationException("Tenant não resolvido para o link de autenticação.");
+            return _tenant.Host;
+        }
 
-            var configured = _configuration[$"WlPublicOrigins:Hosts:{_tenant.Host}"];
-            var value = string.IsNullOrWhiteSpace(configured) ? $"https://{_tenant.Host}" : configured;
+        private string Origem(string host)
+        {
+            if (string.IsNullOrWhiteSpace(host))
+                throw new InvalidOperationException("Host ausente para o link de autenticação.");
+
+            var configured = _configuration[$"WlPublicOrigins:Hosts:{host}"];
+            var value = string.IsNullOrWhiteSpace(configured) ? $"https://{host}" : configured;
             var allowHttp = _environment.IsEnvironment("Preview") &&
                 _configuration.GetValue<bool>("WlPublicOrigins:AllowHttpPreview");
 
             if (!Uri.TryCreate(value, UriKind.Absolute, out var origin) ||
-                !string.Equals(origin.IdnHost, _tenant.Host, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(origin.IdnHost, host, StringComparison.OrdinalIgnoreCase) ||
                 origin.AbsolutePath != "/" || origin.Query.Length > 0 || origin.Fragment.Length > 0 ||
                 origin.UserInfo.Length > 0 ||
                 (origin.Scheme != Uri.UriSchemeHttps && !(allowHttp && origin.Scheme == Uri.UriSchemeHttp)))

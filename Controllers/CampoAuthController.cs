@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Data.Entity;
 using Veiculando.Data.Contexts;
@@ -32,30 +31,21 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         private readonly VeiculandoDataContext _db;
         private readonly JwtSettings _jwtSettings;
         private readonly ITenantQueries _tenant;
-        private readonly WlPublicLinks _links;
-        private readonly IWlTenantResolver _tenantResolver;
-        private readonly IWlPasswordEmailSender _email;
-        private readonly IPasswordResetAttemptGuard _tentativas;
-        private readonly ILogger<CampoAuthController> _logger;
+        private readonly ITenantContext _contexto;
+        private readonly CampoConta _conta;
 
         public CampoAuthController(
             VeiculandoDataContext db,
             IOptions<JwtSettings> jwtSettings,
             ITenantQueries tenant,
-            WlPublicLinks links,
-            IWlTenantResolver tenantResolver,
-            IWlPasswordEmailSender email,
-            IPasswordResetAttemptGuard tentativas,
-            ILogger<CampoAuthController> logger)
+            ITenantContext contexto,
+            CampoConta conta)
         {
             _db = db;
             _jwtSettings = jwtSettings.Value;
             _tenant = tenant;
-            _links = links;
-            _tenantResolver = tenantResolver;
-            _email = email;
-            _tentativas = tentativas;
-            _logger = logger;
+            _contexto = contexto;
+            _conta = conta;
         }
 
         [AllowAnonymous]
@@ -66,49 +56,21 @@ namespace Veiculando.WhiteLabel.Api.Controllers
             if (string.IsNullOrWhiteSpace(request?.Email) || string.IsNullOrWhiteSpace(request?.Senha))
                 return BadRequest(new { message = "Email e senha são obrigatórios." });
 
-            var email = request.Email.ToLower().Trim();
+            var email = CampoConta.Normalizar(request.Email);
             var afiliadaId = _tenant.AfiliadaId;
 
-            var wl = await _db.WlUsuariosOperador
-                .FirstOrDefaultAsync(u => u.Email.Endereco == email
-                    && u.AfiliadaId == afiliadaId
-                    && u.StatusExibicao == StatusExibicaoEnum.Ativo);
-
-            var core = wl == null
-                ? await _db.UsuariosOperador.FirstOrDefaultAsync(u =>
-                    u.Email.Endereco == email
-                    && u.IdAfiliada == afiliadaId
-                    && u.StatusExibicao == StatusExibicaoEnum.Ativo
-                    && u.EmailConfirmado
-                    && u.StatusAprovacao == StatusUsuarioEnum.Aprovado)
-                : null;
-
-            var senhaWl = wl != null
-                && wl.StatusConvite == StatusConviteWlEnum.Aceito
-                && !string.IsNullOrWhiteSpace(wl.SenhaHash)
-                && BC.Verify(request.Senha, wl.SenhaHash);
-            var senhaCore = core != null && SenhaUsuarioCore.Confere(request.Senha, core.Senha);
-
-            var decisao = CampoLoginDecisao.Resolver(
-                wl != null,
-                senhaWl,
-                wl?.Usuario_OperadorId,
-                wl?.Id,
-                core != null,
-                senhaCore,
-                core?.Id ?? 0);
-
-            if (!decisao.Ok)
+            var credencial = await _conta.ConferirAsync(email, request.Senha, afiliadaId);
+            if (!credencial.Decisao.Ok)
                 return Unauthorized(new { message = CredenciaisInvalidas });
 
-            if (wl != null)
+            if (credencial.Wl != null)
             {
-                wl.RegistrarLogin();
+                credencial.Wl.RegistrarLogin();
                 await _db.SaveChangesAsync();
             }
 
-            var nome = core?.Nome ?? email;
-            return Ok(Emitir(decisao, email, nome, afiliadaId));
+            var nome = credencial.Core?.Nome ?? email;
+            return Ok(Emitir(credencial.Decisao, email, nome, afiliadaId));
         }
 
         [Authorize]
@@ -154,33 +116,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpPost("esqueci-senha")]
         public async Task<IActionResult> EsqueciSenha([FromBody] EsqueciSenhaRequest request, CancellationToken ct)
         {
-            var email = (request?.Email ?? string.Empty).ToLowerInvariant().Trim();
-            var afiliadaId = _tenant.AfiliadaId;
-            if (string.IsNullOrWhiteSpace(email) || !_tentativas.PermitirTentativa(afiliadaId, email))
-                return Ok(RespostaEmail);
-
-            var usuario = await _db.WlUsuariosOperador.FirstOrDefaultAsync(u =>
-                u.Email.Endereco == email
-                && u.AfiliadaId == afiliadaId
-                && u.StatusExibicao == StatusExibicaoEnum.Ativo
-                && u.StatusConvite == StatusConviteWlEnum.Aceito, ct);
-            if (usuario == null)
-                return Ok(RespostaEmail);
-
-            var token = usuario.GerarTokenRecuperacao();
-            await _db.SaveChangesAsync(ct);
-            try
-            {
-                var marca = (await _tenantResolver.ObterBrandingAsync(afiliadaId))?.NomeExibicao;
-                await _email.EnviarRecuperacaoAsync(usuario.Email.Endereco, marca, _links.CampoRecuperacao(token, email), ct);
-            }
-            catch (Exception ex) when (!(ex is OperationCanceledException))
-            {
-                usuario.InvalidarTokenRecuperacao();
-                await _db.SaveChangesAsync(ct);
-                _logger.LogError(ex, "Falha ao enviar esqueci senha de campo para a afiliada {AfiliadaId}.", afiliadaId);
-            }
-
+            var email = CampoConta.Normalizar(request?.Email);
+            if (!string.IsNullOrWhiteSpace(email))
+                await _conta.EnviarRecuperacaoAsync(email, _tenant.AfiliadaId, _contexto.Host, ct);
             return Ok(RespostaEmail);
         }
 
@@ -189,40 +127,9 @@ namespace Veiculando.WhiteLabel.Api.Controllers
         [HttpPost("primeiro-acesso")]
         public async Task<IActionResult> SolicitarPrimeiroAcesso([FromBody] EsqueciSenhaRequest request, CancellationToken ct)
         {
-            var email = (request?.Email ?? string.Empty).ToLowerInvariant().Trim();
-            var afiliadaId = _tenant.AfiliadaId;
-            if (string.IsNullOrWhiteSpace(email) || !_tentativas.PermitirTentativa(afiliadaId, email))
-                return Ok(RespostaEmail);
-
-            var usuario = await _db.WlUsuariosOperador.FirstOrDefaultAsync(u =>
-                u.Email.Endereco == email
-                && u.AfiliadaId == afiliadaId
-                && u.StatusExibicao == StatusExibicaoEnum.Ativo
-                && u.StatusConvite == StatusConviteWlEnum.Pendente, ct);
-            if (usuario == null)
-                return Ok(RespostaEmail);
-
-            string token;
-            try
-            {
-                token = usuario.GerarTokenConvite();
-            }
-            catch (InvalidOperationException)
-            {
-                return Ok(RespostaEmail);
-            }
-
-            await _db.SaveChangesAsync(ct);
-            try
-            {
-                var marca = (await _tenantResolver.ObterBrandingAsync(afiliadaId))?.NomeExibicao;
-                await _email.EnviarConviteAsync(usuario.Email.Endereco, marca, _links.CampoPrimeiroAcesso(token, email), ct);
-            }
-            catch (Exception ex) when (!(ex is OperationCanceledException))
-            {
-                _logger.LogError(ex, "Falha ao enviar primeiro acesso de campo para a afiliada {AfiliadaId}.", afiliadaId);
-            }
-
+            var email = CampoConta.Normalizar(request?.Email);
+            if (!string.IsNullOrWhiteSpace(email))
+                await _conta.EnviarConviteAsync(email, _tenant.AfiliadaId, _contexto.Host, ct);
             return Ok(RespostaEmail);
         }
 
