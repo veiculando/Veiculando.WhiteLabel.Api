@@ -22,10 +22,10 @@ namespace Veiculando.WhiteLabel.Api.Tests;
 public class CampoAuthCentralTests
 {
     // A e B têm operadores; C é só o Host fixo do app; D não tem domínio ativo.
-    private const int AfiliadaA = 8981;
-    private const int AfiliadaB = 8982;
-    private const int AfiliadaC = 8983;
-    private const int AfiliadaD = 8984;
+    private const int AfiliadaA = 8904;
+    private const int AfiliadaB = 8905;
+    private const int AfiliadaC = 8906;
+    private const int AfiliadaD = 8907;
     private const string HostA = "exibidora.central-a.teste";
     private const string HostB = "exibidora.central-b.teste";
     private const string HostC = "exibidora.central-c.teste";
