@@ -104,6 +104,7 @@ namespace Veiculando.WhiteLabel.Api.Configurations
             services.AddHttpClient<IWlCompanyRegistry, BrasilApiCompanyRegistry>(client =>
             { client.BaseAddress = new Uri("https://brasilapi.com.br/api/cnpj/v1/"); client.Timeout = TimeSpan.FromSeconds(10); });
             services.AddScoped<WlPublicLinks>();
+            services.AddScoped<CampoConta>();
             services.AddScoped<Services.VendaDiretaProvisionamento>();
             services.AddScoped<Services.AnuncianteDaCasaProvisionamento>();
             services.AddScoped<Services.CarteiraProspeccao>();

@@ -26,7 +26,15 @@ public class CampoAcessoTests
     {
         await Seed.AfiliadaAsync(Afiliada);
         using var ctx = new VeiculandoDataContext();
+        // Perfil 1 garantido aqui: a suíte pode rodar este arquivo antes dos que o criam.
         await ctx.Database.ExecuteSqlCommandAsync(@"
+IF NOT EXISTS (SELECT 1 FROM PerfilUsuario WHERE Id = 1)
+BEGIN
+    SET IDENTITY_INSERT PerfilUsuario ON;
+    INSERT INTO PerfilUsuario (Id, Nome, Codigo, DataCadastro, DataAtualizacao, StatusExibicao)
+    VALUES (1, 'Anunciante', 'ANUN', GETDATE(), GETDATE(), 1);
+    SET IDENTITY_INSERT PerfilUsuario OFF;
+END
 INSERT Usuario (Nome, Email, Senha, StatusAprovacao, Acessos, DataUltimoLogin,
  EmailConfirmado, DataCadastro, DataAtualizacao, StatusExibicao, IdPerfil)
 VALUES ('Campo WL', @p0, @p2, 1, 0, GETUTCDATE(), 1, GETUTCDATE(), GETUTCDATE(), 1, 1);
